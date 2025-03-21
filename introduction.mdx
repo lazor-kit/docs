@@ -1,42 +1,44 @@
-## The Smart Transaction Engine for Onchain Applications on Solana
+---
+title: "Lazor.Kit Protocol"
+description: "The simplest and most secure solution for native passkey authentication and gasless transactions on Solana."
+---
 
-Lazor.kit is a Solana-based framework designed to enable seamless, gasless, and user-friendly interactions for decentralized applications (DApps). By leveraging relayer technology and smart wallets, Lazor.kit simplifies blockchain interactions while ensuring security, decentralization, and composability.
+# Lazor.Kit Protocol
 
-## Why Lazor.kit?
+Lazor.Kit is a **developer-friendly protocol** that provides **secure, fast, and seamless authentication** and transaction execution on Solana. It eliminates the complexity of private keys and unreliable wallet integrations by introducing **passkey authentication** and **gasless transactions** via a relayer system.
 
-Lazor.kit introduces a streamlined way to execute transactions on Solana without requiring users to manage gas fees or complex cryptographic operations. By integrating with the Lazor.kit SDK, developers can provide a frictionless experience where transactions are handled efficiently through a dedicated relayer system.
+## Why Lazor.Kit?
 
-### **Key Features**
+Lazor.Kit provides a **simple and robust solution** for DApps, ensuring:
 
-- **Gasless Transactions**: Users don’t need to pay for gas; relayers cover transaction fees.
-- **Smart Wallet Integration**: Supports programmable wallets with custom rules.
-- **Passkey Authentication**: Users authenticate via passkeys, reducing reliance on private keys.
-- **Seamless DApp Interactions**: Transactions can include wallet creation, rule updates, and smart contract executions.
-- **Composability**: Fully integrates with existing Solana contracts and applications.
-
-## What Can I Build with Lazor.kit?
-
-Lazor.kit facilitates the development of next-generation onchain applications that prioritize decentralization, security, and usability. It is ideal for:
-
-- **Consumer-friendly Web3 Applications**: Simplifies onboarding and interaction for mainstream users.
-- **Permissionless Smart Wallets**: Enables user-defined transaction rules and security settings.
-- **Autonomous Financial Applications**: Supports high-frequency DeFi transactions, marketplaces, and more.
-- **Seamless Game Integrations**: Provides game developers with smart contract-based logic for in-game transactions.
+- **🛡️ Secured** – Passkey-based authentication, no private keys required.
+- **⚡ Fast** – Always accessible, even under high network traffic.
+- **🛠️ Easy** – No deep link failures, seamless wallet integration.
+- **🔗 Simplest Sign-In with Solana** – No wallet app needed, frictionless Web3 access.
 
 ## How It Works
 
-1. **User Initiates an Action**: The client (user) interacts with the DApp using the Lazor.kit SDK.
-2. **SDK Prepares a Transaction**: The SDK handles transaction logic, rule verification, and formatting.
-3. **Relayer Signs and Pays Fees**: The transaction is forwarded to the relayer, which submits it on-chain.
-4. **Smart Contracts Execute the Transaction**: The Lazor.kit contract processes the request securely and efficiently.
+1. **User authenticates via passkey** – No need for traditional wallet apps.
+2. **SDK generates and prepares the transaction** – Handles wallet creation, transaction signing, and rule enforcement.
+3. **Relayer submits and pays for the transaction** – The user doesn't need to handle gas fees.
+4. **Smart contracts execute the transaction on Solana** – Ensuring a trustless and decentralized experience.
+
+## Key Components
+
+### **1️⃣ Lazor.Kit SDK**  
+- Provides **native passkey authentication** integration.  
+- Handles **wallet creation, connection, and transaction signing**.  
+- Offers **developer-friendly APIs** to interact with the protocol.  
+
+### **2️⃣ Smart Contracts**  
+- Manages **wallet creation & rule enforcement** on Solana.  
+- Executes **transactions submitted by the relayer**.  
+
+### **3️⃣ Transaction Relayer**  
+- Covers **gas fees for all transactions**.  
+- Ensures **transactions are submitted efficiently** on-chain.  
 
 ## Where Do I Start?
-
-- **Developers**: Integrate the Lazor.kit SDK into your DApp to enable gasless transactions and smart wallet features.
-- **Users**: Experience Web3 without the hassle of gas fees, private keys, or complex transactions.
-
-Start building today with Lazor.kit and unlock the full potential of decentralized applications on Solana!
-
 
 <CardGroup cols={3}>
   <Card
@@ -44,14 +46,14 @@ Start building today with Lazor.kit and unlock the full potential of decentraliz
     icon='pen-to-square'
     href='/quickstart'
   >
-    Learn how to integrate SDK into your application.
+    Learn how to integrate Lazor.Kit SDK into your application.
   </Card>
   <Card
     title='Examples'
     icon='image'
     href='/docs/examples'
   >
-    Explore real-world examples of Lazor.kit integration.
+    Explore real-world examples of Lazor.Kit integration.
   </Card>
   <Card
     title='Learn the Protocol'
