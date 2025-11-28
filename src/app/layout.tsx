@@ -2,6 +2,23 @@ import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
 import { Inter } from 'next/font/google';
 
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: {
+    template: '%s | LazorKit',
+    default: 'LazorKit Documentation',
+  },
+  description: 'LazorKit Wallet Adapter Documentation',
+  openGraph: {
+    siteName: 'LazorKit',
+    title: {
+      template: '%s | LazorKit',
+      default: 'LazorKit Documentation',
+    },
+  },
+};
+
 const inter = Inter({
   subsets: ['latin'],
 });
