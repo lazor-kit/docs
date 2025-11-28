@@ -1,0 +1,11 @@
+{
+    "title": "Mobile SDK",
+    "pages": [
+        "index",
+        "installation",
+        "getting-started",
+        "guides",
+        "api-reference",
+        "troubleshooting"
+    ]
+}

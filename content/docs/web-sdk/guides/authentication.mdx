@@ -1,0 +1,46 @@
+---
+title: Authentication
+description: Guide to LazorKit's passkey-based authentication.
+---
+
+# Authentication
+
+LazorKit uses WebAuthn passkeys instead of seed phrases - more secure and user-friendly.
+
+## How It Works
+
+**Passkeys** = Device biometrics (Face ID, fingerprint) + secure hardware storage
+
+1. **First time**: Create passkey → Deploy smart wallet
+2. **Return visits**: Authenticate → Reconnect automatically  
+3. **Transactions**: Biometric approval → Sign & send
+
+## Connection Patterns
+
+### Standard Connection (Recommended)
+
+```tsx
+const { connect, account } = useWallet();
+
+const handleConnect = async () => {
+  try {
+    const account = await connect(); // Auto-handles new/existing users
+  } catch (error) {
+    console.error(error.code);
+  }
+};
+```
+
+### Auto-Connect on App Load
+
+```tsx
+useEffect(() => {
+  if (!isConnected) {
+    connect().catch(error => {
+      if (error.code !== 'NO_STORED_CREDENTIALS') {
+        console.error('Auto-connect failed:', error);
+      }
+    });
+  }
+}, []);
+```

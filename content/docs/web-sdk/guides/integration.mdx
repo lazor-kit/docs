@@ -1,0 +1,48 @@
+---
+title: Integration Guide
+description: Integration patterns and best practices.
+---
+
+# Integration Guide
+
+## Quick Setup
+
+### 1. Provider Setup
+
+```tsx
+import { LazorkitProvider } from '@lazorkit/wallet';
+
+const config = {
+  rpcUrl: process.env.REACT_APP_RPC_URL || 'https://api.devnet.solana.com',
+  paymasterUrl: process.env.REACT_APP_PAYMASTER_URL!,
+  ipfsUrl: process.env.REACT_APP_PORTAL_URL!,
+};
+
+export default function App() {
+  return (
+    <LazorkitProvider {...config}>
+      <YourApp />
+    </LazorkitProvider>
+  );
+}
+```
+
+## Connection Patterns
+
+### Auto-Connect Hook
+
+```tsx
+export function useAutoConnect() {
+  const { connect, isConnected } = useWallet();
+
+  useEffect(() => {
+    if (!isConnected) {
+      connect().catch(error => {
+        if (error.code !== 'NO_STORED_CREDENTIALS') {
+          console.error('Auto-connect failed:', error);
+        }
+      });
+    }
+  }, [connect, isConnected]);
+}
+```

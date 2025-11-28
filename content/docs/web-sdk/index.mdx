@@ -1,0 +1,73 @@
+---
+title: Web SDK Overview
+description: Introduction to the LazorKit Web SDK.
+---
+
+# LazorKit Web SDK
+
+A React SDK for WebAuthn-based Solana wallet authentication using passkeys and smart wallets.
+
+```bash
+npm install @lazorkit/wallet
+```
+
+## Overview
+
+LazorKit implements WebAuthn authentication for Solana applications, allowing users to sign transactions using device passkeys. The SDK handles smart wallet creation, session management, and gas sponsorship.
+
+## Library Capabilities
+
+The Web SDK provides a set of React hooks and providers to manage the authentication state. It abstracts the complexity of `navigator.credentials` and the Solana JSON RPC API.
+
+- **Credential Management**: Handles the browser-specific quirks of the WebAuthn API, ensuring compatibility across Chrome, Safari, and Firefox.
+- **Smart Account Logic**: Automatically derives the user's PDA based on their passkey public key and handles the transaction serialization required for smart wallet execution.
+- **Type-Safe Hooks**: Exports typed hooks like `useWallet` and `useSignMessage` that integrate seamlessly with existing React application state.
+
+## Browser Support
+
+LazorKit relies on the WebAuthn API. Most modern browsers are supported.
+
+| Browser | Minimum Version | Notes |
+| :--- | :--- | :--- |
+| **Chrome** | 88+ | Full support |
+| **Safari** | 15+ | Requires iCloud Keychain for sync |
+| **Firefox** | 90+ | Full support |
+| **Edge** | 88+ | Full support |
+
+> [!NOTE]
+> Secure Context (HTTPS) is **required** for WebAuthn to function. For local development, use `localhost` or setup a local HTTPS proxy.
+
+## Quick Start
+
+```tsx
+import { LazorkitProvider, useWallet } from '@lazorkit/wallet';
+
+function App() {
+  return (
+    <LazorkitProvider
+      rpcUrl={process.env.REACT_APP_RPC_URL}
+      paymasterUrl={process.env.REACT_APP_PAYMASTER_URL}
+      ipfsUrl={process.env.REACT_APP_PORTAL_URL}
+    >
+      <WalletDemo />
+    </LazorkitProvider>
+  );
+}
+
+function WalletDemo() {
+  const { connect, disconnect, isConnected, smartWalletPubkey } = useWallet();
+
+  return (
+    <div>
+      {!isConnected ? (
+        <button onClick={connect}>Connect Wallet</button>
+      ) : (
+        <div>
+          <p>Connected: {smartWalletPubkey?.toString().slice(0, 8)}...</p>
+          <button onClick={disconnect}>Disconnect</button>
+        </div>
+      )}
+    </div>
+  );
+}
+```

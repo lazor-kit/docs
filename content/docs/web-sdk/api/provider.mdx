@@ -1,0 +1,49 @@
+---
+title: LazorkitProvider
+description: API reference for the LazorkitProvider component.
+---
+
+# LazorkitProvider
+
+The `LazorkitProvider` component wraps your application to provide wallet context and handle SDK initialization.
+
+## Import
+
+```tsx
+import { LazorkitProvider } from '@lazorkit/wallet';
+```
+
+## Usage
+
+```tsx
+function App() {
+  return (
+    <LazorkitProvider
+      rpcUrl="https://api.devnet.solana.com"
+      paymasterUrl="https://lazorkit-paymaster.onrender.com"
+      ipfsUrl="https://portal.lazor.sh"
+    >
+      <YourApplication />
+    </LazorkitProvider>
+  );
+}
+```
+
+## Props
+
+### `rpcUrl` (required)
+- **Type**: `string`
+- **Description**: Solana RPC endpoint URL
+
+### `paymasterUrl` (required)
+- **Type**: `string`
+- **Description**: Paymaster service URL for gasless transactions
+
+### `ipfsUrl` (optional)
+- **Type**: `string`
+- **Default**: `"https://portal.lazor.sh"`
+- **Description**: LazorKit portal URL for wallet dialogs
+
+### `children`
+- **Type**: `ReactNode`
+- **Description**: Your application components

@@ -1,0 +1,10 @@
+{
+    "title": "Web SDK",
+    "pages": [
+        "index",
+        "installation",
+        "getting-started",
+        "guides",
+        "api"
+    ]
+}

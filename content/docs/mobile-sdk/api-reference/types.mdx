@@ -1,0 +1,57 @@
+---
+title: Types
+description: API reference for common types and interfaces.
+---
+
+# Types
+
+Common TypeScript interfaces used throughout the SDK.
+
+## WalletInfo
+
+Represents the connected wallet's state.
+
+```typescript
+interface WalletInfo {
+  readonly credentialId: string;      // Base64 credential ID
+  readonly passkeyPubkey: number[];   // Passkey public key bytes
+  readonly smartWallet: string;       // Smart Wallet address (Base58)
+  readonly walletDevice: string;      // Wallet Device PDA address (Base58)
+  readonly platform: string;          // 'android' | 'ios'
+}
+```
+
+## WebAuthnSignatureResult
+
+The result returned when signing a raw message string.
+
+```typescript
+interface WebAuthnSignatureResult {
+  readonly signature: string;               // Base64 signature
+  readonly clientDataJsonBase64: string;    // Base64 Client Data JSON
+  readonly authenticatorDataBase64: string; // Base64 Authenticator Data
+}
+```
+
+## SmartWalletActionArgs
+
+Arguments for executing a smart wallet action.
+
+```typescript
+type SmartWalletActionArgs = 
+  | { type: SmartWalletAction.Execute; args: ExecuteArgs }
+  | { type: SmartWalletAction.CreateChunk; args: CreateChunkArgs }
+  | { type: SmartWalletAction.ExecuteChunk; args: ExecuteChunkArgs };
+```
+
+## SignOptions
+
+Options passed to `signMessage`.
+
+```typescript
+interface SignOptions {
+  redirectUrl: string;
+  onSuccess?: (result: any) => void;
+  onFail?: (error: Error) => void;
+}
+```

@@ -1,0 +1,44 @@
+---
+title: Smart Wallet Actions
+description: How to execute smart wallet transactions.
+---
+
+# Smart Wallet Actions
+
+Smart wallets allow for advanced functionality like transaction bundling, policy checks, and fee sponsorship.
+
+## Executing a Transaction
+
+To execute a Solana transaction through the smart wallet:
+
+```typescript
+import { SmartWalletAction } from '@lazorkit/wallet-mobile-adapter';
+
+const action = {
+  type: SmartWalletAction.Execute,
+  args: {
+    policyInstruction: null, // Optional policy check
+    cpiInstruction: myTransferInstruction // The actual instruction to execute
+  }
+};
+
+const txSignature = await signMessage(action, {
+  redirectUrl: 'your-app://callback'
+});
+```
+
+## Creating a Chunk (Deferred Execution)
+
+Chunks allow you to sign a transaction now but execute it later, or execute it in multiple parts.
+
+```typescript
+const action = {
+  type: SmartWalletAction.CreateChunk,
+  args: {
+    cpiInstructions: [ix1, ix2, ix3], // Multiple instructions
+    policyInstruction: null
+  }
+};
+
+await signMessage(action, { ... });
+```

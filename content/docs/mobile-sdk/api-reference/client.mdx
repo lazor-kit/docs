@@ -1,0 +1,52 @@
+---
+title: LazorkitClient
+description: API reference for the LazorkitClient class.
+---
+
+# LazorkitClient
+
+The `LazorkitClient` provides low-level access to the LazorKit program. It is used internally by the adapter but is also exposed for advanced use cases.
+
+```typescript
+import { LazorkitClient } from '@lazorkit/wallet-mobile-adapter';
+```
+
+## Constructor
+
+```typescript
+const client = new LazorkitClient(connection: Connection);
+```
+
+## Methods
+
+### Wallet Search
+
+#### `getSmartWalletByPasskey(passkeyPublicKey: number[])`
+
+Finds a smart wallet associated with a specific passkey public key.
+
+#### `getSmartWalletByCredentialHash(credentialHash: number[])`
+
+Finds a smart wallet associated with a specific credential hash.
+
+#### `findSmartWallet(passkeyPublicKey?: number[], credentialHash?: number[])`
+
+Convenience method that tries both search approaches.
+
+### Transaction Builders
+
+#### `createSmartWalletTxn(params)`
+
+Creates a transaction to initialize a new smart wallet.
+
+#### `executeTxn(params)`
+
+Creates a transaction to execute an instruction via the smart wallet.
+
+#### `createChunkTxn(params)`
+
+Creates a transaction to create a deferred execution chunk.
+
+#### `executeChunkTxn(params)`
+
+Creates a transaction to execute a deferred chunk.

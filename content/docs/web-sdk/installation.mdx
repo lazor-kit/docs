@@ -1,0 +1,112 @@
+---
+title: Installation
+description: How to install the LazorKit Web SDK.
+---
+
+# Installation
+
+## Requirements
+
+Before installing LazorKit, ensure your development environment meets these requirements:
+
+### Browser Support  
+- **Chrome**: 88+ (latest recommended)
+- **Firefox**: 90+ (latest recommended)
+- **Safari**: 15+ (latest recommended)
+- **Edge**: 88+ (latest recommended)
+
+All modern browsers that support [WebAuthn Level 2](https://caniuse.com/webauthn) and [Passkeys](https://caniuse.com/passkeys) are compatible.
+
+### Development Environment
+- **HTTPS in local**: Required for WebAuthn 
+
+## Package Installation
+
+```bash
+npm install @lazorkit/wallet
+```
+
+## Environment Configuration
+
+Create environment variables for your application:
+
+```bash
+# Required
+REACT_APP_RPC_URL=https://api.devnet.solana.com
+REACT_APP_PAYMASTER_URL=your-paymaster-service-url
+REACT_APP_PORTAL_URL=your-portal-service-url
+
+# Optional: External payer integration
+REACT_APP_EXTERNAL_PAYER_ADDRESS=your-external-payer-public-key
+REACT_APP_API_ENDPOINT=your-backend-api-url
+REACT_APP_API_KEY=your-api-authentication-key
+```
+
+### Browser Polyfills (if needed)
+
+For some build environments, you may need to add Buffer polyfills:
+
+```js
+// polyfills.js
+import { Buffer } from 'buffer';
+
+if (typeof window !== 'undefined') {
+  window.Buffer = Buffer;
+}
+```
+
+Then import this file early in your application:
+
+```js
+// main.tsx or index.tsx
+import './polyfills';
+import React from 'react';
+// ... rest of your app
+```
+
+## Framework Integration
+
+### React Setup
+
+Wrap your application with the `LazorkitProvider`:
+
+```tsx
+import { LazorkitProvider } from '@lazorkit/wallet';
+
+function App() {
+  return (
+    <LazorkitProvider
+      rpcUrl={process.env.REACT_APP_RPC_URL || 'https://api.devnet.solana.com'}
+      paymasterUrl={process.env.REACT_APP_PAYMASTER_URL}
+      ipfsUrl={process.env.REACT_APP_PORTAL_URL}
+    >
+      <YourApp />
+    </LazorkitProvider>
+  );
+}
+```
+
+### TypeScript Configuration
+
+Ensure your `tsconfig.json` includes the necessary compiler options:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
+```
