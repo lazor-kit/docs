@@ -1,0 +1,51 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for LazorKit SDKs.
+---
+
+# Troubleshooting
+
+## General Debugging
+
+Enable debug mode in your `LazorKitProvider` (or `LazorkitProvider` for React) to see detailed logs about connection attempts, signing flows, and errors.
+
+```tsx
+<LazorKitProvider isDebug={true} ... />
+```
+
+This will log detailed information to the console.
+
+## Common Issues
+
+### Transaction Failed
+
+- **Paymaster Config**: Verify your `paymasterUrl` and `apiKey` are correct.
+- **Compute Units**: Complex transactions may require higher compute unit limits. Try increasing `computeUnitLimit` in `transactionOptions`.
+- **Insufficient Funds**: Even with a paymaster, some operations might require the smart wallet to have a minimum balance if not fully sponsored.
+
+### "Wallet not connected" Error
+
+Ensure you are wrapping your application with the Provider component and that the component calling `useWallet` is a child of the provider.
+
+## React Native Specific
+
+### "Cannot resolve module"
+
+Ensure you have installed all peer dependencies and configured polyfills correctly. See the [Installation](/docs/react-native-sdk/installation) guide.
+
+### WebAuthn / Deep Linking Issues
+
+- **HTTPS**: WebAuthn requires a secure context (HTTPS) or localhost (for development).
+- **Redirect URL**: Ensure your `redirectUrl` matches exactly what is configured in your app's scheme (Info.plist / app.json).
+- **Deep Linking Logs**: Check native logs (`npx expo start`) for any reported linking errors if the app doesn't open.
+
+## React SDK Specific
+
+### Dialog Does Not Open
+
+1. **Browser Blocking**: Some browsers block popups. Ensure the portal popup is allowed.
+2. **Network**: Verify connectivity to the LazorKit portal.
+
+## Support
+
+If you continue to experience issues, please report them on our [GitHub Issues](https://github.com/lazorkit/lazor-kit/issues) page.

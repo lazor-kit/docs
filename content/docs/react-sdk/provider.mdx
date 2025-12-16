@@ -20,8 +20,10 @@ function App() {
   return (
     <LazorkitProvider
       rpcUrl="https://api.devnet.solana.com"
-      paymasterUrl="https://lazorkit-paymaster.onrender.com"
-      ipfsUrl="https://portal.lazor.sh"
+      portalUrl="https://portal.lazor.sh"
+      paymasterConfig={{ 
+        paymasterUrl: "https://lazorkit-paymaster.onrender.com" 
+      }}
     >
       <YourApplication />
     </LazorkitProvider>
@@ -35,14 +37,14 @@ function App() {
 - **Type**: `string`
 - **Description**: Solana RPC endpoint URL
 
-### `paymasterUrl` (required)
-- **Type**: `string`
-- **Description**: Paymaster service URL for gasless transactions
-
-### `ipfsUrl` (optional)
+### `portalUrl` (optional)
 - **Type**: `string`
 - **Default**: `"https://portal.lazor.sh"`
 - **Description**: LazorKit portal URL for wallet dialogs
+
+### `paymasterConfig` (optional)
+- **Type**: `{ paymasterUrl: string, apiKey?: string }`
+- **Description**: Configuration for the paymaster service.
 
 ### `children`
 - **Type**: `ReactNode`

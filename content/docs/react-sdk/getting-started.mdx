@@ -1,0 +1,155 @@
+---
+title: Getting Started
+description: Complete guide to integrating the LazorKit React SDK.
+---
+
+# Integration Guide
+
+## Default Configuration
+
+LazorKit comes with pre-configured defaults for Devnet. You can use these values to get started quickly:
+
+```ts
+const DEFAULT_CONFIG = {
+  rpcUrl: 'https://api.devnet.solana.com',
+  portalUrl: 'https://portal.lazor.sh',
+  paymasterConfig: {
+    paymasterUrl: 'https://kora.devnet.lazorkit.com'
+  }
+};
+```
+
+This guide walks through building a complete wallet integration.
+
+## 1. Polyfills & Configuration
+
+### Polyfills (Required)
+
+The SDK relies on Node.js globals like `Buffer`. You must polyfill these depending on your framework.
+
+#### Vite
+
+Use [vite-plugin-node-polyfills](https://www.npmjs.com/package/vite-plugin-node-polyfills):
+
+```ts
+// vite.config.ts
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
+
+export default defineConfig({
+  plugins: [
+    nodePolyfills(),
+    // ...
+  ],
+});
+```
+
+#### Next.js
+
+Next.js usually handles module resolution, but ensure you are running wallet logic on the client-side (`use client`). If you encounter `Buffer` errors, add this to your `layout.tsx` or provider:
+
+```ts
+// layout.tsx or providers.tsx
+if (typeof window !== 'undefined') {
+    window.Buffer = window.Buffer || require('buffer').Buffer;
+}
+```
+
+### Provider Implementation
+
+```tsx
+// App.tsx
+import { LazorkitProvider } from '@lazorkit/wallet-sdk';
+
+const CONFIG = {
+  RPC_URL: "https://api.devnet.solana.com",
+  PORTAL_URL: "https://portal.lazor.sh",
+  PAYMASTER: { 
+    paymasterUrl: "https://lazorkit-paymaster.onrender.com" 
+  }
+};
+
+export default function App() {
+  return (
+    <LazorkitProvider
+      rpcUrl={CONFIG.RPC_URL}
+      portalUrl={CONFIG.PORTAL_URL}
+      paymasterConfig={CONFIG.PAYMASTER}
+    >
+      <MainContent />
+    </LazorkitProvider>
+  );
+}
+```
+
+## 2. Connect Button
+
+Create a component to handle user authentication.
+
+```tsx
+// ConnectButton.tsx
+import { useWallet } from '@lazorkit/wallet';
+
+export function ConnectButton() {
+  const { connect, disconnect, isConnected, isConnecting, wallet } = useWallet();
+
+  if (isConnected && wallet) {
+    return (
+      <button onClick={() => disconnect()}>
+        Disconnect ({wallet.smartWallet.slice(0, 6)}...)
+      </button>
+    );
+  }
+
+  return (
+    <button onClick={() => connect()} disabled={isConnecting}>
+      {isConnecting ? 'Connecting...' : 'Connect Wallet'}
+    </button>
+  );
+}
+```
+
+## 3. Sending Transactions
+
+Send SOL or execute instructions using the `signAndSendTransaction` method.
+
+```tsx
+// TransferButton.tsx
+import { useWallet } from '@lazorkit/wallet';
+import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+
+export function TransferButton() {
+  const { signAndSendTransaction, smartWalletPubkey } = useWallet();
+
+  const handleTransfer = async () => {
+    try {
+      if (!smartWalletPubkey) return;
+
+      // 1. Create Instruction
+      const destination = new PublicKey('RECIPIENT_ADDRESS');
+      const instruction = SystemProgram.transfer({
+        fromPubkey: smartWalletPubkey,
+        toPubkey: destination,
+        lamports: 0.1 * LAMPORTS_PER_SOL
+      });
+
+      // 2. Sign and Send
+      const signature = await signAndSendTransaction({
+        instructions: [instruction],
+        transactionOptions: {
+          feeToken: 'USDC' // Optional: Pay gas in USDC
+        }
+      });
+
+      console.log('Transaction confirmed:', signature);
+    } catch (error) {
+      console.error('Transfer failed:', error);
+    }
+  };
+
+  return <button onClick={handleTransfer}>Send 0.1 SOL</button>;
+}
+```
+
+## 4. Next Steps
+
+Check out the [Troubleshooting](/docs/troubleshooting) guide if you encounter any issues, or explore the [API Reference](/docs/react-sdk/use-wallet) for more advanced usage.

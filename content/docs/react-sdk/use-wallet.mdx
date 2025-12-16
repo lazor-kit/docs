@@ -1,0 +1,111 @@
+---
+title: useWallet
+description: API reference for the useWallet hook.
+---
+
+# `useWallet`
+
+The `useWallet` hook provides methods to interact with the wallet.
+
+```tsx
+import { useWallet } from '@lazorkit/wallet';
+```
+
+## `connect`
+
+Connects to the wallet. If a session exists in storage, it reconnects automatically without prompting the user.
+
+### Usage
+
+```tsx
+const { connect } = useWallet();
+await connect({ feeMode: 'paymaster' });
+```
+
+### Arguments
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `options` | `object` | No | Connection options. |
+| `options.feeMode` | `'paymaster' \| 'user'` | No | Fee payment mode (default: 'paymaster'). |
+
+### Returns
+
+`Promise<WalletInfo>` - The connected wallet info object.
+
+---
+
+## `disconnect`
+
+Disconnects the wallet and clears the current session state.
+
+### Usage
+
+```tsx
+const { disconnect } = useWallet();
+await disconnect();
+```
+
+### Returns
+
+`Promise<void>`
+
+---
+
+## `signMessage`
+
+Signs a message with the linked passkey.
+
+### Usage
+
+```tsx
+const { signMessage } = useWallet();
+const message = 'Hello LazorKit';
+const { signature } = await signMessage(message);
+```
+
+### Arguments
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `message` | `string` | Yes | The message content to sign. |
+
+### Returns
+
+`Promise<{ signature: string, signedPayload: string }>`
+
+---
+
+## `signAndSendTransaction`
+
+Signs and sends a transaction using the Paymaster service.
+
+### Usage
+
+```tsx
+const { signAndSendTransaction } = useWallet();
+
+const signature = await signAndSendTransaction({
+  instructions: [/* ... */],
+  transactionOptions: {
+    feeToken: 'USDC',
+    computeUnitLimit: 500_000
+  }
+});
+```
+
+### Arguments
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `payload` | `object` | Yes | Transaction payload. |
+| `payload.instructions` | `TransactionInstruction[]` | Yes | Array of Solana instructions. |
+| `payload.transactionOptions` | `object` | No | Configuration options. |
+| `~.feeToken` | `string` | No | Spl token mint address for fees. |
+| `~.computeUnitLimit` | `number` | No | Custom compute unit limit. |
+| `~.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | Versioned Tx ALT accounts. |
+| `~.clusterSimulation` | `'devnet' \| 'mainnet'` | No | Cluster to simulate against (default: inferred). |
+
+### Returns
+
+`Promise<string>` - The transaction signature.

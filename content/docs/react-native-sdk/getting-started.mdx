@@ -1,0 +1,167 @@
+---
+title: Getting Started
+description: Complete guide to integrating the LazorKit React Native SDK.
+---
+
+# Integration Guide
+
+## Default Configuration
+
+Use these default values for quick integration on Devnet:
+
+```ts
+const DEFAULT_CONFIG = {
+  rpcUrl: 'https://api.devnet.solana.com',
+  portalUrl: 'https://portal.lazor.sh',
+  configPaymaster: {
+    paymasterUrl: 'https://kora.devnet.lazorkit.com'
+  }
+};
+```
+
+## 1. Polyfills & Configuration
+
+Solana libraries (`@solana/web3.js`) require certain Node.js globals to be polyfilled in React Native.
+
+### Install Dependencies
+
+```bash
+npm install react-native-get-random-values react-native-url-polyfill buffer
+```
+
+### Configure Entry Point
+
+Add these imports to the **very top** of your entry file (e.g., `app/_layout.tsx`, `index.js`, or `App.tsx`):
+
+```tsx
+import 'react-native-get-random-values';
+import 'react-native-url-polyfill/auto';
+import { Buffer } from 'buffer';
+
+global.Buffer = global.Buffer || Buffer;
+```
+
+> **Note**: For Expo, ensure `expo-crypto` is also installed if you encounter random value issues.
+
+## 2. Setup Provider
+
+Wrap your application with `LazorKitProvider`. Ensure you have `expo-web-browser` installed.
+
+```tsx
+// App.tsx
+import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
+
+export default function App() {
+  return (
+    <LazorKitProvider
+      rpcUrl="https://api.devnet.solana.com"
+      portalUrl="https://portal.lazor.sh"
+      configPaymaster={{ 
+        paymasterUrl: "https://lazorkit-paymaster.onrender.com" 
+      }}
+    >
+      <HomeScreen />
+    </LazorKitProvider>
+  );
+}
+```
+
+## 3. Authentication
+
+Handle authentication using the `redirectUrl`.
+
+> **Important**: The `redirectUrl` must strictly match the Custom URL Scheme configured in your `app.json` (Expo) or `Info.plist` (iOS).
+
+```tsx
+// ConnectScreen.tsx
+import { useWallet } from '@lazorkit/wallet-mobile-adapter';
+import { Button, View, Text } from 'react-native';
+
+export function ConnectScreen() {
+  const { connect, isConnected, wallet } = useWallet();
+  const APP_SCHEME = 'myapp://home';
+
+  if (isConnected) {
+    return <Text>Connected: {wallet?.smartWallet}</Text>;
+  }
+
+  return (
+    <Button 
+      title="Connect with Passkey" 
+      onPress={() => connect({ redirectUrl: APP_SCHEME })} 
+    />
+  );
+}
+```
+
+## 4. Signing Messages
+
+Sign messages by directing users to the portal.
+
+```tsx
+// SignScreen.tsx
+import { useWallet } from '@lazorkit/wallet-mobile-adapter';
+import { Button } from 'react-native';
+
+export function SignScreen() {
+  const { signMessage } = useWallet();
+
+  const handleSign = async () => {
+    try {
+      const signature = await signMessage(
+        "Welcome to LazorKit!", 
+        { redirectUrl: 'myapp://callback' }
+      );
+      console.log("Verified Signature:", signature);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return <Button title="Sign Message" onPress={handleSign} />;
+}
+```
+
+## 5. Sending Transactions
+
+Send SOL or execute instructions on-chain.
+
+```tsx
+// TransferScreen.tsx
+import { useWallet } from '@lazorkit/wallet-mobile-adapter';
+import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Button } from 'react-native';
+
+export function TransferScreen() {
+  const { signAndSendTransaction, wallet } = useWallet();
+
+  const handleTransfer = async () => {
+    if (!wallet) return;
+
+    // 1. Create Instruction
+    const ix = SystemProgram.transfer({
+      fromPubkey: new PublicKey(wallet.smartWallet),
+      toPubkey: new PublicKey("RECIPIENT_ADDRESS"),
+      lamports: 0.01 * LAMPORTS_PER_SOL,
+    });
+
+    // 2. Sign and Send
+    const signature = await signAndSendTransaction(
+      { 
+        instructions: [ix], 
+        transactionOptions: { feeToken: 'USDC' } 
+      },
+      { redirectUrl: 'myapp://callback' }
+    );
+    console.log("Tx:", signature);
+  };
+
+  return <Button title="Send SOL" onPress={handleTransfer} />;
+}
+  return <Button title="Send SOL" onPress={handleTransfer} />;
+}
+```
+
+## 6. Next Steps
+
+See the [Troubleshooting](/docs/troubleshooting) guide for help with common issues like deep linking configuration.

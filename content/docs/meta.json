@@ -1,7 +1,9 @@
 {
     "pages": [
         "index",
-        "mobile-sdk",
-        "web-sdk"
+        "react-native-sdk",
+        "react-sdk",
+        "wallet-standard",
+        "troubleshooting"
     ]
 }

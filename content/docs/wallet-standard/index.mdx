@@ -1,0 +1,136 @@
+---
+title: Wallet Standard
+description: Integration with Solana Wallet Adapter and other frameworks.
+---
+
+# Wallet Standard Support
+
+The LazorKit SDK supports the [Solana Wallet Standard](https://github.com/wallet-standard/wallet-standard), enabling compatibility with popular libraries like `@solana/wallet-adapter-react`.
+
+## Integration with `@solana/wallet-adapter-react`
+
+### Default Configuration
+
+Recommended defaults for Devnet:
+
+```ts
+export const DEFAULT_CONFIG = {
+  rpcUrl: 'https://api.devnet.solana.com',
+  portalUrl: 'https://portal.lazor.sh',
+  paymasterConfig: {
+    paymasterUrl: 'https://kora.devnet.lazorkit.com',
+    apiKey: ''
+  },
+};
+```
+
+You can use LazorKit seamlessly alongside other standard wallets (like Phantom, Solflare) in your existing provider setup.
+
+### 1. Installation
+
+Install the necessary dependencies:
+
+```bash
+npm install @lazorkit/wallet @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
+```
+
+### 2. Register the Wallet
+
+Invoke `registerLazorkitWallet` with your configuration. This registers LazorKit globally so the adapter can discover it.
+
+#### For Next.js / SSR Apps (Recommended)
+
+Use `useEffect` to ensure registration happens only on the client-side, as the Wallet Standard relies on the global `window` object.
+
+#### For Create React App / Vite (SPA)
+
+You can call this at the top level of your entry file if you don't need runtime configuration.
+
+### 3. Setup Provider
+
+Here is an example setup using `ConnectionProvider` and `WalletProvider`:
+
+```tsx
+import { useMemo, useEffect } from 'react';
+import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
+import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
+import { registerLazorkitWallet } from '@lazorkit/wallet';
+
+// Configuration
+const CONFIG = {
+  RPC_URL: "https://api.devnet.solana.com",
+  PORTAL_URL: "https://portal.lazor.sh",
+  PAYMASTER: {
+    paymasterUrl: "https://lazorkit-paymaster.onrender.com",
+    apiKey: "YOUR_API_KEY" 
+  }
+};
+
+export function AppProviders({ children }) {
+  // Register LazorKit once on mount
+  useEffect(() => {
+    registerLazorkitWallet({
+        rpcUrl: CONFIG.RPC_URL,
+        portalUrl: CONFIG.PORTAL_URL,
+        paymasterConfig: CONFIG.PAYMASTER,
+    });
+  }, []);
+
+  const wallets = useMemo(
+    () => [
+      // Standard wallets are automatically detected. 
+      // LazorKit will appear here after registration.
+    ],
+    []
+  );
+
+  return (
+    <ConnectionProvider endpoint={CONFIG.RPC_URL}>
+      <WalletProvider wallets={wallets} autoConnect>
+        <WalletModalProvider>
+          {children}
+        </WalletModalProvider>
+      </WalletProvider>
+    </ConnectionProvider>
+  );
+}
+```
+
+### Usage in Components
+
+Once connected, you can use the standard `useWallet` hook from `@solana/wallet-adapter-react`:
+
+```tsx
+import { useWallet } from '@solana/wallet-adapter-react';
+import { SystemProgram, PublicKey } from '@solana/web3.js';
+
+export function TransferButton() {
+  const { publicKey, sendTransaction } = useWallet();
+
+  const handleSend = async () => {
+    if (!publicKey) return;
+
+    const transaction = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: publicKey,
+        toPubkey: new PublicKey("RECIPIENT"),
+        lamports: 1000,
+      })
+    );
+
+    // LazorKit abstracts the Paymaster logic internally here
+    const signature = await sendTransaction(transaction, connection);
+    console.log("Sig:", signature);
+  };
+
+  return <button onClick={handleSend}>Send SOL</button>;
+}
+```
+
+## How It Works
+
+1. **Registration**: `registerLazorkitWallet` creates a standard-compliant wallet object and emits an event.
+2. **Discovery**: `@solana/wallet-adapter-react` listens for standard wallet events and automatically adds LazorKit to the list of available wallets.
+3. **Execution**: When you call `sendTransaction`, LazorKit intercepts this calls and routes it through its Paymaster infrastructure, maintaining the standard API signature while handling gas abstraction under the hood.
+
+> **Note**: While LazorKit uses a smart wallet architecture, it presents itself as a standard signer to the adapter, allowing full compatibility with most dApps.

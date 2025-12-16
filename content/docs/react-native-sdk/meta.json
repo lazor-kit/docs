@@ -1,10 +1,11 @@
 {
-    "title": "Web SDK",
+    "title": "React Native SDK",
     "pages": [
         "index",
         "installation",
         "getting-started",
-        "guides",
-        "api"
+        "provider",
+        "use-wallet",
+        "types"
     ]
 }
