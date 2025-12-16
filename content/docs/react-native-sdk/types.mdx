@@ -7,42 +7,37 @@ description: API reference for common types and interfaces.
 
 Common TypeScript interfaces used throughout the SDK.
 
+## SignAndSendTransactionPayload
+
+Payload structure for transaction signing.
+
+```typescript
+interface SignAndSendTransactionPayload {
+  readonly instructions: TransactionInstruction[];
+  readonly transactionOptions: {
+    readonly feeToken?: string;
+    readonly addressLookupTableAccounts?: AddressLookupTableAccount[];
+    readonly computeUnitLimit?: number;
+    readonly clusterSimulation: 'devnet' | 'mainnet';
+  };
+}
+```
+
 ## WalletInfo
 
 Represents the connected wallet's state.
 
 ```typescript
 interface WalletInfo {
-  readonly credentialId: string;      // Base64 credential ID
-  readonly passkeyPubkey: number[];   // Passkey public key bytes
-  readonly smartWallet: string;       // Smart Wallet address (Base58)
-  readonly walletDevice: string;      // Wallet Device PDA address (Base58)
-  readonly platform: string;          // 'android' | 'ios'
+  readonly credentialId: string;      // Unique WebAuthn credential ID (Base64). Used for authentication.
+  readonly passkeyPubkey: number[];   // Raw public key bytes of the passkey.
+  readonly smartWallet: string;       // **YOUR SOLANA WALLET ADDRESS** (Base58). Use this to receive funds.
+  readonly walletDevice: string;      // Internal PDA for device management.
+  readonly platform: string;          // Origin platform ('android' | 'ios').
 }
 ```
 
-## WebAuthnSignatureResult
 
-The result returned when signing a raw message string.
-
-```typescript
-interface WebAuthnSignatureResult {
-  readonly signature: string;               // Base64 signature
-  readonly clientDataJsonBase64: string;    // Base64 Client Data JSON
-  readonly authenticatorDataBase64: string; // Base64 Authenticator Data
-}
-```
-
-## SmartWalletActionArgs
-
-Arguments for executing a smart wallet action.
-
-```typescript
-type SmartWalletActionArgs = 
-  | { type: SmartWalletAction.Execute; args: ExecuteArgs }
-  | { type: SmartWalletAction.CreateChunk; args: CreateChunkArgs }
-  | { type: SmartWalletAction.ExecuteChunk; args: ExecuteChunkArgs };
-```
 
 ## SignOptions
 

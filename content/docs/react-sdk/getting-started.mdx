@@ -21,7 +21,13 @@ const DEFAULT_CONFIG = {
 
 This guide walks through building a complete wallet integration.
 
-## 1. Polyfills & Configuration
+## 1. Installation
+
+```bash
+npm install @lazorkit/wallet @coral-xyz/anchor @solana/web3.js
+```
+
+## 2. Polyfills & Configuration
 
 ### Polyfills (Required)
 
@@ -81,7 +87,7 @@ export default function App() {
 }
 ```
 
-## 2. Connect Button
+## 3. Connect Button
 
 Create a component to handle user authentication.
 
@@ -108,7 +114,7 @@ export function ConnectButton() {
 }
 ```
 
-## 3. Sending Transactions
+## 4. Sending Transactions
 
 Send SOL or execute instructions using the `signAndSendTransaction` method.
 
@@ -150,6 +156,6 @@ export function TransferButton() {
 }
 ```
 
-## 4. Next Steps
+## 5. Next Steps
 
 Check out the [Troubleshooting](/docs/troubleshooting) guide if you encounter any issues, or explore the [API Reference](/docs/react-sdk/use-wallet) for more advanced usage.

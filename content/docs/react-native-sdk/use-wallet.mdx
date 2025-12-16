@@ -90,16 +90,9 @@ await signMessage('Hello', {
 
 ### Returns
 
-`Promise<BrowserResult>` - Object containing the signature and raw authenticator data.
+`Promise<{ signature: string; signedPayload: string }>` - Object containing the signature and signed payload.
 
-```ts
-interface BrowserResult {
-  signature: string;
-  clientDataJsonBase64: string;
-  authenticatorDataBase64: string;
-  message: string;
-}
-```
+
 
 ---
 
@@ -137,10 +130,10 @@ await signAndSendTransaction(
 | `payload` | `object` | Yes | Transaction payload. |
 | `payload.instructions` | `TransactionInstruction[]` | Yes | Array of instructions. |
 | `payload.transactionOptions` | `object` | Yes | Config options. |
-| `~.feeToken` | `string` | No | SPL token mint for gas fees. |
-| `~.computeUnitLimit` | `number` | No | Custom compute unit limit. |
-| `~.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | ALTs for versioned txs. |
-| `~.clusterSimulation` | `'devnet' \| 'mainnet'` | Yes | Cluster to simulate against. |
+| `transactionOptions.feeToken` | `string` | No | Token address for gas fees (e.g. USDC). |
+| `transactionOptions.computeUnitLimit` | `number` | No | Max compute units for the transaction. |
+| `transactionOptions.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | Lookup tables for versioned (v0) transactions. |
+| `transactionOptions.clusterSimulation` | `'devnet' \| 'mainnet'` | Yes | Network to use for simulation. |
 | `options` | `object` | Yes | Options object. |
 | `options.redirectUrl` | `string` | Yes | App deep link. |
 | `options.onSuccess` | `(sig: string) => void` | No | Callback on success. |

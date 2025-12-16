@@ -14,14 +14,23 @@ const DEFAULT_CONFIG = {
   rpcUrl: 'https://api.devnet.solana.com',
   portalUrl: 'https://portal.lazor.sh',
   configPaymaster: {
-    paymasterUrl: 'https://kora.devnet.lazorkit.com'
+    paymasterUrl: 'https://kora.devnet.lazorkit.com',
+    // apiKey: 'YOUR_API_KEY' // Optional
   }
 };
 ```
 
-## 1. Polyfills & Configuration
+## 1. Installation
 
-Solana libraries (`@solana/web3.js`) require certain Node.js globals to be polyfilled in React Native.
+```bash
+npm install @lazorkit/wallet-mobile-adapter
+```
+
+## 2. Polyfills & Configuration
+
+## 2. Polyfills & Configuration
+
+Since React Native doesn't have a standardized Node.js environment, some Solana libraries (like `@solana/web3.js`) need a little help to work correctly. You'll need to install a few polyfills.
 
 ### Install Dependencies
 
@@ -41,9 +50,9 @@ import { Buffer } from 'buffer';
 global.Buffer = global.Buffer || Buffer;
 ```
 
-> **Note**: For Expo, ensure `expo-crypto` is also installed if you encounter random value issues.
+> **Note**: If you're using Expo and run into issues with random values, make sure `expo-crypto` is installed.
 
-## 2. Setup Provider
+## 3. Setup Provider
 
 Wrap your application with `LazorKitProvider`. Ensure you have `expo-web-browser` installed.
 
@@ -66,11 +75,11 @@ export default function App() {
 }
 ```
 
-## 3. Authentication
+## 4. Authentication
 
-Handle authentication using the `redirectUrl`.
+Use the `connect` method to log a user in. You'll need to provide a `redirectUrl` so the app knows where to return after the user finishes signing in on the portal.
 
-> **Important**: The `redirectUrl` must strictly match the Custom URL Scheme configured in your `app.json` (Expo) or `Info.plist` (iOS).
+> **Important**: This `redirectUrl` must match the Custom URL Scheme you set up in your `app.json` (for Expo) or `Info.plist` (for iOS).
 
 ```tsx
 // ConnectScreen.tsx
@@ -82,7 +91,7 @@ export function ConnectScreen() {
   const APP_SCHEME = 'myapp://home';
 
   if (isConnected) {
-    return <Text>Connected: {wallet?.smartWallet}</Text>;
+    return <Text>Welcome back, {wallet?.smartWallet}</Text>;
   }
 
   return (
@@ -94,7 +103,7 @@ export function ConnectScreen() {
 }
 ```
 
-## 4. Signing Messages
+## 5. Signing Messages
 
 Sign messages by directing users to the portal.
 
@@ -122,7 +131,7 @@ export function SignScreen() {
 }
 ```
 
-## 5. Sending Transactions
+## 6. Sending Transactions
 
 Send SOL or execute instructions on-chain.
 
@@ -158,10 +167,8 @@ export function TransferScreen() {
 
   return <Button title="Send SOL" onPress={handleTransfer} />;
 }
-  return <Button title="Send SOL" onPress={handleTransfer} />;
-}
 ```
 
-## 6. Next Steps
+## 7. Next Steps
 
 See the [Troubleshooting](/docs/troubleshooting) guide for help with common issues like deep linking configuration.

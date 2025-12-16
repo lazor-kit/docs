@@ -1,11 +1,13 @@
 ---
-title: Introduction
+title: LazorKit Documentation
 description: Documentation for LazorKit SDKs.
 ---
 
-# LazorKit Documentation
+LazorKit allows you to build **Passkey-native** Solana applications.
 
-LazorKit provides SDKs for integrating WebAuthn-based smart wallets into Solana applications. It enables passkey authentication and programmable account management on both web and mobile platforms.
+Traditionally, crypto requires users to manage complex seed phrases. LazorKit replaces this with the standard biometrics users already know: **FaceID**, **TouchID**, or **Windows Hello**.
+
+By leveraging WebAuthn and smart accounts (PDAs), LazorKit provides a **seedless** onboarding experience that is both secure and familiar—turning every device into a hardware wallet.
 
 ---
 
@@ -36,7 +38,7 @@ LazorKit provides SDKs for integrating WebAuthn-based smart wallets into Solana 
 ## Core Concepts
 
 ### Biometric Authentication
-LazorKit uses WebAuthn credentials (Passkeys) for signing. Private keys are generated and stored in the device's secure enclave (TouchID, FaceID, or Windows Hello). The protocol ensures keys never leave the device.
+LazorKit uses WebAuthn credentials (Passkeys) for signing. Instead of handling keys directly, a hardware-bound credential is created in your device's Secure Enclave (TouchID, FaceID, or Windows Hello). The secret material never leaves the device.
 
 ### Smart Wallets
 Accounts are Program Derived Addresses (PDAs) controlled by the LazorKit on-chain program.
@@ -46,18 +48,6 @@ Accounts are Program Derived Addresses (PDAs) controlled by the LazorKit on-chai
 
 ### Paymaster
 The Paymaster service enables gas sponsorship. Transactions can be paid for by an external relayer, removing the requirement for users to hold SOL for network fees.
-
-
-
-## Technical Architecture
-
-LazorKit integrates three core components to provide a seamless user experience:
-
-1.  **Key Management (WebAuthn)**: Instead of generating a seed phrase, the SDK invokes the device's native authenticator (TouchID, FaceID, or Windows Hello) to create a public-private key pair. The private key remains hardware-bound in the Secure Enclave or Titan M chip, while the public key is registered on-chain.
-
-2.  **Account Abstraction (Smart Wallets)**: The user's address is a Program Derived Address (PDA) controlled by the LazorKit program. This smart contract validates signatures from the registered WebAuthn credential, enabling logic such as account recovery, spending limits, and session keys.
-
-3.  **Transaction Relaying (Paymaster)**: To abstract gas fees, the SDK can route transactions through a Paymaster service. The Paymaster pays the SOL fee on behalf of the user, allowing for a completely gasless onboarding experience.
 
 ## Resources
 

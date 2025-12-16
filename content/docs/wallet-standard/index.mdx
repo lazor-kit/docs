@@ -11,16 +11,16 @@ The LazorKit SDK supports the [Solana Wallet Standard](https://github.com/wallet
 
 ### Default Configuration
 
-Recommended defaults for Devnet:
-
+// Standard Devnet Configuration
 ```ts
 export const DEFAULT_CONFIG = {
   rpcUrl: 'https://api.devnet.solana.com',
   portalUrl: 'https://portal.lazor.sh',
   paymasterConfig: {
     paymasterUrl: 'https://kora.devnet.lazorkit.com',
-    apiKey: ''
+    // apiKey: 'YOUR_API_KEY' // Optional
   },
+  clusterSimulation: 'devnet'
 };
 ```
 
@@ -36,7 +36,7 @@ npm install @lazorkit/wallet @solana/wallet-adapter-react @solana/wallet-adapter
 
 ### 2. Register the Wallet
 
-Invoke `registerLazorkitWallet` with your configuration. This registers LazorKit globally so the adapter can discover it.
+Call `registerLazorkitWallet` with your config. This adds LazorKit to the list of wallets so your adapter can find it.
 
 #### For Next.js / SSR Apps (Recommended)
 
@@ -63,7 +63,8 @@ const CONFIG = {
   PAYMASTER: {
     paymasterUrl: "https://lazorkit-paymaster.onrender.com",
     apiKey: "YOUR_API_KEY" 
-  }
+  },
+  CLUSTER: 'devnet'
 };
 
 export function AppProviders({ children }) {
@@ -73,6 +74,7 @@ export function AppProviders({ children }) {
         rpcUrl: CONFIG.RPC_URL,
         portalUrl: CONFIG.PORTAL_URL,
         paymasterConfig: CONFIG.PAYMASTER,
+        clusterSimulation: CONFIG.CLUSTER,
     });
   }, []);
 
@@ -127,10 +129,52 @@ export function TransferButton() {
 }
 ```
 
+### Message Signing & Verification (P256)
+
+WebAuthn keys use the P256 curve (secp256r1), which works differently than standard Solana Ed25519 keys. The `signMessage` function returns a JSON object containing two critical pieces of data:
+
+1.  **`signature`**: The actual P256 signature.
+2.  **`signedPayload`**: The challenge string that was signed by the authenticator.
+
+**Why two values?**
+In WebAuthn, the browser often adds extra data (like `clientDataJSON`) to the message you provide. To verify the signature, you need to know exactly what bytes were signed, which is why we return the `signedPayload`.
+
+Here's how to decode and use them:
+
+```tsx
+import { useWallet } from '@solana/wallet-adapter-react';
+
+export function SignAndVerify() {
+  const { signMessage } = useWallet();
+
+  const handleSign = async () => {
+    if (!signMessage) return;
+
+    const message = new TextEncoder().encode("Please verify ownership");
+    
+    // 1. Sign the message
+    const result = await signMessage(message);
+
+    // 2. Decode the result
+    const jsonString = new TextDecoder().decode(result);
+    const { signature, signedPayload } = JSON.parse(jsonString);
+
+    console.log("Signature:", signature);
+    console.log("Original Callenge:", signedPayload);
+
+    // 3. Verify (Conceptual)
+    // Pass these values to your backend or a library like 'p256-ecdsa'
+    // verify(publicKey, signedPayload, signature);
+  };
+
+  return <button onClick={handleSign}>Sign Message</button>;
+}
+```
+
 ## How It Works
 
-1. **Registration**: `registerLazorkitWallet` creates a standard-compliant wallet object and emits an event.
-2. **Discovery**: `@solana/wallet-adapter-react` listens for standard wallet events and automatically adds LazorKit to the list of available wallets.
-3. **Execution**: When you call `sendTransaction`, LazorKit intercepts this calls and routes it through its Paymaster infrastructure, maintaining the standard API signature while handling gas abstraction under the hood.
+1.  **Register**: The `register` function sets up the LazorKit adapter.
+2.  **Discover**: Your wallet provider sees the new adapter and adds it to the list.
+3.  **Transact**: When you send a transaction, LazorKit handles the gas sponsorship (Paymaster) and signing logic automatically.
 
-> **Note**: While LazorKit uses a smart wallet architecture, it presents itself as a standard signer to the adapter, allowing full compatibility with most dApps.
+> **Note**: LazorKit behaves like any other wallet to your app, but uses smart contracts and passkeys under the hood.

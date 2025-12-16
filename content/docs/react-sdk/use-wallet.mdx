@@ -13,7 +13,7 @@ import { useWallet } from '@lazorkit/wallet';
 
 ## `connect`
 
-Connects to the wallet. If a session exists in storage, it reconnects automatically without prompting the user.
+Trigger the connection flow. If the user has previously connected, this will try to restore their session automatically without showing a pop-up.
 
 ### Usage
 
@@ -37,7 +37,7 @@ await connect({ feeMode: 'paymaster' });
 
 ## `disconnect`
 
-Disconnects the wallet and clears the current session state.
+Signs the user out and wipes any cached session data from local storage.
 
 ### Usage
 
@@ -54,7 +54,7 @@ await disconnect();
 
 ## `signMessage`
 
-Signs a message with the linked passkey.
+Requests the user to sign a plain text message using their passkey. This is useful for verifying ownership without sending a transaction.
 
 ### Usage
 
@@ -78,7 +78,7 @@ const { signature } = await signMessage(message);
 
 ## `signAndSendTransaction`
 
-Signs and sends a transaction using the Paymaster service.
+The core method for executing on-chain actions. It handles signing the transaction with the user's passkey and submitting it via the Paymaster (bundler).
 
 ### Usage
 
@@ -101,10 +101,10 @@ const signature = await signAndSendTransaction({
 | `payload` | `object` | Yes | Transaction payload. |
 | `payload.instructions` | `TransactionInstruction[]` | Yes | Array of Solana instructions. |
 | `payload.transactionOptions` | `object` | No | Configuration options. |
-| `~.feeToken` | `string` | No | Spl token mint address for fees. |
-| `~.computeUnitLimit` | `number` | No | Custom compute unit limit. |
-| `~.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | Versioned Tx ALT accounts. |
-| `~.clusterSimulation` | `'devnet' \| 'mainnet'` | No | Cluster to simulate against (default: inferred). |
+| `transactionOptions.feeToken` | `string` | No | Token address for gas fees (e.g. USDC). |
+| `transactionOptions.computeUnitLimit` | `number` | No | Max compute units for the transaction. |
+| `transactionOptions.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | Lookup tables for versioned (v0) transactions. |
+| `transactionOptions.clusterSimulation` | `'devnet' \| 'mainnet'` | No | Network to use for simulation. |
 
 ### Returns
 
