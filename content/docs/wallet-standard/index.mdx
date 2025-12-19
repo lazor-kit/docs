@@ -133,11 +133,24 @@ export function TransferButton() {
 
 WebAuthn keys use the P256 curve (secp256r1), which works differently than standard Solana Ed25519 keys. The `signMessage` function returns a JSON object containing two critical pieces of data:
 
-1.  **`signature`**: The actual P256 signature.
-2.  **`signedPayload`**: The challenge string that was signed by the authenticator.
+1.  **`signature`**: The signature produced by the WebAuthn authenticator.
+2.  **`signedPayload`**: The exact byte sequence that was signed by the authenticator, encoded as base64:
+
+```test 
+signedPayload = authenticatorData || SHA-256(clientDataJSON)
+```
 
 **Why two values?**
-In WebAuthn, the browser often adds extra data (like `clientDataJSON`) to the message you provide. To verify the signature, you need to know exactly what bytes were signed, which is why we return the `signedPayload`.
+In WebAuthn, the authenticator does not sign the challenge directly.
+Instead, the browser constructs clientDataJSON (which includes the challenge, origin, and operation type), and the authenticator signs a payload derived from both:
+
+browser-generated data (clientDataJSON)
+
+authenticator-generated data (authenticatorData)
+
+Because this signed payload cannot be reconstructed from the challenge alone, the verifier must know the exact bytes that were signed in order to validate the signature.
+
+For this reason, signedPayload is returned alongside the signature.
 
 Here's how to decode and use them:
 
