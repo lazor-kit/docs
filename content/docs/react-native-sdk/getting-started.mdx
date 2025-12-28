@@ -11,12 +11,12 @@ Use these default values for quick integration on Devnet:
 
 ```ts
 const DEFAULT_CONFIG = {
-  rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
+  rpcUrl: "https://api.devnet.solana.com",
+  portalUrl: "https://portal.lazor.sh",
   configPaymaster: {
-    paymasterUrl: 'https://kora.devnet.lazorkit.com',
+    paymasterUrl: "https://kora.devnet.lazorkit.com",
     // apiKey: 'YOUR_API_KEY' // Optional
-  }
+  },
 };
 ```
 
@@ -41,9 +41,9 @@ npm install react-native-get-random-values react-native-url-polyfill buffer
 Add these imports to the **very top** of your entry file (e.g., `app/_layout.tsx`, `index.js`, or `App.tsx`):
 
 ```tsx
-import 'react-native-get-random-values';
-import 'react-native-url-polyfill/auto';
-import { Buffer } from 'buffer';
+import "react-native-get-random-values";
+import "react-native-url-polyfill/auto";
+import { Buffer } from "buffer";
 
 global.Buffer = global.Buffer || Buffer;
 ```
@@ -56,15 +56,15 @@ Wrap your application with `LazorKitProvider`. Ensure you have `expo-web-browser
 
 ```tsx
 // App.tsx
-import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
+import { LazorKitProvider } from "@lazorkit/wallet-mobile-adapter";
 
 export default function App() {
   return (
     <LazorKitProvider
       rpcUrl="https://api.devnet.solana.com"
       portalUrl="https://portal.lazor.sh"
-      configPaymaster={{ 
-        paymasterUrl: "https://kora.devnet.lazorkit.com" 
+      configPaymaster={{
+        paymasterUrl: "https://kora.devnet.lazorkit.com",
       }}
     >
       <HomeScreen />
@@ -81,21 +81,21 @@ Use the `connect` method to log a user in. You'll need to provide a `redirectUrl
 
 ```tsx
 // ConnectScreen.tsx
-import { useWallet } from '@lazorkit/wallet-mobile-adapter';
-import { Button, View, Text } from 'react-native';
+import { useWallet } from "@lazorkit/wallet-mobile-adapter";
+import { Button, View, Text } from "react-native";
 
 export function ConnectScreen() {
-  const { connect, isConnected, wallet } = useWallet();
-  const APP_SCHEME = 'myapp://home';
+  const { connect, isConnected, smartWalletPubkey } = useWallet();
+  const APP_SCHEME = "myapp://home";
 
   if (isConnected) {
-    return <Text>Welcome back, {wallet?.smartWallet}</Text>;
+    return <Text>Welcome back, {smartWalletPubkey}</Text>;
   }
 
   return (
-    <Button 
-      title="Connect with Passkey" 
-      onPress={() => connect({ redirectUrl: APP_SCHEME })} 
+    <Button
+      title="Connect with Passkey"
+      onPress={() => connect({ redirectUrl: APP_SCHEME })}
     />
   );
 }
@@ -107,18 +107,17 @@ Sign messages by directing users to the portal.
 
 ```tsx
 // SignScreen.tsx
-import { useWallet } from '@lazorkit/wallet-mobile-adapter';
-import { Button } from 'react-native';
+import { useWallet } from "@lazorkit/wallet-mobile-adapter";
+import { Button } from "react-native";
 
 export function SignScreen() {
   const { signMessage } = useWallet();
 
   const handleSign = async () => {
     try {
-      const signature = await signMessage(
-        "Welcome to LazorKit!", 
-        { redirectUrl: 'myapp://callback' }
-      );
+      const signature = await signMessage("Welcome to LazorKit!", {
+        redirectUrl: "myapp://callback",
+      });
       console.log("Verified Signature:", signature);
     } catch (e) {
       console.error(e);
@@ -135,30 +134,30 @@ Send SOL or execute instructions on-chain.
 
 ```tsx
 // TransferScreen.tsx
-import { useWallet } from '@lazorkit/wallet-mobile-adapter';
-import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { Button } from 'react-native';
+import { useWallet } from "@lazorkit/wallet-mobile-adapter";
+import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { Button } from "react-native";
 
 export function TransferScreen() {
-  const { signAndSendTransaction, wallet } = useWallet();
+  const { signAndSendTransaction, smartWalletPubkey } = useWallet();
 
   const handleTransfer = async () => {
-    if (!wallet) return;
+    if (!smartWalletPubkey) return;
 
     // 1. Create Instruction
     const ix = SystemProgram.transfer({
-      fromPubkey: new PublicKey(wallet.smartWallet),
+      fromPubkey: new PublicKey(smartWalletPubkey),
       toPubkey: new PublicKey("RECIPIENT_ADDRESS"),
       lamports: 0.01 * LAMPORTS_PER_SOL,
     });
 
     // 2. Sign and Send
     const signature = await signAndSendTransaction(
-      { 
-        instructions: [ix], 
-        transactionOptions: { feeToken: 'USDC' } 
+      {
+        instructions: [ix],
+        transactionOptions: { feeToken: "USDC" },
       },
-      { redirectUrl: 'myapp://callback' }
+      { redirectUrl: "myapp://callback" }
     );
     console.log("Tx:", signature);
   };
