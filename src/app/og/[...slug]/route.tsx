@@ -27,9 +27,9 @@ export async function GET(
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: '64px 72px',
-          backgroundColor: '#080f23',
+          backgroundColor: '#0d0a1a',
           backgroundImage:
-            'radial-gradient(ellipse at 15% 50%, rgba(5, 105, 255, 0.18) 0%, transparent 55%), radial-gradient(ellipse at 85% 20%, rgba(5, 105, 255, 0.08) 0%, transparent 45%)',
+            'radial-gradient(ellipse at 15% 50%, rgba(120, 87, 255, 0.18) 0%, transparent 55%), radial-gradient(ellipse at 85% 20%, rgba(120, 87, 255, 0.08) 0%, transparent 45%)',
           fontFamily: 'Inter, system-ui, sans-serif',
         }}
       >
@@ -43,7 +43,7 @@ export async function GET(
           />
           <span
             style={{
-              color: '#daeeff',
+              color: '#ede8ff',
               fontSize: '22px',
               fontWeight: '700',
               letterSpacing: '-0.02em',
@@ -53,7 +53,7 @@ export async function GET(
           </span>
           <span
             style={{
-              color: '#7ecfff',
+              color: '#c4b0ff',
               fontSize: '15px',
               marginLeft: 'auto',
               opacity: 0.6,
@@ -81,7 +81,7 @@ export async function GET(
           {page.data.description && (
             <div
               style={{
-                color: '#7ecfff',
+                color: '#c4b0ff',
                 fontSize: '22px',
                 fontWeight: '400',
                 lineHeight: '1.5',
@@ -99,13 +99,13 @@ export async function GET(
           style={{
             display: 'flex',
             alignItems: 'center',
-            borderTop: '1px solid rgba(126, 207, 255, 0.15)',
+            borderTop: '1px solid rgba(169, 139, 255, 0.15)',
             paddingTop: '28px',
           }}
         >
           <span
             style={{
-              color: '#aae5ff',
+              color: '#c4b0ff',
               fontSize: '16px',
               fontWeight: '500',
               opacity: 0.5,
