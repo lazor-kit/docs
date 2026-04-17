@@ -1,0 +1,166 @@
+---
+title: Session Keys
+description: Create, use, and revoke session keys with the web3.js v1 SDK.
+---
+
+# Session Keys
+
+Session keys let an app or agent execute transactions on behalf of a wallet without passkey re-authentication. See [Session Keys concept page](/concepts/session-keys) for the full protocol explanation.
+
+---
+
+## Create a Session
+
+### Ed25519 Admin
+
+```typescript
+import { Keypair, SystemProgram } from '@solana/web3.js';
+import { ed25519 } from '@lazorkit/sdk-legacy';
+
+const sessionKp = Keypair.generate();
+const slot = await connection.getSlot();
+
+const { instructions, sessionPda } = await client.createSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionKey: sessionKp.publicKey,
+  expiresAt: BigInt(slot) + 216_000n,   // ~1 day
+  actions: [
+    { type: 'SolMaxPerTx', max: 1_000_000_000n },
+    { type: 'SolLimit', remaining: 10_000_000_000n },
+    { type: 'ProgramWhitelist', programId: SystemProgram.programId },
+  ],
+});
+```
+
+`expiresAt` is a **slot number**, not a Unix timestamp. Max duration ~30 days.
+
+### Passkey Admin (Two-Phase)
+
+```typescript
+const prepared = await client.prepareCreateSession({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
+  sessionKey: sessionKp.publicKey,
+  expiresAt: BigInt(slot) + 432_000n,
+  actions: [
+    { type: 'TokenLimit', mint: USDC_MINT, remaining: 1_000_000_000n },
+    { type: 'TokenMaxPerTx', mint: USDC_MINT, max: 100_000_000n },
+  ],
+});
+
+const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+const { instructions, sessionPda } = client.finalizeCreateSession(prepared, webauthnResponse);
+```
+
+### Unrestricted Session
+
+Omit `actions` for a fully open session:
+
+```typescript
+const { instructions, sessionPda } = await client.createSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionKey: sessionKp.publicKey,
+  expiresAt: BigInt(slot) + 9_000n,
+});
+```
+
+---
+
+## Execute via Session Key
+
+```typescript
+import { session } from '@lazorkit/sdk-legacy';
+
+const { instructions } = await client.transferSol({
+  payer: payer.publicKey,
+  walletPda,
+  signer: session(sessionPda, sessionKp.publicKey),
+  recipient,
+  lamports: 500_000_000n,
+});
+```
+
+No passkey prompt. The session keypair signs the transaction directly.
+
+---
+
+## Deferred Execution
+
+For large payloads exceeding the ~574 bytes available in a single Secp256r1 Execute (e.g. Jupiter swaps).
+
+### TX1 — Authorize
+
+```typescript
+const { instructions: authIx } = await client.prepareAuthorize({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
+  instructions: innerInstructions,   // the instructions to pre-authorize
+});
+
+const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+const { instructions, deferredExecPda } = client.finalizeAuthorize(prepared, webauthnResponse);
+```
+
+### TX2 — ExecuteDeferred
+
+```typescript
+const { instructions } = await client.executeDeferred({
+  payer: payer.publicKey,
+  walletPda,
+  deferredExecPda,
+  instructions: innerInstructions,   // must match what was authorized in TX1
+});
+```
+
+### Reclaim Expired Authorization
+
+If TX2 is never submitted, recover the DeferredExec account rent:
+
+```typescript
+const { instructions } = await client.reclaimDeferred({
+  payer: payer.publicKey,
+  deferredExecPda,
+  refundDestination: payer.publicKey,
+});
+```
+
+Only the original payer can reclaim, and only after the deferred account expires.
+
+---
+
+## Revoke a Session
+
+```typescript
+const { instructions } = await client.revokeSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionPda,
+  refundDestination: payer.publicKey,
+});
+```
+
+Closes the session PDA and refunds rent. Works on active or already-expired sessions. Only Owner or Admin can revoke.
+
+---
+
+## Action Types Reference
+
+| Type | Fields |
+|---|---|
+| `SolLimit` | `remaining: bigint` |
+| `SolRecurringLimit` | `limit: bigint`, `window: bigint` |
+| `SolMaxPerTx` | `max: bigint` |
+| `TokenLimit` | `mint: PublicKey`, `remaining: bigint` |
+| `TokenRecurringLimit` | `mint: PublicKey`, `limit: bigint`, `window: bigint` |
+| `TokenMaxPerTx` | `mint: PublicKey`, `max: bigint` |
+| `ProgramWhitelist` | `programId: PublicKey` |
+| `ProgramBlacklist` | `programId: PublicKey` |
+
+All SOL/token amounts are in **lamports** (`bigint`). Max 16 actions per session.

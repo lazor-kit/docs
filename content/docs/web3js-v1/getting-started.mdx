@@ -1,0 +1,143 @@
+---
+title: Getting Started
+description: Create a wallet, execute a transaction, and look up a wallet by credential.
+---
+
+# Getting Started
+
+## Prerequisites
+
+- Node.js 18+
+- `@lazorkit/sdk-legacy` and `@solana/web3.js` installed
+
+```bash
+npm install @lazorkit/sdk-legacy @solana/web3.js
+```
+
+---
+
+## 1. Initialize the Client
+
+```typescript
+import { Connection } from '@solana/web3.js';
+import { LazorKitClient, ed25519, session } from '@lazorkit/sdk-legacy';
+import * as crypto from 'crypto';
+
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const client = new LazorKitClient(connection);
+```
+
+---
+
+## 2. Create a Wallet
+
+### Ed25519 Owner
+
+```typescript
+import { Keypair } from '@solana/web3.js';
+
+const ownerKp = Keypair.generate();
+
+const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
+  payer: payer.publicKey,
+  userSeed: crypto.randomBytes(32),
+  owner: {
+    type: 'ed25519',
+    pubkey: ownerKp.publicKey,
+  },
+});
+```
+
+### Secp256r1 (Passkey) Owner
+
+```typescript
+const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
+  payer: payer.publicKey,
+  userSeed: crypto.randomBytes(32),
+  owner: {
+    type: 'secp256r1',
+    credentialIdHash,     // 32-byte SHA256 of WebAuthn credential ID
+    compressedPubkey,     // 33-byte compressed Secp256r1 public key
+    rpId: 'your-app.com',
+  },
+});
+```
+
+---
+
+## 3. Execute a Transaction
+
+### Ed25519 Signer
+
+```typescript
+import { SystemProgram } from '@solana/web3.js';
+
+const { instructions } = await client.execute({
+  payer: payer.publicKey,
+  walletPda,
+  signer: ed25519(ownerKp.publicKey),
+  instructions: [
+    SystemProgram.transfer({
+      fromPubkey: vaultPda,
+      toPubkey: recipient,
+      lamports: 1_000_000n,
+    }),
+  ],
+});
+```
+
+### Secp256r1 (Passkey) — Two-Phase Flow
+
+Passkey signing requires a prepare/finalize pattern because the WebAuthn challenge must be computed before the authenticator signs:
+
+```typescript
+// Step 1: Compute the challenge
+const prepared = await client.prepareExecute({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, publicKeyBytes: compressedPubkey, authorityPda },
+  instructions: [
+    SystemProgram.transfer({ fromPubkey: vaultPda, toPubkey: recipient, lamports: 1_000_000n }),
+  ],
+});
+
+// Step 2: Browser authenticator signs the challenge
+const webauthnResponse = await getWebAuthnResponse(prepared.challenge, 'your-app.com', credentialId);
+
+// Step 3: Build the transaction
+const { instructions } = client.finalizeExecute(prepared, webauthnResponse);
+```
+
+---
+
+## 4. Look Up a Wallet (Returning Users)
+
+No need to store `walletPda` client-side — look it up by credential hash:
+
+```typescript
+const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
+// Returns: { walletPda, authorityPda, vaultPda, role, authorityType }
+```
+
+---
+
+## 5. Transfer SOL (Shorthand)
+
+```typescript
+const { instructions } = await client.transferSol({
+  payer: payer.publicKey,
+  walletPda,
+  signer: ed25519(ownerKp.publicKey),
+  recipient,
+  lamports: 500_000_000n,
+});
+```
+
+---
+
+## Program ID
+
+```typescript
+import { PROGRAM_ID } from '@lazorkit/sdk-legacy';
+// 4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS
+```

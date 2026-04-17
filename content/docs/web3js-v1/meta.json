@@ -1,0 +1,9 @@
+{
+    "title": "SDK (web3.js v1)",
+    "pages": [
+        "index",
+        "getting-started",
+        "session-keys",
+        "types"
+    ]
+}

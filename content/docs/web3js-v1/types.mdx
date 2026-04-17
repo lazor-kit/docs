@@ -1,0 +1,151 @@
+---
+title: Types
+description: TypeScript types and interfaces for the LazorKit web3.js v1 SDK.
+---
+
+# Types
+
+---
+
+## Signer Types
+
+Three signer types are used across all client methods:
+
+```typescript
+import { ed25519, session } from '@lazorkit/sdk-legacy';
+
+// Ed25519 keypair signer
+ed25519(publicKey: PublicKey): Ed25519Signer
+
+// Session key signer
+session(sessionPda: PublicKey, sessionKey: PublicKey): SessionSigner
+```
+
+For Secp256r1 (passkey), use `secp256r1` params directly — the two-phase prepare/finalize flow handles signing.
+
+---
+
+## Secp256r1Params
+
+Used for passkey-authenticated operations:
+
+```typescript
+interface Secp256r1Params {
+  credentialIdHash: Buffer;    // 32-byte SHA256 of WebAuthn credential ID
+  publicKeyBytes: Buffer;      // 33-byte compressed Secp256r1 public key
+  authorityPda: PublicKey;     // Authority PDA for this credential
+}
+```
+
+---
+
+## WebAuthnResponse
+
+Returned by the browser authenticator, passed to `finalize*` methods:
+
+```typescript
+interface WebAuthnResponse {
+  signature: Buffer;           // DER-encoded Secp256r1 signature
+  authenticatorData: Buffer;   // WebAuthn authenticator data
+  clientDataJSON: Buffer;      // Raw clientDataJSON bytes from authenticator
+}
+```
+
+---
+
+## CreateWalletParams
+
+```typescript
+interface CreateWalletParams {
+  payer: PublicKey;
+  userSeed: Buffer;            // 32 bytes, unique per wallet
+  owner: Ed25519OwnerParams | Secp256r1OwnerParams;
+}
+
+interface Ed25519OwnerParams {
+  type: 'ed25519';
+  pubkey: PublicKey;
+}
+
+interface Secp256r1OwnerParams {
+  type: 'secp256r1';
+  credentialIdHash: Buffer;
+  compressedPubkey: Buffer;
+  rpId: string;
+}
+```
+
+---
+
+## SessionAction
+
+```typescript
+type SessionAction =
+  | { type: 'SolLimit'; remaining: bigint }
+  | { type: 'SolRecurringLimit'; limit: bigint; window: bigint }
+  | { type: 'SolMaxPerTx'; max: bigint }
+  | { type: 'TokenLimit'; mint: PublicKey; remaining: bigint }
+  | { type: 'TokenRecurringLimit'; mint: PublicKey; limit: bigint; window: bigint }
+  | { type: 'TokenMaxPerTx'; mint: PublicKey; max: bigint }
+  | { type: 'ProgramWhitelist'; programId: PublicKey }
+  | { type: 'ProgramBlacklist'; programId: PublicKey };
+```
+
+---
+
+## WalletLookupResult
+
+Returned by `findWalletsByAuthority`:
+
+```typescript
+interface WalletLookupResult {
+  walletPda: PublicKey;
+  authorityPda: PublicKey;
+  vaultPda: PublicKey;
+  role: 0 | 1 | 2;            // 0=Owner, 1=Admin, 2=Spender
+  authorityType: 0 | 1;       // 0=Ed25519, 1=Secp256r1
+}
+```
+
+---
+
+## On-Chain Account Decoders
+
+The SDK exports decoders for reading account state:
+
+```typescript
+import { decodeWalletAccount, decodeAuthorityAccount, decodeSessionAccount } from '@lazorkit/sdk-legacy';
+
+const walletAccount = decodeWalletAccount(accountInfo.data);
+const authorityAccount = decodeAuthorityAccount(accountInfo.data);
+const sessionAccount = decodeSessionAccount(accountInfo.data);
+```
+
+---
+
+## PDA Derivation
+
+```typescript
+import { deriveWalletPda, deriveVaultPda, deriveAuthorityPda, deriveSessionPda } from '@lazorkit/sdk-legacy';
+
+const walletPda = deriveWalletPda(userSeed);
+const vaultPda = deriveVaultPda(walletPda);
+const authorityPda = deriveAuthorityPda(walletPda, credentialIdHash);
+const sessionPda = deriveSessionPda(walletPda, sessionKey);
+```
+
+---
+
+## Error Codes
+
+| Range | Category |
+|---|---|
+| 3001–3029 | `AuthError` — authentication and permission failures |
+| 4001–4007 | `ProtocolError` — protocol fee system errors |
+
+```typescript
+import { parseError } from '@lazorkit/sdk-legacy';
+
+const error = parseError(transactionError);
+// Returns: { code: number, name: string, message: string }
+```

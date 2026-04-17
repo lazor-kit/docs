@@ -1,0 +1,45 @@
+---
+title: Overview
+description: LazorKit SDK for @solana/web3.js v1 — direct contract interaction via LazorKitClient.
+---
+
+# SDK — web3.js v1
+
+`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction. It uses `@solana/web3.js` v1 and provides `LazorKitClient` — a typed API for all on-chain operations.
+
+Use this SDK when you need low-level contract access: building transactions manually, integrating with existing web3.js v1 infrastructure, or working outside of React.
+
+For React and React Native apps, see the [React SDK](/react-sdk) and [React Native SDK](/react-native-sdk).
+
+---
+
+## Installation
+
+```bash
+npm install @lazorkit/sdk-legacy @solana/web3.js
+```
+
+---
+
+## What It Covers
+
+| Area | Methods |
+|---|---|
+| Wallet management | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` |
+| Execution | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute` |
+| Session keys | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession` |
+| Deferred execution | `authorize`, `executeDeferred`, `reclaimDeferred` |
+| Wallet lookup | `findWalletsByAuthority` |
+| Protocol (admin) | `initializeProtocol`, `registerPayer`, `withdrawTreasury` |
+
+---
+
+## Client Setup
+
+```typescript
+import { Connection } from '@solana/web3.js';
+import { LazorKitClient } from '@lazorkit/sdk-legacy';
+
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const client = new LazorKitClient(connection);
+```
