@@ -1,8 +1,15 @@
 {
     "pages": [
         "index",
-        "react-native-sdk",
+        "protocol",
+        "concepts",
+        "---UI SDKs---",
         "react-sdk",
+        "react-native-sdk",
+        "---Contract SDKs---",
+        "web3js-v1",
+        "web3js-v2",
+        "---Reference---",
         "wallet-standard",
         "troubleshooting"
     ]

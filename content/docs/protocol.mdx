@@ -1,0 +1,185 @@
+---
+title: Protocol Overview
+description: LazorKit — Execution Layer for Web3. A permissioned execution layer that defines who executes, how execution happens, and who pays.
+---
+
+# LazorKit — Execution Layer for Web3
+
+A permissioned execution layer that defines who can execute, how execution happens, and who pays for it.
+
+---
+
+## TL;DR
+
+- **Passkey wallets** — users authenticate with biometrics (FaceID, TouchID, Windows Hello); no seed phrase, no private key management
+- **Session keys** — scoped, time-bound delegation keys that let apps or agents act on a user's behalf without repeated signing prompts
+- **Paymaster** — a gas abstraction service that sponsors or routes transaction fees, so users never need to hold SOL to interact
+- **Programmable execution** — RBAC policies define what a session key can do, to which programs, up to what value, and for how long
+- **Live on Solana** — deployed in production with two reference products: Seedless (onboarding) and session.money (agent execution)
+
+---
+
+## System Overview
+
+<Mermaid chart={`
+flowchart TD
+    A([User / Agent]) --> lk
+    subgraph lk [LazorKit]
+        sk[Session Key] --> rbac[RBAC Validation]
+    end
+    lk --> pm
+    subgraph pm [Paymaster]
+        fee[Fee Decision]
+    end
+    pm --> D([Solana])
+`} />
+
+When a user or agent triggers an action, LazorKit validates whether the session key has permission to execute it under the configured RBAC policy. If valid, the request is forwarded to the Paymaster, which decides how to fund the transaction fee. The final transaction is submitted on-chain, fees are captured, and the result is recorded.
+
+---
+
+## The Problem
+
+Web3 applications today impose a fixed set of prerequisites before a user can do anything:
+
+- **Wallet required at entry** — users must set up a wallet before they can touch the product
+- **Every action requires signing** — each transaction triggers a wallet prompt, breaking flow
+- **Gas is a hard requirement** — if a user has no SOL, they cannot execute, regardless of intent
+- **No delegation or automation** — there is no standard way for an app or agent to act on behalf of a user within defined limits
+
+These are not UX problems. They are structural constraints built into how execution currently works.
+
+---
+
+## The Shift
+
+Execution should not be monolithic. It should be:
+
+- **Programmable** — define what can be executed, against which programs, within what parameters
+- **Delegatable** — users should be able to grant scoped execution rights to apps or agents
+- **Automatable** — agents and services should be able to trigger execution without user interruption
+- **Sponsorable** — any party should be able to fund a user's transaction based on business logic, not just the user themselves
+
+LazorKit is the layer that makes this possible.
+
+---
+
+## How LazorKit Works
+
+<Steps>
+  <Step>
+    ### User signs in with passkey
+    The user authenticates using a device-bound WebAuthn credential — FaceID, TouchID, or Windows Hello. No seed phrase is created or stored.
+  </Step>
+  <Step>
+    ### Smart wallet is created (sponsored)
+    A Program Derived Address (PDA) is created on-chain, controlled by the LazorKit program. The wallet creation fee is sponsored — the user pays nothing.
+  </Step>
+  <Step>
+    ### Action is triggered
+    A user clicks a button, or an agent sends a request. This generates an intent to execute a specific instruction against a specific on-chain program.
+  </Step>
+  <Step>
+    ### Session key and RBAC are validated
+    LazorKit checks whether the active session key is authorized to execute this action. Validation covers: which program is being called, what instruction, the value involved, and whether the session has expired.
+  </Step>
+  <Step>
+    ### Paymaster evaluates the request
+    The Paymaster receives the validated transaction and decides whether to sponsor it. This decision is configurable: free for all users, tiered by usage, or paid by the dapp.
+  </Step>
+  <Step>
+    ### Transaction is submitted
+    The transaction is signed by the session key and submitted to Solana. No user signature is required at this step if the session key has valid delegation.
+  </Step>
+  <Step>
+    ### Fee is captured and recorded
+    A protocol fee (currently a fixed SOL amount) is captured at execution. The result is recorded on-chain.
+  </Step>
+</Steps>
+
+---
+
+## Core Components
+
+### Smart Wallet (Passkey-controlled PDA)
+An on-chain account controlled by the LazorKit program. The owner is authenticated via a WebAuthn credential, not a private key. Supports key rotation, spending policies, and session delegation.
+
+### Session Keys (Scoped Delegation)
+Ephemeral keypairs granted limited execution rights. A session key can be constrained to specific programs, instruction types, value limits, and expiry windows. When the session ends, the key is invalid.
+
+### RBAC (Role-Based Access Control)
+The on-chain permission model that governs what a session key can do. Policies are set at wallet creation or updated by the user. Execution that violates the RBAC policy is rejected before it reaches the Paymaster.
+
+### Paymaster (Gas Abstraction)
+A service that funds transaction fees on behalf of users. Sponsorship logic is configurable per integration. Currently operates with a fixed SOL fee captured by the protocol. Future versions will support open paymaster competition.
+
+---
+
+## Use Cases
+
+### 1. Gasless Onboarding
+
+A new user opens a Web3 app for the first time.
+
+1. User authenticates with FaceID
+2. LazorKit creates a smart wallet on Solana — fee sponsored by the app
+3. A session key is issued scoped to that app's program
+4. The user interacts immediately — no wallet setup, no SOL required
+
+**Who pays:** The app sponsors wallet creation and initial transactions via the Paymaster.
+
+---
+
+### 2. Agent Execution
+
+An on-chain agent needs to execute recurring actions on behalf of a user (e.g. rebalancing, auto-compound, limit orders).
+
+1. User creates a session key with a defined scope: program address, max value per tx, expiry date
+2. Agent holds the session key and triggers execution on its own schedule
+3. Each execution passes RBAC validation before the Paymaster funds it
+4. Session expires automatically — no manual revocation needed
+
+**Who pays:** The agent operator pre-funds the Paymaster, or the user configures a self-funded execution budget.
+
+---
+
+## Economic Model
+
+### Current model
+
+- **Protocol fee**: A fixed SOL amount captured on each transaction execution
+- **Paymaster funding**: Apps or operators pre-fund the Paymaster with SOL to sponsor user transactions
+- **No token required**: The current model operates entirely in native SOL
+
+### Future model
+
+- **Paymaster competition**: Multiple Paymaster providers will be able to compete on fee rates and sponsorship terms
+- **Fee configurability**: Protocol fees will shift from fixed to configurable based on execution type
+- **Protocol token**: A token will be introduced for governance, fee settlement, and Paymaster staking — details TBD
+
+---
+
+## Current Status
+
+LazorKit is live on Solana mainnet. Two products are in production:
+
+- **[Seedless](https://seedless.lazorkit.xyz)** — a reference implementation of gasless passkey onboarding. Users create a smart wallet with biometrics in under 10 seconds.
+- **[session.money](https://session.money)** — an agent execution interface using LazorKit session keys. Demonstrates scoped delegation for automated on-chain actions.
+
+The core protocol (smart wallet program, session key validation, Paymaster service) is deployed and actively used.
+
+---
+
+## Positioning
+
+LazorKit is not a wallet. It does not have a user-facing interface for managing assets.
+
+LazorKit is not a dapp. It does not define what users do on-chain.
+
+LazorKit is an **execution layer** — infrastructure that sits between the user (or agent) and the blockchain. It handles authentication, permission enforcement, fee routing, and transaction submission. Applications and agents build on top of it.
+
+---
+
+## Closing
+
+Every Web3 application today manages execution ad-hoc — wallets, signatures, gas, and delegation handled differently by every team. LazorKit turns execution into a programmable layer: consistent, composable, and sponsorable. Any application that needs to move users or agents from intent to on-chain action can build on it.
