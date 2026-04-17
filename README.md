@@ -1,45 +1,79 @@
-# docs
+# LazorKit Docs
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+Documentation site for [LazorKit](https://lazorkit.com) — an execution layer for Solana built on passkey wallets, session keys, and programmable gas sponsorship.
 
-Run development server:
+Live at **[docs.lazorkit.com](https://docs.lazorkit.com)**
+
+---
+
+## Stack
+
+- [Next.js 16](https://nextjs.org)
+- [Fumadocs](https://fumadocs.dev) — docs framework
+- [Tailwind CSS v4](https://tailwindcss.com)
+- [Mermaid](https://mermaid.js.org) — flow diagrams
+
+---
+
+## Development
 
 ```bash
-npm run dev
-# or
+pnpm install
 pnpm dev
-# or
-yarn dev
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Explore
+---
 
-In the project, you can see:
+## Structure
 
-- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
-- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
+```
+content/docs/
+  index.mdx               Landing page
+  protocol.mdx            Protocol overview (for investors and builders)
 
-| Route                     | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `app/(home)`              | The route group for your landing page and other pages. |
-| `app/docs`                | The documentation layout and pages.                    |
-| `app/api/search/route.ts` | The Route Handler for search.                          |
+  concepts/               Protocol deep-dives
+    smart-wallet.mdx
+    session-keys.mdx
+    rbac.mdx
+    paymaster.mdx
 
-### Fumadocs MDX
+  react-sdk/              React SDK (@lazorkit/react)
+  react-native-sdk/       React Native SDK (@lazorkit/react-native)
+  web3js-v1/              Contract SDK — web3.js v1 (@lazorkit/sdk-legacy)
+  web3js-v2/              Contract SDK — web3.js v2 (coming soon)
 
-A `source.config.ts` config file has been included, you can customise different options like frontmatter schema.
+  wallet-standard/        Wallet Standard integration
+  troubleshooting.mdx
+```
 
-Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
+---
 
-## Learn More
+## Adding Content
 
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
+All content lives in `content/docs/` as `.mdx` files. Pages support these components without any imports:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs
+| Component | Usage |
+|---|---|
+| `<Card>`, `<Cards>` | Navigation cards with icon + title |
+| `<Callout>` | Info / warning / error callouts |
+| `<Steps>`, `<Step>` | Numbered step sequences |
+| `<Tabs>`, `<Tab>` | Tabbed content |
+| `<Mermaid chart={...} />` | Flow diagrams |
+
+Icons come from `lucide-react` and must be imported in the MDX file:
+
+```mdx
+import { Wallet, Key } from 'lucide-react'
+
+<Card icon={<Wallet />} title="Smart Wallet" href="/concepts/smart-wallet" />
+```
+
+---
+
+## Links
+
+- [GitHub](https://github.com/lazor-kit)
+- [Telegram](https://t.me/lazorkit)
+- [Twitter](https://twitter.com/lazorkit)
