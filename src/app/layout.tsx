@@ -10,6 +10,10 @@ export const metadata: Metadata = {
     default: 'LazorKit Documentation',
   },
   description: 'LazorKit Wallet Adapter Documentation',
+  icons: {
+    icon: '/logo.jpg',
+    apple: '/logo.jpg',
+  },
   openGraph: {
     siteName: 'LazorKit',
     title: {
