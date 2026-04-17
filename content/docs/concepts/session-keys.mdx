@@ -1,0 +1,191 @@
+---
+title: Session Keys
+description: How session keys work in LazorKit — delegation, scope, action types, deferred execution, and revocation.
+---
+
+# Session Keys
+
+A session key is an ephemeral keypair with an expiry slot and optional action constraints. It lets an app or agent execute transactions on behalf of a wallet without triggering a passkey prompt on every operation.
+
+---
+
+## How It Works
+
+1. An Owner or Admin creates a session, specifying a keypair and expiry slot
+2. Optional action rules are attached at creation time (spending limits, program filters)
+3. The session keypair holder calls `Execute` — no passkey prompt
+4. At expiry the session is invalid. The account can be closed to recover rent.
+
+Sessions are the cheapest execution path: **4,483–5,983 CU** vs 9,441 CU for passkey execution.
+
+---
+
+## Actions
+
+Actions constrain what a session key can do. They are validated before and after each CPI during `Execute`. Max 16 actions per session, stored in a flat byte buffer up to 2048 bytes.
+
+| Type | Description |
+|---|---|
+| `SolLimit` | Lifetime SOL spending cap — decrements until exhausted |
+| `SolRecurringLimit` | Per-window SOL cap (e.g. 1 SOL/day) — resets each window |
+| `SolMaxPerTx` | Max SOL gross outflow per transaction |
+| `TokenLimit` | Lifetime token cap per mint |
+| `TokenRecurringLimit` | Per-window token cap per mint |
+| `TokenMaxPerTx` | Max tokens per transaction per mint |
+| `ProgramWhitelist` | Session can only CPI to this program (repeatable) |
+| `ProgramBlacklist` | Session cannot CPI to this program (repeatable) |
+
+`SolMaxPerTx` uses **gross outflow tracking** — per-CPI lamport snapshotting prevents DeFi round-trips from bypassing the cap.
+
+### Expired Action Behavior
+
+Actions have their own `expires_at` independent of session expiry.
+
+| Action Type | On Expiry |
+|---|---|
+| Spending limits (SolLimit, TokenLimit, etc.) | Treated as **fully exhausted** — any spend rejected |
+| ProgramWhitelist | **Hard deny** — all programs blocked |
+| ProgramBlacklist | **Silently dropped** — ban lifted |
+
+---
+
+## Creating a Session
+
+### Ed25519 Admin
+
+```typescript
+const { instructions, sessionPda } = await client.createSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionKey: sessionKp.publicKey,
+  expiresAt: currentSlot + 216_000n,  // ~1 day in slots
+  actions: [
+    { type: 'SolMaxPerTx', max: 1_000_000_000n },           // 1 SOL per tx
+    { type: 'SolLimit', remaining: 10_000_000_000n },        // 10 SOL lifetime
+    { type: 'ProgramWhitelist', programId: SystemProgram.programId },
+  ],
+});
+```
+
+`expiresAt` is an **absolute slot number**, not a Unix timestamp. Max duration is ~30 days (~2,592,000 slots).
+
+### Passkey Admin (Two-Phase)
+
+When the authorizer is a Secp256r1 passkey, use prepare/finalize:
+
+```typescript
+const prepared = await client.prepareCreateSession({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
+  sessionKey: sessionKp.publicKey,
+  expiresAt: currentSlot + 432_000n,  // ~2 days
+  actions: [
+    { type: 'TokenLimit', mint: USDC_MINT, remaining: 1_000_000_000n },
+    { type: 'TokenMaxPerTx', mint: USDC_MINT, max: 100_000_000n },
+  ],
+});
+
+const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+const { instructions, sessionPda } = client.finalizeCreateSession(prepared, webauthnResponse);
+```
+
+### Unrestricted Session
+
+Omit `actions` for a fully open session — the session key can do anything the wallet can:
+
+```typescript
+const { instructions, sessionPda } = await client.createSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionKey: sessionKp.publicKey,
+  expiresAt: currentSlot + 9_000n,
+});
+```
+
+---
+
+## Executing via Session Key
+
+```typescript
+const { instructions } = await client.transferSol({
+  payer: payer.publicKey,
+  walletPda,
+  signer: session(sessionPda, sessionKp.publicKey),
+  recipient,
+  lamports: 500_000_000n,  // 0.5 SOL — within the 1 SOL per-tx limit
+});
+```
+
+The session keypair signs the transaction. No passkey prompt.
+
+---
+
+## Deferred Execution
+
+For payloads exceeding ~574 bytes in a single Secp256r1 Execute transaction (e.g. Jupiter swaps with complex routing), LazorKit provides a 2-transaction deferred flow.
+
+<Mermaid chart={`
+sequenceDiagram
+    participant C as Client
+    participant P as LazorKit
+    participant S as Solana
+
+    Note over C: Compute instruction and account hashes
+    C->>P: TX1 Authorize(hashes, expiry)
+    Note over P: Verify Secp256r1 signature
+    Note over P: Increment odometer counter
+    P->>S: Create DeferredExec PDA
+
+    Note over C: Prepare full instructions
+    C->>P: TX2 ExecuteDeferred(instructions)
+    P->>P: Verify hashes match
+    P->>S: Close DeferredExec PDA
+    P->>S: Execute via CPI
+    Note over S: Rent refunded to payer
+`} />
+
+
+| Metric | Immediate Execute | Deferred (2 txs) |
+|---|---|---|
+| Inner instruction capacity | ~574 bytes | ~1,100 bytes (1.9×) |
+| Total CU | 9,441 | 15,613 |
+| Tx fee | 0.000005 SOL | 0.00001 SOL |
+| Temp rent (refunded) | — | 0.002116 SOL |
+
+Expired DeferredExec accounts can be reclaimed via `ReclaimDeferred` — the original payer recovers the rent.
+
+Only Secp256r1 Owner or Admin can call `Authorize` (TX1). TX2 can be submitted by any signer.
+
+---
+
+## Revocation
+
+Sessions can be revoked early by Owner or Admin:
+
+```typescript
+const { instructions } = await client.revokeSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionPda,
+  refundDestination: payer.publicKey,
+});
+```
+
+Closes the session PDA and refunds rent. Works on active or already-expired sessions.
+
+---
+
+## Cost
+
+| Item | Cost |
+|---|---|
+| Session account rent (one-time) | 0.001448 SOL |
+| CreateSession tx fee | 0.000005 SOL |
+| **Total setup** | **0.001453 SOL** |
+| Execute via session (per tx) | 0.000005 SOL |
+
+Session rent is refundable after expiry via `RevokeSession`.

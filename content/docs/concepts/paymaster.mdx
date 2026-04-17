@@ -1,0 +1,110 @@
+---
+title: Paymaster
+description: How the LazorKit protocol fee system works — fee collection, treasury sharding, and payer tracking.
+---
+
+# Paymaster
+
+The Paymaster is LazorKit's on-chain fee collection and gas sponsorship layer. It handles protocol revenue, tracks integrator activity, and routes funds to a sharded treasury.
+
+---
+
+## How It Works
+
+Fee collection is **opt-in per payer**. If a payer has no `FeeRecord` on-chain, no fee is charged — the protocol behaves identically to the open-source version.
+
+When a payer is registered:
+
+1. SDK detects the `FeeRecord` PDA keyed by the payer's pubkey (RPC call, cached)
+2. SDK appends 4 accounts to the transaction: `[protocol_config, fee_record, treasury_shard, system_program]`
+3. Entrypoint detects these trailing accounts and collects the configured fee
+4. SOL is transferred from payer to a randomly selected treasury shard
+5. `FeeRecord` counters are updated (`tx_count`, `wallet_count`, `total_fees_paid`)
+6. The 4 protocol accounts are stripped before passing to the processor — processor is unchanged
+
+Fee collection applies to: `CreateWallet`, `Execute`, and `ExecuteDeferred`.
+
+---
+
+## Architecture
+
+<Mermaid chart={`
+flowchart LR
+    P[Payer] -->|SOL fee| E{Entrypoint}
+    E -.->|updates| FR[FeeRecord]
+    E -->|random shard| S0[Shard 0]
+    E -->|random shard| S1[Shard 1]
+    E -->|random shard| SN[Shard N]
+    S0 & S1 & SN -->|admin withdraws| T([Treasury])
+`} />
+
+### Sharded Treasury
+
+Fees route to one of N shards (e.g. 16), selected randomly per transaction. This eliminates write contention — parallel transactions hit different shards without blocking each other.
+
+Admin calls `WithdrawTreasury` once per shard to sweep accumulated SOL to the treasury address.
+
+---
+
+## On-Chain Accounts
+
+### ProtocolConfig — `["protocol_config"]`
+
+Global configuration. Set once via `InitializeProtocol`.
+
+| Field | Description |
+|---|---|
+| `admin` | Protocol admin pubkey |
+| `treasury` | Withdrawal destination |
+| `creation_fee` | Lamports per `CreateWallet` |
+| `execution_fee` | Lamports per `Execute` / `ExecuteDeferred` |
+| `enabled` | 0 = disabled, 1 = enabled |
+| `num_shards` | Number of treasury shards |
+
+### FeeRecord — `["fee_record", payer_pubkey]`
+
+Created by admin via `RegisterPayer`. One per integrator.
+
+| Field | Description |
+|---|---|
+| `total_fees_paid` | Cumulative lamports paid — used for token reward distribution |
+| `tx_count` | Fee-eligible transaction count |
+| `wallet_count` | Wallets created by this payer |
+| `registered_at` | Registration slot |
+
+### TreasuryShard — `["treasury_shard", shard_id]`
+
+8-byte account. SOL accumulates as lamport balance. Created once per shard via `InitializeTreasuryShard`.
+
+---
+
+## Fee Amounts
+
+Fees are configurable. The current values are set by the protocol admin.
+
+| Instruction | Typical Fee |
+|---|---|
+| CreateWallet | ~5,000 lamports |
+| Execute | ~2,000 lamports |
+| ExecuteDeferred | ~2,000 lamports |
+
+Per fee-eligible transaction overhead: ~3,000 additional CU and +128 bytes (4 extra accounts).
+
+---
+
+## Token Reward Distribution
+
+`FeeRecord.total_fees_paid` tracks cumulative fees per payer proportional to usage. When the protocol token launches, rewards are distributed based on this data:
+
+1. Snapshot all `FeeRecord` accounts via `getProgramAccounts` (filter by discriminator `6`)
+2. Calculate share: `payer_share = total_fees_paid / sum_all_fees`
+3. Distribute via merkle airdrop or direct transfer
+
+---
+
+## Current Status
+
+- Protocol fee system is live on Solana mainnet
+- Fee collection operates in native SOL
+- Protocol token for governance and fee settlement is not yet deployed
+- Future: open Paymaster competition where multiple providers compete on sponsorship terms

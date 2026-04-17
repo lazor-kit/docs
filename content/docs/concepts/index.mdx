@@ -1,0 +1,35 @@
+---
+title: Concepts
+description: Core protocol concepts behind LazorKit — smart wallets, session keys, RBAC, and the paymaster.
+---
+
+# Concepts
+
+LazorKit is built on four protocol primitives. Understanding these is useful if you are integrating at the contract level or building on top of the execution layer.
+
+<Cards>
+  <Card
+    title="Smart Wallet"
+    description="Passkey-controlled on-chain account (PDA). Authentication, account structure, roles, and lifecycle."
+    href="/concepts/smart-wallet"
+  />
+  <Card
+    title="Session Keys"
+    description="Scoped, time-bound delegation keys. Action types, spending limits, deferred execution, and revocation."
+    href="/concepts/session-keys"
+  />
+  <Card
+    title="RBAC"
+    description="On-chain permission model. Owner, Admin, and Spender roles with a strict enforcement hierarchy."
+    href="/concepts/rbac"
+  />
+  <Card
+    title="Paymaster"
+    description="Gas abstraction and fee sponsorship. How fees are collected, routed, and tracked per integrator."
+    href="/concepts/paymaster"
+  />
+</Cards>
+
+<Callout type="info">
+  These concepts are independent but work together in every execution flow. See the [Protocol Overview](/protocol) for how they interact end-to-end.
+</Callout>

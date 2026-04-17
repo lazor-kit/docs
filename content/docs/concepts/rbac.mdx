@@ -1,0 +1,83 @@
+---
+title: RBAC
+description: Role-based access control in LazorKit — Owner, Admin, and Spender roles and what each can do.
+---
+
+# RBAC
+
+LazorKit enforces a three-tier role hierarchy on-chain. Every authority PDA stores a role, and every state-modifying instruction verifies the caller's role before executing.
+
+---
+
+## Roles
+
+| Role | Value | Description |
+|---|---|---|
+| Owner | 0 | Full control over the wallet |
+| Admin | 1 | Operational control — no ownership changes |
+| Spender | 2 | Execute only |
+
+---
+
+## Permission Matrix
+
+| Instruction | Owner | Admin | Spender |
+|---|---|---|---|
+| Execute | Yes | Yes | Yes |
+| CreateSession | Yes | Yes | No |
+| RevokeSession | Yes | Yes | No |
+| AddAuthority (any role) | Yes | No | No |
+| AddAuthority (Spender only) | Yes | Yes | No |
+| RemoveAuthority | Yes | Yes | No |
+| TransferOwnership | Yes | No | No |
+| Authorize (Deferred TX1) | Yes (Secp256r1 only) | Yes (Secp256r1 only) | No |
+
+---
+
+## Role Details
+
+### Owner
+
+Full control. The only role that can:
+- Add authorities of any role (Owner, Admin, Spender)
+- Transfer ownership atomically to a new key
+- Remove any non-owner authority
+
+A wallet starts with exactly one owner (the key used at `CreateWallet`). There is no on-chain enforcement preventing multiple owners, but `TransferOwnership` atomically closes the old owner PDA.
+
+### Admin
+
+Operational access without ownership control. Admins can:
+- Add **Spender** authorities only — cannot elevate to Admin or Owner
+- Create and revoke sessions
+- Execute instructions via CPI
+
+Admins cannot modify ownership or add higher-privilege keys.
+
+### Spender
+
+Execution-only access. Spenders can only call `Execute`. They cannot create sessions, manage authorities, or modify any wallet state.
+
+---
+
+## Role Storage
+
+Each authority has a separate PDA. The role is stored as a `u8` in `AuthorityAccountHeader.role`. There is no in-place role update instruction — to change a key's role, remove and re-add the authority.
+
+```
+AuthorityAccountHeader
+  discriminator: u8   // 2 = Authority
+  authority_type: u8  // 0 = Ed25519, 1 = Secp256r1
+  role: u8            // 0 = Owner, 1 = Admin, 2 = Spender
+  bump: u8
+  ...
+```
+
+---
+
+## Enforcement Notes
+
+- **Owner cannot be removed** directly — `RemoveAuthority` rejects removal of the wallet's owner. Use `TransferOwnership` instead.
+- **Admin cannot self-escalate** — adding an Admin or Owner authority requires an Owner signature.
+- **Deferred execution (Authorize)** is restricted to Secp256r1 Owner or Admin — Ed25519 signers and Spenders cannot call it.
+- **CPI reentrancy** is blocked via stack height check — no instruction can re-enter the LazorKit program via CPI.

@@ -1,0 +1,133 @@
+---
+title: Smart Wallet
+description: How LazorKit smart wallets work — passkey authentication, PDA structure, roles, and lifecycle.
+---
+
+# Smart Wallet
+
+A LazorKit smart wallet is a group of on-chain accounts controlled by the LazorKit program. The owner authenticates via WebAuthn (passkey) or Ed25519 — no seed phrase or browser extension required.
+
+---
+
+## Account Structure
+
+<Mermaid chart={`
+graph TD
+    W[Wallet PDA] --> V[Vault PDA]
+    W --> A1[Owner Authority PDA]
+    W --> A2[Admin Authority PDA]
+    W --> A3[Spender Authority PDA]
+    W --> S1[Session PDA - App]
+    W --> S2[Session PDA - Agent]
+`} />
+
+| Account | Seeds | Size | Description |
+|---|---|---|---|
+| Wallet PDA | `["wallet", user_seed]` | 8 bytes | Identity anchor |
+| Vault PDA | `["vault", wallet]` | 0 bytes | Holds SOL and tokens |
+| Authority PDA | `["authority", wallet, id_hash]` | 48+ bytes | Per-key auth with role + counter |
+| Session PDA | `["session", wallet, session_key]` | 80+ bytes | Ephemeral sub-key with spending limits |
+
+### Wallet PDA
+
+Minimal 8-byte account. Acts as the identity anchor. The `user_seed` (32 bytes) is chosen at creation time.
+
+### Vault PDA
+
+Zero-data account that holds SOL and tokens. The program signs for it via PDA seeds during `Execute`. No rent required.
+
+### Authority PDA
+
+Each authorized key gets its own PDA. Key fields:
+
+- `authority_type` — `Ed25519` (0) or `Secp256r1` (1)
+- `role` — `Owner` (0) / `Admin` (1) / `Spender` (2)
+- `counter` — monotonic u32 for Secp256r1 replay protection
+- variable data — pubkey for Ed25519; `credential_id_hash` + `compressed_pubkey` + `rpId` for Secp256r1
+
+One PDA per authority means **different authorities on the same wallet execute in parallel** — the only writable account during `Execute` is the caller's own authority PDA (counter increment). Wallet and vault are read-only.
+
+---
+
+## Authentication
+
+**Secp256r1 (Passkey)**
+
+WebAuthn credentials bound to the device's Secure Enclave (FaceID, TouchID, Windows Hello). The credential never leaves the device. On-chain verification uses the Secp256r1 precompile and enforces:
+
+- **Odometer counter** — monotonic u32 per authority. Client submits `stored_counter + 1`. Committed only after successful verification.
+- **Slot freshness** — auth payload slot must be within 150 slots of `Clock::get()`.
+- **CPI protection** — stack height check prevents passkey auth via CPI.
+- **Accounts hash** — signed payload binds to all account pubkeys, preventing account-swap attacks.
+
+**Ed25519**
+
+Standard Solana keypair. Verified by the Solana runtime. No counter required.
+
+---
+
+## Roles
+
+| Role | Value | Permissions |
+|---|---|---|
+| Owner | 0 | Full control — add/remove any authority, transfer ownership, create/revoke sessions, execute |
+| Admin | 1 | Add Spender authorities, create/revoke sessions, execute |
+| Spender | 2 | Execute only |
+
+See [RBAC](./rbac) for the full permission breakdown.
+
+---
+
+## Wallet Lifecycle
+
+### Create
+
+```typescript
+const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
+  payer: payer.publicKey,
+  userSeed: crypto.randomBytes(32),
+  owner: {
+    type: 'secp256r1',
+    credentialIdHash,     // 32-byte SHA256 of WebAuthn credential ID
+    compressedPubkey,     // 33-byte compressed Secp256r1 public key
+    rpId: 'your-app.com',
+  },
+});
+```
+
+Creates Wallet PDA, Vault PDA, and the first Authority PDA in one transaction.
+
+### Add Authority
+
+Adds an additional key. Owner can add any role; Admin can only add Spender.
+
+### Remove Authority
+
+Closes the authority PDA and refunds rent to a specified destination. Prevents self-removal and removal of the last owner.
+
+### Transfer Ownership
+
+Atomically closes the old owner PDA and creates a new owner PDA. Refunds old owner's rent to an explicit destination.
+
+---
+
+## Wallet Lookup
+
+Find wallets by credential hash — no need to store `walletPda` client-side:
+
+```typescript
+const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
+// Returns: { walletPda, authorityPda, vaultPda, role, authorityType }
+```
+
+---
+
+## Costs
+
+| Auth Type | Wallet Creation | Execute (per tx) |
+|---|---|---|
+| Ed25519 | 0.002399 SOL | 0.000005 SOL |
+| Secp256r1 (Passkey) | 0.002713 SOL | 0.000005 SOL |
+| Session Key | 0.001453 SOL (one-time setup) | 0.000005 SOL |
+
+At $150/SOL, wallet creation is ~$0.36–$0.41. Session setup is ~$0.22, with subsequent executes at ~$0.00075 each.
