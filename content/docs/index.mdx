@@ -1,53 +1,59 @@
 ---
 title: LazorKit Documentation
-description: Documentation for LazorKit SDKs.
+description: Documentation for LazorKit — execution layer for Web3.
 ---
 
-LazorKit allows you to build **Passkey-native** Solana applications.
+LazorKit is an execution layer for Solana. It handles **passkey authentication**, **session key delegation**, **gas sponsorship**, and **on-chain permission enforcement** — so your app or agent can go from user intent to on-chain action without the usual friction.
 
-Traditionally, crypto requires users to manage complex seed phrases. LazorKit replaces this with the standard biometrics users already know: **FaceID**, **TouchID**, or **Windows Hello**.
-
-By leveraging WebAuthn and smart accounts (PDAs), LazorKit provides a **seedless** onboarding experience that is both secure and familiar—turning every device into a hardware wallet.
+<Callout type="info" title="New here?">
+  Start with the [Protocol Overview](/protocol) to understand how the system works end-to-end, then pick the SDK that fits your stack.
+</Callout>
 
 ---
 
 ## SDKs
 
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-8">
-  <div className="p-6 border rounded-lg hover:border-blue-500 transition-colors">
-    <h3 className="text-xl font-bold mb-2">React Native SDK</h3>
-    <div className="text-gray-600 mb-4">
-      React Native bindings for iOS and Android. Implements native passkey integration and secure storage.
-    </div>
-    <a href="/react-native-sdk" className="text-blue-500 font-medium hover:underline">
-      React Native Documentation &rarr;
-    </a>
-  </div>
+<Cards>
+  <Card
+    title="React SDK"
+    description="Hooks and components for web apps. Browser-based passkey auth via WebAuthn."
+    href="/react-sdk"
+  />
+  <Card
+    title="React Native SDK"
+    description="Native iOS and Android bindings. Integrates with device Secure Enclave."
+    href="/react-native-sdk"
+  />
+  <Card
+    title="web3.js v1 SDK"
+    description="Direct contract interaction via LazorKitClient. Full access to all protocol instructions."
+    href="/web3js-v1"
+  />
+  <Card
+    title="web3.js v2 SDK"
+    description="Coming soon. Same capabilities as v1 built on the new @solana/web3.js v2 API."
+    href="/web3js-v2"
+  />
+</Cards>
 
-  <div className="p-6 border rounded-lg hover:border-blue-500 transition-colors">
-    <h3 className="text-xl font-bold mb-2">React SDK</h3>
-    <div className="text-gray-600 mb-4">
-      React hooks and components for web applications. Supports browser-based WebAuthn authentication.
-    </div>
-    <a href="/react-sdk" className="text-blue-500 font-medium hover:underline">
-      React Documentation &rarr;
-    </a>
-  </div>
-</div>
+---
 
-## Core Concepts
+## Protocol
 
-### Biometric Authentication
-LazorKit uses WebAuthn credentials (Passkeys) for signing. Instead of handling keys directly, a hardware-bound credential is created in your device's Secure Enclave (TouchID, FaceID, or Windows Hello). The secret material never leaves the device.
+<Cards>
+  <Card
+    title="Protocol Overview"
+    description="System architecture, execution flow, economic model, and current status."
+    href="/protocol"
+  />
+  <Card
+    title="Concepts"
+    description="Deep dives into Smart Wallets, Session Keys, RBAC, and the Paymaster."
+    href="/concepts"
+  />
+</Cards>
 
-### Smart Wallets
-Accounts are Program Derived Addresses (PDAs) controlled by the LazorKit on-chain program.
-- **Recovery**: Logic for key rotation and recovery.
-- **Policies**: On-chain spending limits and access controls.
-- **Session Keys**: Ephemeral keys for scoped application access.
-
-### Paymaster
-The Paymaster service enables gas sponsorship. Transactions can be paid for by an external relayer, removing the requirement for users to hold SOL for network fees.
+---
 
 ## Resources
 

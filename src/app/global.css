@@ -1,3 +1,29 @@
 @import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/ocean.css';
 @import 'fumadocs-ui/css/preset.css';
+
+/* LazorKit brand tweaks on top of ocean theme */
+
+/* Tighten up sidebar font size slightly */
+#nd-sidebar {
+  font-size: 0.875rem;
+}
+
+/* Subtle blue glow on active sidebar items */
+#nd-sidebar [data-active='true'] {
+  box-shadow: inset 2px 0 0 var(--color-fd-primary);
+}
+
+/* Make code inline feel sharper */
+.prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
+  font-size: 0.85em;
+}
+
+/* Slightly tighter heading spacing */
+.prose h2 {
+  margin-top: 2rem;
+}
+
+.prose h3 {
+  margin-top: 1.5rem;
+}

@@ -17,5 +17,12 @@ export function baseOptions(): BaseLayoutProps {
         </div>
       ),
     },
+    links: [
+      {
+        text: 'GitHub',
+        url: 'https://github.com/lazor-kit',
+        external: true,
+      },
+    ],
   };
 }
