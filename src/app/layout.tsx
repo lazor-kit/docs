@@ -12,6 +12,7 @@ export const metadata: Metadata = {
     default: 'LazorKit Documentation',
   },
   description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
+  metadataBase: new URL(SITE_URL),
   icons: {
     icon: '/logo.jpg',
     apple: '/logo.jpg',
@@ -22,20 +23,11 @@ export const metadata: Metadata = {
     description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
     url: SITE_URL,
     type: 'website',
-    images: [
-      {
-        url: `${SITE_URL}/og/image.jpg`,
-        width: 1200,
-        height: 630,
-        alt: 'LazorKit Documentation',
-      },
-    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'LazorKit Documentation',
     description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
-    images: [`${SITE_URL}/og/image.jpg`],
   },
 };
 
