@@ -3,6 +3,8 @@ title: LazorKit Documentation
 description: Documentation for LazorKit — execution layer for Web3.
 ---
 
+import { Globe, Smartphone, Code, Zap, Layers, BookOpen } from 'lucide-react'
+
 LazorKit is an execution layer for Solana. It handles **passkey authentication**, **session key delegation**, **gas sponsorship**, and **on-chain permission enforcement** — so your app or agent can go from user intent to on-chain action without the usual friction.
 
 <Callout type="info" title="New here?">
@@ -15,21 +17,25 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
 
 <Cards>
   <Card
+    icon={<Globe />}
     title="React SDK"
     description="Hooks and components for web apps. Browser-based passkey auth via WebAuthn."
     href="/react-sdk"
   />
   <Card
+    icon={<Smartphone />}
     title="React Native SDK"
     description="Native iOS and Android bindings. Integrates with device Secure Enclave."
     href="/react-native-sdk"
   />
   <Card
+    icon={<Code />}
     title="web3.js v1 SDK"
     description="Direct contract interaction via LazorKitClient. Full access to all protocol instructions."
     href="/web3js-v1"
   />
   <Card
+    icon={<Zap />}
     title="web3.js v2 SDK"
     description="Coming soon. Same capabilities as v1 built on the new @solana/web3.js v2 API."
     href="/web3js-v2"
@@ -42,11 +48,13 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
 
 <Cards>
   <Card
+    icon={<Layers />}
     title="Protocol Overview"
     description="System architecture, execution flow, economic model, and current status."
     href="/protocol"
   />
   <Card
+    icon={<BookOpen />}
     title="Concepts"
     description="Deep dives into Smart Wallets, Session Keys, RBAC, and the Paymaster."
     href="/concepts"
