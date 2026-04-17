@@ -10,6 +10,8 @@ import { getMDXComponents } from '@/mdx-components';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 
+const SITE_URL = 'https://docs.lazorkit.com';
+
 export default async function Page(props: PageProps<'/[[...slug]]'>) {
   const params = await props.params;
   const page = source.getPage(params.slug);
@@ -44,11 +46,22 @@ export async function generateMetadata(
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const ogImage = `${SITE_URL}${getPageImage(page).url}`;
+
   return {
     title: page.data.title,
     description: page.data.description,
     openGraph: {
-      images: getPageImage(page).url,
+      title: page.data.title,
+      description: page.data.description,
+      url: `${SITE_URL}/${page.slugs.join('/')}`,
+      images: [{ url: ogImage, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: page.data.title,
+      description: page.data.description,
+      images: [ogImage],
     },
   };
 }

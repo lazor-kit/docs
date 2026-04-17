@@ -4,22 +4,38 @@ import { Inter } from 'next/font/google';
 
 import type { Metadata } from 'next';
 
+const SITE_URL = 'https://docs.lazorkit.com';
+
 export const metadata: Metadata = {
   title: {
     template: '%s | LazorKit',
     default: 'LazorKit Documentation',
   },
-  description: 'LazorKit Wallet Adapter Documentation',
+  description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
   icons: {
     icon: '/logo.jpg',
     apple: '/logo.jpg',
   },
   openGraph: {
     siteName: 'LazorKit',
-    title: {
-      template: '%s | LazorKit',
-      default: 'LazorKit Documentation',
-    },
+    title: 'LazorKit Documentation',
+    description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
+    url: SITE_URL,
+    type: 'website',
+    images: [
+      {
+        url: `${SITE_URL}/og/image.jpg`,
+        width: 1200,
+        height: 630,
+        alt: 'LazorKit Documentation',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'LazorKit Documentation',
+    description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
+    images: [`${SITE_URL}/og/image.jpg`],
   },
 };
 
