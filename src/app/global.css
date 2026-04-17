@@ -90,6 +90,11 @@
   font-size: 0.875rem;
 }
 
+/* Center callout icon vertically */
+.my-4.rounded-xl > svg {
+  align-self: center;
+}
+
 /* Make code inline feel sharper */
 .prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)) {
   font-size: 0.85em;
