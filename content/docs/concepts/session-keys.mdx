@@ -7,6 +7,15 @@ description: How session keys work in LazorKit — delegation, scope, action typ
 
 A session key is an ephemeral keypair with an expiry slot and optional action constraints. It lets an app or agent execute transactions on behalf of a wallet without triggering a passkey prompt on every operation.
 
+<Callout type="info" title="When to use session keys">
+  Session keys are for **delegation** — giving an app or agent the ability to execute on a user's behalf within a defined scope. They are not required for direct user execution. A wallet owner can execute transactions at any time using their passkey authority directly, with no session key involved.
+
+  Use a session key when:
+  - An agent or bot needs to execute on a schedule without the user present
+  - An app needs to batch or automate actions without prompting the user on every transaction
+  - You want to constrain what an executor can do (program, value, expiry)
+</Callout>
+
 ---
 
 ## How It Works
