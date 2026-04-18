@@ -1,24 +1,52 @@
 ---
 title: Paymaster
-description: How the LazorKit protocol fee system works — fee collection, treasury sharding, and payer tracking.
+description: How gas sponsorship and protocol fee collection work in LazorKit — the Paymaster service, fee_payer economics, and on-chain FeeRecord tracking.
 ---
 
 # Paymaster
 
-The Paymaster is LazorKit's on-chain fee collection and gas sponsorship layer. It handles protocol revenue, tracks integrator activity, and routes funds to a sharded treasury.
+The Paymaster is the entity that sponsors gas for LazorKit transactions. It acts as the transaction's `fee_payer` on Solana — signs the transaction, pays the SOL required for gas, and submits it on-chain.
+
+<Callout type="info" title="In practice, the developer is the Paymaster">
+  Most LazorKit integrations do not use a third-party Paymaster service. The **developer (integrator) is the `fee_payer`** — they fund their users' wallet creation and execution directly.
+
+  The developer recoups the cost through **app-level monetization** — on-ramp markups, subscription fees, product fees, in-app purchases, or direct token collection. LazorKit doesn't prescribe this layer; it only cares about the `fee_payer` pubkey on-chain.
+
+  The developer's `fee_payer` pubkey is tracked in `FeeRecord` — that's the basis for early contributor rewards at token launch. **If you sponsor your users' fees, you earn.**
+</Callout>
 
 ---
 
-## How It Works
+## Economic Flow
 
-Fee collection is **opt-in per payer**. If a payer has no `FeeRecord` on-chain, no fee is charged — the protocol behaves identically to the open-source version.
+<Mermaid chart={`
+flowchart LR
+    U([User]) -->|on-ramp fee / subscription / in-app| D[Developer / Paymaster\nfee_payer]
+    D -->|SOL gas + protocol fee| LK[LazorKit program]
+    LK -->|records fee_payer| FR[FeeRecord PDA]
+    LK --> Sol([Solana])
+`} />
 
-When a payer is registered:
+- **User pays** — the developer, through app-level monetization. The mechanism is the dev's choice.
+- **Developer pays (as `fee_payer`)** — SOL for gas + LazorKit's protocol fee. Recouped from the user via the app.
+- **LazorKit earns** — the protocol fee, recorded against the developer's `fee_payer` pubkey.
 
-1. SDK detects the `FeeRecord` PDA keyed by the payer's pubkey (RPC call, cached)
+The end user never needs to hold SOL. The developer acts as the economic bridge: takes value from the user in whatever form their app supports (USDC, fiat on-ramp, subscription, product fees), and pays protocol costs in SOL.
+
+---
+
+## Protocol Fee Collection
+
+LazorKit captures a protocol fee on sponsored transactions. The fee is deducted from the transaction's `fee_payer` — which is the Paymaster, not the end user.
+
+Fee collection is **opt-in per fee_payer**. If a `fee_payer` has no `FeeRecord` on-chain, no fee is charged — the protocol behaves identically to the open-source version.
+
+When a `fee_payer` is registered:
+
+1. SDK detects the `FeeRecord` PDA keyed by the `fee_payer`'s pubkey (RPC call, cached)
 2. SDK appends 4 accounts to the transaction: `[protocol_config, fee_record, treasury_shard, system_program]`
 3. Entrypoint detects these trailing accounts and collects the configured fee
-4. SOL is transferred from payer to a randomly selected treasury shard
+4. SOL is transferred from the `fee_payer` (the Paymaster) to a randomly selected treasury shard
 5. `FeeRecord` counters are updated (`tx_count`, `wallet_count`, `total_fees_paid`)
 6. The 4 protocol accounts are stripped before passing to the processor — processor is unchanged
 
@@ -30,7 +58,7 @@ Fee collection applies to: `CreateWallet`, `Execute`, and `ExecuteDeferred`.
 
 <Mermaid chart={`
 flowchart LR
-    P[Payer] -->|SOL fee| E{Entrypoint}
+    P[fee_payer / Paymaster] -->|SOL fee| E{Entrypoint}
     E -.->|updates| FR[FeeRecord]
     E -->|random shard| S0[Shard 0]
     E -->|random shard| S1[Shard 1]
@@ -61,16 +89,20 @@ Global configuration. Set once via `InitializeProtocol`.
 | `enabled` | 0 = disabled, 1 = enabled |
 | `num_shards` | Number of treasury shards |
 
-### FeeRecord — `["fee_record", payer_pubkey]`
+### FeeRecord — `["fee_record", fee_payer_pubkey]`
 
-Created by admin via `RegisterPayer`. One per integrator.
+Created by admin via `RegisterPayer`. One per `fee_payer` — typically one per Paymaster operator.
 
 | Field | Description |
 |---|---|
-| `total_fees_paid` | Cumulative lamports paid — used for token reward distribution |
+| `total_fees_paid` | Cumulative lamports paid — basis for early contributor rewards |
 | `tx_count` | Fee-eligible transaction count |
-| `wallet_count` | Wallets created by this payer |
+| `wallet_count` | Wallets created via this `fee_payer` |
 | `registered_at` | Registration slot |
+
+FeeRecord currently tracks the **`fee_payer`** — the developer (or Paymaster service) that sponsored the transaction. This data is the basis for rewarding early contributors: developers that funded protocol activity before the token launched.
+
+Future: a parallel tracking mechanism may be added for end users, so that users can also be recognized for their protocol usage.
 
 ### TreasuryShard — `["treasury_shard", shard_id]`
 
@@ -80,7 +112,7 @@ Created by admin via `RegisterPayer`. One per integrator.
 
 ## Fee Amounts
 
-Fees are configurable. The current values are set by the protocol admin.
+Fees are configurable. Current values are set by the protocol admin.
 
 | Instruction | Typical Fee |
 |---|---|
@@ -92,13 +124,17 @@ Per fee-eligible transaction overhead: ~3,000 additional CU and +128 bytes (4 ex
 
 ---
 
-## Token Reward Distribution
+## Early Contributor Rewards
 
-`FeeRecord.total_fees_paid` tracks cumulative fees per payer proportional to usage. When the protocol token launches, rewards are distributed based on this data:
+`FeeRecord.total_fees_paid` tracks cumulative fees per `fee_payer` proportional to the volume of activity they sponsored. When the protocol token launches, early contributor rewards are distributed based on this data:
 
 1. Snapshot all `FeeRecord` accounts via `getProgramAccounts` (filter by discriminator `6`)
-2. Calculate share: `payer_share = total_fees_paid / sum_all_fees`
+2. Calculate share: `contributor_share = total_fees_paid / sum_all_fees`
 3. Distribute via merkle airdrop or direct transfer
+
+**The intent — for developers:** if you build on LazorKit and pay for your users' wallet creation and transactions, your `fee_payer` pubkey accumulates SOL paid into `FeeRecord`. That's your reward claim. The more user activity you sponsor in the early phase, the larger your share of the token launch.
+
+This is a direct growth incentive: LazorKit does not take a cut from your app-level revenue, and it rewards you in protocol tokens for the protocol fees you funded on behalf of your users. User-level tracking may be added later so end users can share in this as well.
 
 ---
 
@@ -107,4 +143,4 @@ Per fee-eligible transaction overhead: ~3,000 additional CU and +128 bytes (4 ex
 - Protocol fee system is live on Solana mainnet
 - Fee collection operates in native SOL
 - Protocol token for governance and fee settlement is not yet deployed
-- Future: open Paymaster competition where multiple providers compete on sponsorship terms
+- Future: open Paymaster competition where multiple providers compete on sponsorship terms (rates, supported tokens, SLAs)
