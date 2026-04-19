@@ -76,8 +76,9 @@
     );
 }
 
-/* Active sidebar item — pressed button style */
-#nd-sidebar [data-active='true'] {
+/* Active sidebar item — pressed button style (desktop + mobile) */
+#nd-sidebar [data-active='true'],
+#nd-sidebar-mobile [data-active='true'] {
   background-color: color-mix(in srgb, var(--color-fd-primary) 15%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-fd-primary) 35%, transparent);
   color: var(--color-fd-primary);
@@ -86,8 +87,15 @@
 }
 
 /* Tighten up sidebar font size slightly */
-#nd-sidebar {
+#nd-sidebar,
+#nd-sidebar-mobile {
   font-size: 0.875rem;
+}
+
+/* Mobile sidebar backdrop — semi-transparent dark overlay */
+#nd-sidebar-mobile + div,
+div.fixed.inset-0.backdrop-blur-xs {
+  background-color: rgba(0, 0, 0, 0.45);
 }
 
 /* Center callout icon vertically */
