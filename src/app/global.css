@@ -92,9 +92,8 @@
   font-size: 0.875rem;
 }
 
-/* Mobile sidebar backdrop — semi-transparent dark overlay */
-#nd-sidebar-mobile + div,
-div.fixed.inset-0.backdrop-blur-xs {
+/* Mobile sidebar backdrop — semi-transparent dark overlay (only when open) */
+div.fixed.inset-0.backdrop-blur-xs[data-state='open'] {
   background-color: rgba(0, 0, 0, 0.45);
 }
 
