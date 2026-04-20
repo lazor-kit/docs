@@ -1,64 +1,52 @@
 ---
 title: Types
-description: TypeScript types and interfaces for the LazorKit web3.js v1 SDK.
+description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-# Types
+Every public type and helper exported from `@lazorkit/sdk-legacy`.
 
----
+## Signer helpers
 
-## Signer Types
-
-Three signer types are used across all client methods:
+Three signer constructors are shared across every `client.*` method that takes a `signer`:
 
 ```typescript
 import { ed25519, session } from '@lazorkit/sdk-legacy';
 
-// Ed25519 keypair signer
 ed25519(publicKey: PublicKey): Ed25519Signer
-
-// Session key signer
 session(sessionPda: PublicKey, sessionKey: PublicKey): SessionSigner
 ```
 
-For Secp256r1 (passkey), use `secp256r1` params directly — the two-phase prepare/finalize flow handles signing.
-
----
-
-## Secp256r1Params
-
-Used for passkey-authenticated operations:
+For Secp256r1 (passkey), pass the `secp256r1` params object directly — the two-phase
+prepare/finalize flow handles the signing round-trip:
 
 ```typescript
 interface Secp256r1Params {
-  credentialIdHash: Buffer;    // 32-byte SHA256 of WebAuthn credential ID
-  publicKeyBytes: Buffer;      // 33-byte compressed Secp256r1 public key
-  authorityPda: PublicKey;     // Authority PDA for this credential
+  /** 32-byte SHA256 of the WebAuthn credential ID. */
+  credentialIdHash: Uint8Array;
+  /** 33-byte compressed pubkey. Auto-fetched from the on-chain Authority if omitted. */
+  publicKeyBytes?: Uint8Array;
+  /** Pre-derived Authority PDA. Auto-derived from credentialIdHash if omitted. */
+  authorityPda?: PublicKey;
+  /** Override slot (auto-fetched from the connection if omitted). */
+  slotOverride?: bigint;
 }
 ```
 
----
-
-## WebAuthnResponse
-
-Returned by the browser authenticator, passed to `finalize*` methods:
-
-```typescript
-interface WebAuthnResponse {
-  signature: Buffer;           // DER-encoded Secp256r1 signature
-  authenticatorData: Buffer;   // WebAuthn authenticator data
-  clientDataJSON: Buffer;      // Raw clientDataJSON bytes from authenticator
-}
-```
+<Callout type="info" title="Only credentialIdHash is strictly required">
+  Since v1.8 (upstream commit `830229e`), `publicKeyBytes` and `authorityPda` are optional.
+  Pass only `credentialIdHash` and the client reads the pubkey off-chain and derives the
+  PDA for you. Keeps client state minimal — you only persist the credential ID (or its
+  hash) per user.
+</Callout>
 
 ---
 
-## CreateWalletParams
+## `CreateWalletParams`
 
 ```typescript
 interface CreateWalletParams {
   payer: PublicKey;
-  userSeed: Buffer;            // 32 bytes, unique per wallet
+  userSeed: Buffer;                                        // 32 bytes, unique per wallet
   owner: Ed25519OwnerParams | Secp256r1OwnerParams;
 }
 
@@ -77,23 +65,57 @@ interface Secp256r1OwnerParams {
 
 ---
 
-## SessionAction
+## `WebAuthnResponse`
+
+Returned from the browser authenticator; passed into `finalize*` methods:
 
 ```typescript
-type SessionAction =
-  | { type: 'SolLimit'; remaining: bigint }
-  | { type: 'SolRecurringLimit'; limit: bigint; window: bigint }
-  | { type: 'SolMaxPerTx'; max: bigint }
-  | { type: 'TokenLimit'; mint: PublicKey; remaining: bigint }
-  | { type: 'TokenRecurringLimit'; mint: PublicKey; limit: bigint; window: bigint }
-  | { type: 'TokenMaxPerTx'; mint: PublicKey; max: bigint }
-  | { type: 'ProgramWhitelist'; programId: PublicKey }
-  | { type: 'ProgramBlacklist'; programId: PublicKey };
+interface WebAuthnResponse {
+  signature: Buffer;           // DER-encoded Secp256r1 signature
+  authenticatorData: Buffer;   // WebAuthn authenticator data
+  clientDataJSON: Buffer;      // Raw clientDataJSON bytes
+}
 ```
 
 ---
 
-## WalletLookupResult
+## `SessionAction`
+
+Union of all on-chain action types. See [Session Keys concept](/concepts/session-keys#actions-reference)
+for semantics.
+
+```typescript
+type SessionAction =
+  | { type: 'SolLimit'; remaining: bigint; expiresAt?: bigint }
+  | { type: 'SolRecurringLimit'; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: 'SolMaxPerTx'; max: bigint; expiresAt?: bigint }
+  | { type: 'TokenLimit'; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
+  | { type: 'TokenRecurringLimit'; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: 'TokenMaxPerTx'; mint: PublicKey; max: bigint; expiresAt?: bigint }
+  | { type: 'ProgramWhitelist'; programId: PublicKey; expiresAt?: bigint }
+  | { type: 'ProgramBlacklist'; programId: PublicKey; expiresAt?: bigint };
+```
+
+### `Actions` builders
+
+Prefer the builder helpers — they match the object shape exactly and are easier to read:
+
+```typescript
+import { Actions } from '@lazorkit/sdk-legacy';
+
+Actions.solLimit(lamports, expiresAt?)
+Actions.solRecurringLimit({ limit, window, expiresAt? })
+Actions.solMaxPerTx(lamports, expiresAt?)
+Actions.tokenLimit({ mint, remaining, expiresAt? })
+Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
+Actions.tokenMaxPerTx({ mint, max, expiresAt? })
+Actions.programWhitelist(programId, expiresAt?)
+Actions.programBlacklist(programId, expiresAt?)
+```
+
+---
+
+## `WalletLookupResult`
 
 Returned by `findWalletsByAuthority`:
 
@@ -101,51 +123,87 @@ Returned by `findWalletsByAuthority`:
 interface WalletLookupResult {
   walletPda: PublicKey;
   authorityPda: PublicKey;
-  vaultPda: PublicKey;
-  role: 0 | 1 | 2;            // 0=Owner, 1=Admin, 2=Spender
-  authorityType: 0 | 1;       // 0=Ed25519, 1=Secp256r1
+  vaultPda: PublicKey;                       // ← the address funds live at
+  role: 0 | 1 | 2;                           // 0=Owner, 1=Admin, 2=Spender
+  authorityType: 0 | 1;                      // 0=Ed25519, 1=Secp256r1
 }
 ```
 
 ---
 
-## On-Chain Account Decoders
-
-The SDK exports decoders for reading account state:
+## PDA derivation
 
 ```typescript
-import { decodeWalletAccount, decodeAuthorityAccount, decodeSessionAccount } from '@lazorkit/sdk-legacy';
+import {
+  deriveWalletPda,
+  deriveVaultPda,
+  deriveAuthorityPda,
+  deriveSessionPda,
+  deriveDeferredExecPda,
+} from '@lazorkit/sdk-legacy';
 
-const walletAccount = decodeWalletAccount(accountInfo.data);
-const authorityAccount = decodeAuthorityAccount(accountInfo.data);
-const sessionAccount = decodeSessionAccount(accountInfo.data);
+const [walletPda]      = deriveWalletPda(userSeed);
+const [vaultPda]       = deriveVaultPda(walletPda);
+const [authorityPda]   = deriveAuthorityPda(walletPda, credentialIdHash);
+const [sessionPda]     = deriveSessionPda(walletPda, sessionKey);
+const [deferredExecPda] = deriveDeferredExecPda(walletPda, authorityPda, counter);
+```
+
+Every helper returns `[PublicKey, bump]`.
+
+---
+
+## Account decoders
+
+Read on-chain state without manual byte juggling:
+
+```typescript
+import {
+  decodeWalletAccount,
+  decodeAuthorityAccount,
+  decodeSessionAccount,
+  decodeDeferredExecAccount,
+} from '@lazorkit/sdk-legacy';
+
+const info = await connection.getAccountInfo(walletPda);
+const wallet = decodeWalletAccount(info!.data);
+
+const authority = decodeAuthorityAccount(authorityInfo.data);
+console.log(authority.role, authority.counter);
 ```
 
 ---
 
-## PDA Derivation
+## Role & auth constants
 
 ```typescript
-import { deriveWalletPda, deriveVaultPda, deriveAuthorityPda, deriveSessionPda } from '@lazorkit/sdk-legacy';
+export const ROLE_OWNER   = 0;
+export const ROLE_ADMIN   = 1;
+export const ROLE_SPENDER = 2;
 
-const walletPda = deriveWalletPda(userSeed);
-const vaultPda = deriveVaultPda(walletPda);
-const authorityPda = deriveAuthorityPda(walletPda, credentialIdHash);
-const sessionPda = deriveSessionPda(walletPda, sessionKey);
+export const AUTH_TYPE_ED25519   = 0;
+export const AUTH_TYPE_SECP256R1 = 1;
 ```
 
 ---
 
-## Error Codes
-
-| Range | Category |
-|---|---|
-| 3001–3029 | `AuthError` — authentication and permission failures |
-| 4001–4007 | `ProtocolError` — protocol fee system errors |
+## Error utilities
 
 ```typescript
-import { parseError } from '@lazorkit/sdk-legacy';
+import { parseError, extractErrorCode, errorFromCode } from '@lazorkit/sdk-legacy';
 
-const error = parseError(transactionError);
-// Returns: { code: number, name: string, message: string }
+// From a thrown SendTransactionError:
+const parsed = parseError(err);              // { code, name, message }
+const code   = extractErrorCode(err);        // 3024
+const name   = errorFromCode(3024);          // 'ActionSolLimitExceeded'
 ```
+
+Error ranges:
+
+| Range       | Category                                          |
+| ----------- | ------------------------------------------------- |
+| 3001–3019   | `AuthError` — authentication and permission failures |
+| 3020–3029   | `ActionError` — session action violations         |
+| 4001–4007   | `ProtocolError` — protocol fee system errors      |
+
+Full error map in [Troubleshooting › Program errors](/troubleshooting#program-errors-0xbd0-0xbd1-).

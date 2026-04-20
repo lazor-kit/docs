@@ -1,111 +1,249 @@
 ---
 title: useWallet
-description: API reference for the useWallet hook.
+description: Hook API — connect, sign, manage sessions & authorities.
 ---
 
-# `useWallet`
-
-The `useWallet` hook provides methods to interact with the wallet.
-
-```tsx
+```ts
 import { useWallet } from '@lazorkit/wallet';
 ```
 
-## `connect`
+Returns wallet state and every mutation method. WebAuthn runs inline through
+`navigator.credentials` — no redirect, no popup, no `redirectUrl` argument.
 
-Trigger the connection flow. If the user has previously connected, this will try to restore their session automatically without showing a pop-up.
+## Quick reference
 
-### Usage
-
-```tsx
-const { connect } = useWallet();
-await connect({ feeMode: 'paymaster' });
-```
-
-### Arguments
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `options` | `object` | No | Connection options. |
-| `options.feeMode` | `'paymaster' \| 'user'` | No | Fee payment mode (default: 'paymaster'). |
-
-### Returns
-
-`Promise<WalletInfo>` - The connected wallet info object.
+| Method                     | Passkey prompt   | Use for                                                      |
+| -------------------------- | ---------------- | ------------------------------------------------------------ |
+| `connect`                  | yes (first time) | Authenticate; silently restores on repeat visits             |
+| `disconnect`               | no               | Clear local state                                            |
+| `signAndSendTransaction`   | yes              | Single-tx Execute via paymaster                              |
+| `signMessage`              | yes              | Off-chain signature                                          |
+| `verifyMessage`            | no               | Browser-side signature verification via `crypto.subtle`      |
+| `createSession`            | yes              | Mint a scoped Ed25519 session (optional `SpendingLimits`)    |
+| `signAndSendWithSession`   | **no**           | Send using the active session keypair                        |
+| `revokeSession`            | yes              | Close the session, refund rent                               |
+| `addAuthority`             | yes              | Grant an Ed25519 admin / spender (keypair generated + stored)|
+| `signAndSendWithAuthority` | **no**           | Send signed by a stored Ed25519 authority                    |
+| `removeAuthority`          | yes              | Remove any authority by PDA                                  |
+| `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads                    |
 
 ---
 
-## `disconnect`
+## State
 
-Signs the user out and wipes any cached session data from local storage.
+| Field               | Type                 | Notes                                                      |
+| ------------------- | -------------------- | ---------------------------------------------------------- |
+| `smartWalletPubkey` | `PublicKey \| null`  | Vault PDA — where funds live.                              |
+| `wallet`            | `WalletInfo \| null` | Full persisted record.                                     |
+| `isConnected`       | `boolean`            |                                                            |
+| `isLoading`         | `boolean`            | `isConnecting \|\| isSigning \|\| ...`                     |
+| `isConnecting`      | `boolean`            |                                                            |
+| `isSigning`         | `boolean`            |                                                            |
+| `error`             | `Error \| null`      |                                                            |
 
-### Usage
+---
 
-```tsx
-const { disconnect } = useWallet();
+## Connection
+
+### `connect`
+
+Authenticate the user. On first login this prompts the passkey; on repeat visits the
+portal silently re-attaches using the cached credential.
+
+```ts
+const wallet = await connect({ feeMode: 'paymaster' });
+```
+
+| Option     | Type                      | Default       |
+| ---------- | ------------------------- | ------------- |
+| `feeMode`  | `'paymaster' \| 'user'`   | `'paymaster'` |
+
+**Returns** `Promise<WalletInfo>`.
+
+### `disconnect`
+
+```ts
 await disconnect();
 ```
 
-### Returns
-
-`Promise<void>`
+Clears persisted session. The on-chain wallet is untouched.
 
 ---
 
-## `signMessage`
+## Transactions
 
-Requests the user to sign a plain text message using their passkey. This is useful for verifying ownership without sending a transaction.
+### `signAndSendTransaction`
 
-### Usage
+Single-transaction execution for payloads up to ~574 bytes of inner instructions.
 
-```tsx
-const { signMessage } = useWallet();
-const message = 'Hello LazorKit';
-const { signature } = await signMessage(message);
-```
-
-### Arguments
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `message` | `string` | Yes | The message content to sign. |
-
-### Returns
-
-`Promise<{ signature: string, signedPayload: string }>`
-
----
-
-## `signAndSendTransaction`
-
-The core method for executing on-chain actions. It handles signing the transaction with the user's passkey and submitting it via the Paymaster (bundler).
-
-### Usage
-
-```tsx
-const { signAndSendTransaction } = useWallet();
-
-const signature = await signAndSendTransaction({
-  instructions: [/* ... */],
+```ts
+const sig = await signAndSendTransaction({
+  instructions: [ix],
   transactionOptions: {
-    feeToken: 'USDC',
-    computeUnitLimit: 500_000
-  }
+    feeToken: 'USDC',                   // optional — pay fees in any SPL mint
+    computeUnitLimit: 400_000,
+    addressLookupTableAccounts: [alt],
+    clusterSimulation: 'devnet',
+  },
 });
 ```
 
-### Arguments
+**Returns** `Promise<string>` — confirmed signature.
 
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `payload` | `object` | Yes | Transaction payload. |
-| `payload.instructions` | `TransactionInstruction[]` | Yes | Array of Solana instructions. |
-| `payload.transactionOptions` | `object` | No | Configuration options. |
-| `transactionOptions.feeToken` | `string` | No | Token address for gas fees (e.g. USDC). |
-| `transactionOptions.computeUnitLimit` | `number` | No | Max compute units for the transaction. |
-| `transactionOptions.addressLookupTableAccounts` | `AddressLookupTableAccount[]` | No | Lookup tables for versioned (v0) transactions. |
-| `transactionOptions.clusterSimulation` | `'devnet' \| 'mainnet'` | No | Network to use for simulation. |
+### `authorizeAndExecute`
 
-### Returns
+Two-transaction deferred flow for payloads that don't fit in a single tx (Jupiter swaps
+with routes + ATAs, multi-CPI batches). One passkey prompt covers both txs.
 
-`Promise<string>` - The transaction signature.
+```ts
+const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
+```
+
+<Callout type="info" title="How it works">
+  TX1 `Authorize` records a SHA-256 hash of your instruction set. TX2 `ExecuteDeferred`
+  replays the exact instructions — any mismatch is rejected. The SDK submits both and
+  returns TX2's signature.
+</Callout>
+
+---
+
+## Messages
+
+### `signMessage`
+
+Off-chain passkey signature over an arbitrary string.
+
+```ts
+const { signature, signedPayload } = await signMessage('Sign in as user-123');
+```
+
+Both values are base64. Returns `Promise<{ signature: string; signedPayload: string }>`.
+
+### `verifyMessage`
+
+Verify a `signMessage` result in-browser — no RPC call. Useful for server-side auth flows
+that want to validate before hitting the chain.
+
+```ts
+const ok = await verifyMessage({
+  signedPayload,    // Uint8Array
+  signature,        // Uint8Array
+  publicKey,        // Uint8Array — 33-byte compressed secp256r1
+});
+```
+
+**Returns** `Promise<boolean>`.
+
+---
+
+## Session keys
+
+### `createSession`
+
+Mint an Ed25519 session keypair. The SDK persists the private key internally so
+`signAndSendWithSession` can reuse it.
+
+```ts
+const { sessionPda, sessionPublicKey } = await createSession({
+  expiresInSlots: 216_000n,             // ~24h; omit for SDK default
+  spendingLimits: {
+    solLifetimeCap: 5_000_000_000n,     // 5 SOL total
+    solPerTxMax:    500_000_000n,       // 0.5 SOL per tx
+    solRecurring:   {
+      limit: 1_000_000_000n,            // 1 SOL per window
+      windowSlots: 216_000n,            // 24h window
+    },
+  },
+});
+```
+
+| Field              | Type             | Required |
+| ------------------ | ---------------- | -------- |
+| `expiresInSlots`   | `bigint`         | no       |
+| `spendingLimits`   | `SpendingLimits` | no       |
+
+<Callout type="warn" title="Limits are immutable">
+  Session actions can't be changed once created. To adjust, revoke and recreate.
+</Callout>
+
+**Returns** `Promise<{ sessionPda: string; sessionPublicKey: string }>`.
+
+See [`SpendingLimits`](/react-sdk/types#spendinglimits) for the full shape.
+
+### `signAndSendWithSession`
+
+Send a transaction using the currently active session keypair. No passkey prompt.
+
+```ts
+const sig = await signAndSendWithSession({ instructions: [ix] });
+```
+
+Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are hit —
+see [Troubleshooting](/troubleshooting).
+
+### `revokeSession`
+
+```ts
+await revokeSession();
+```
+
+Closes the active session PDA and refunds rent.
+
+---
+
+## Ed25519 authorities
+
+### `addAuthority`
+
+Adds a fresh Ed25519 authority on the smart wallet. The SDK generates the keypair
+internally and persists it for `signAndSendWithAuthority`.
+
+```ts
+import { ROLE_ADMIN, ROLE_SPENDER } from '@lazorkit/wallet';
+
+const { authorityPda, authorityPublicKey } = await addAuthority({
+  role: ROLE_SPENDER,                   // default if omitted
+});
+```
+
+**Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`.
+
+### `signAndSendWithAuthority`
+
+Send a transaction signed by the stored Ed25519 authority. No passkey prompt.
+
+```ts
+const sig = await signAndSendWithAuthority({ instructions: [ix] });
+```
+
+### `removeAuthority`
+
+```ts
+await removeAuthority(targetAuthorityPda);   // base58 string
+```
+
+<Callout type="warn">
+  You can't remove the last Owner. Transfer ownership first — use `LazorKitClient`
+  directly if needed.
+</Callout>
+
+---
+
+## Lower-level escape hatch
+
+Everything from the underlying TS SDK is re-exported:
+
+```ts
+import {
+  LazorKitClient,
+  findWalletPda, findVaultPda, findAuthorityPda,
+  findSessionPda, findDeferredExecPda,
+  Actions,
+  ROLE_OWNER, ROLE_ADMIN, ROLE_SPENDER,
+  AUTH_TYPE_ED25519, AUTH_TYPE_SECP256R1,
+  PublicKey, Connection, Transaction, TransactionInstruction, Keypair,
+} from '@lazorkit/wallet';
+
+const client = new LazorKitClient(connection);
+const list = await client.listAuthorities(walletPda);
+```

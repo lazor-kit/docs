@@ -1,0 +1,79 @@
+---
+title: Changelog
+description: Protocol and SDK changes that affect integrators.
+---
+
+A running log of the changes that move user-visible SDK or on-chain behaviour. Internal
+refactors and perf work are summarised when they affect CU budgets or account sizes.
+
+## 2026-04-20 — Phase 2.1 & API unification
+
+### Breaking
+
+- **Mode 0 dropped.** The Secp256r1 auth path now only supports **raw
+  `clientDataJSON`** from a real browser authenticator. `Secp256r1Signer.sign()` must
+  return `clientDataJson`; the `typeAndFlags` parameter of `buildAuthPayload` is gone.
+  _Bot / programmatic signing should use Ed25519 authorities instead._
+- **Authority account layout changed.** Secp256r1 authorities now store
+  `rpIdHash` (32 bytes) instead of the variable-length `rpId` string.
+  Account size is fixed at **145 bytes** (Ed25519 authorities stay at ~80 bytes).
+  Instruction data for `CreateWallet` / `AddAuthority` / `TransferOwnership` is
+  **unchanged** — clients still send `rpId`; the program hashes it once at write time.
+- **Unified prepare/finalize API.** Every Secp256r1 op now has a matching
+  `client.prepare*` / `client.finalize*` pair — `prepareExecute`/`finalizeExecute`,
+  `prepareCreateSession`/`finalizeCreateSession`, etc. The old `*Prepare` methods that
+  returned an embedded `finalize` closure are gone.
+- **Fee model.** Protocol fee is now charged on **every transaction** when the protocol
+  is enabled — not opt-in per `fee_payer`. Registering a `FeeRecord` is opt-in for
+  **reward tracking**; unregistered payers still pay the fee but don't accumulate a
+  claim at token launch.
+
+### Improvements
+
+- **CU reductions.** Execute Secp256r1: `10,883 → 9,495 CU` (-12.8%). Execute Session:
+  `4,723 → 4,105 CU` (-13.1%). Zero-copy compact instructions + elimination of Vec
+  concats in the hot path.
+- **`publicKeyBytes` auto-fetch.** `Secp256r1Params.publicKeyBytes` is now optional —
+  the client reads the pubkey off the on-chain Authority account via the new
+  `readAuthorityPubkey` helper. Integrators only need to persist `credentialIdHash`
+  per user.
+- **Serializable `DeferredPayload`.** New `serializeDeferredPayload()` /
+  `deserializeDeferredPayload()` helpers turn a payload into JSON-safe bytes. Unblocks
+  cross-machine deferred flows (sign TX1 on the user's device, submit TX2 from a
+  server relayer).
+
+### Security hardening
+
+- `H1` — vault / token invariants enforced around CPIs in session+actions execute
+  (prevents round-trip swap bypass of `SolMaxPerTx`).
+- `H2` — admin paths require program-owned `ProtocolConfig` and `TreasuryShard` accounts
+  (prevents account-spoofing on withdraw / update).
+- `M1` — `clientDataJSON` parser correctly skips strings nested inside objects.
+- `payer` and `adminAuthority` metas switched to writable where required for rent refunds.
+
+### What to do
+
+<Cards>
+  <Card title="RN SDK upgrade guide" href="/react-native-sdk/getting-started"
+    description="wallet-mobile-adapter ≥ 2.0.0 — no code changes for consumers, internal methods renamed." />
+  <Card title="React SDK upgrade guide" href="/react-sdk/getting-started"
+    description="@lazorkit/wallet upgrades bring prepare/finalize + publicKeyBytes optional." />
+  <Card title="web3.js v1 types" href="/web3js-v1/types"
+    description="Updated Secp256r1Params + cross-machine deferred helpers." />
+  <Card title="Troubleshooting" href="/troubleshooting"
+    description="Full error code map kept in sync — including 0xbd0 session exhaustion." />
+</Cards>
+
+---
+
+## Earlier milestones
+
+- **Solita artifacts removed.** The SDK is now fully hand-written for fine-grained
+  control over wire layout. No IDL-generated wrappers remain.
+- **Protocol fee system live on mainnet.** Sharded treasury (16 shards by default),
+  per-`fee_payer` `FeeRecord` counters, fees collected in native SOL.
+- **Seedless + session.money launched.** First production integrators running on the
+  LazorKit execution layer.
+
+For the authoritative change history, browse the
+[`lazorkit-protocol` git log](https://github.com/lazor-kit/lazorkit-protocol/commits/main).

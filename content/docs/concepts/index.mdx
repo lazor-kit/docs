@@ -1,41 +1,50 @@
 ---
 title: Concepts
-description: Core protocol concepts behind LazorKit — smart wallets, session keys, RBAC, and the paymaster.
+description: Core protocol primitives — smart wallets, session keys, RBAC, and the paymaster.
 ---
 
 import { Wallet, KeyRound, ShieldCheck, Zap } from 'lucide-react'
 
-# Concepts
-
-LazorKit is built on four protocol primitives. Understanding these is useful if you are integrating at the contract level or building on top of the execution layer.
+LazorKit is built on four protocol primitives. Read these once and the SDK surface
+starts making sense — every method on every hook maps to one of the concepts below.
 
 <Cards>
-  <Card
-    icon={<Wallet />}
-    title="Smart Wallet"
-    description="Passkey-controlled on-chain account (PDA). Authentication, account structure, roles, and lifecycle."
-    href="/concepts/smart-wallet"
-  />
-  <Card
-    icon={<KeyRound />}
-    title="Session Keys"
+  <Card icon={<Wallet />} title="Smart Wallet"
+    description="Passkey-controlled PDAs. Authentication, account structure, vault vs wallet PDA, roles, lifecycle."
+    href="/concepts/smart-wallet" />
+  <Card icon={<KeyRound />} title="Session Keys"
     description="Scoped, time-bound delegation keys. Action types, spending limits, deferred execution, and revocation."
-    href="/concepts/session-keys"
-  />
-  <Card
-    icon={<ShieldCheck />}
-    title="RBAC"
-    description="On-chain permission model. Owner, Admin, and Spender roles with a strict enforcement hierarchy."
-    href="/concepts/rbac"
-  />
-  <Card
-    icon={<Zap />}
-    title="Paymaster"
-    description="Gas abstraction and fee sponsorship. How fees are collected, routed, and tracked per integrator."
-    href="/concepts/paymaster"
-  />
+    href="/concepts/session-keys" />
+  <Card icon={<ShieldCheck />} title="RBAC"
+    description="On-chain permission model. Owner, Admin, and Spender roles with strict enforcement."
+    href="/concepts/rbac" />
+  <Card icon={<Zap />} title="Paymaster"
+    description="Gas abstraction. How fees are collected, routed across treasury shards, and tracked per integrator."
+    href="/concepts/paymaster" />
 </Cards>
 
-<Callout type="info">
-  These concepts are independent but work together in every execution flow. See the [Protocol Overview](/protocol) for how they interact end-to-end.
+<Callout type="info" title="How they fit together">
+  Every execution flow touches all four. A user signs with their **passkey** (Smart Wallet)
+  or a **session key** (delegated), passes the **RBAC** role check, and the transaction is
+  relayed by a **Paymaster** that covers gas + any LazorKit protocol fee. See the
+  [Protocol Overview](/protocol) for the end-to-end picture.
 </Callout>
+
+---
+
+## Quick glossary
+
+| Term                 | Definition                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| **Smart Wallet**     | A cluster of on-chain accounts (wallet PDA, vault PDA, authorities, sessions) controlled by LazorKit. |
+| **Wallet PDA**       | Metadata anchor — 8 bytes, derived from `user_seed`. Internal to the program.                       |
+| **Vault PDA**        | The actual fund-holding address. What end-users see as "their wallet address".                      |
+| **Authority PDA**    | Per-key auth record (pubkey, role, replay counter). One PDA per authorised key.                     |
+| **Session PDA**      | Ephemeral signer record with action constraints + expiry. Closed on revocation or expiry.           |
+| **Passkey**          | WebAuthn credential bound to a device's Secure Enclave. Verified on-chain via the Secp256r1 precompile. |
+| **Action**           | Immutable policy attached to a session (SOL cap, token cap, program allow-list, etc.).               |
+| **Paymaster**        | The transaction's `fee_payer`. Pays SOL, collects reimbursement from the user (or integrator).       |
+| **FeeRecord**        | Per-`fee_payer` on-chain counter used for early-contributor rewards at token launch.                 |
+| **Deferred exec**    | 2-tx flow (`Authorize` + `ExecuteDeferred`) for payloads that exceed a single Secp256r1 transaction. |
+
+Need the exact byte layouts and on-chain account shapes? See the [Protocol Overview](/protocol).

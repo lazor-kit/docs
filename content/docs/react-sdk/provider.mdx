@@ -1,53 +1,109 @@
 ---
 title: LazorkitProvider
-description: API reference for the LazorkitProvider component.
+description: Provider component — initialises the wallet store and paymaster config.
 ---
 
-# LazorkitProvider
-
-The `LazorkitProvider` handles all the initialization logic for the SDK. It wraps your app to provide the wallet context everywhere.
-
-## Import
+Mount once at the top of your client tree. `LazorkitProvider` creates the wallet store,
+builds the RPC connection, and stores the paymaster config.
 
 ```tsx
 import { LazorkitProvider } from '@lazorkit/wallet';
 ```
 
-## Usage
+<Callout type="warn" title="Client only">
+  This provider uses `navigator.credentials` and `localStorage`. Mount it inside a
+  client-side boundary — in Next.js App Router, wrap it in a `"use client"` file.
+</Callout>
+
+## Minimum setup
 
 ```tsx
-function App() {
+<LazorkitProvider>
+  <App />
+</LazorkitProvider>
+```
+
+Defaults: Solana Devnet, `portal.lazor.sh`, public Kora paymaster.
+
+## Production setup
+
+```tsx
+<LazorkitProvider
+  rpcUrl={process.env.NEXT_PUBLIC_RPC_URL}
+  portalUrl="https://portal.lazor.sh"
+  paymasterConfig={{
+    paymasterUrl: process.env.NEXT_PUBLIC_PAYMASTER_URL!,
+    apiKey: process.env.NEXT_PUBLIC_PAYMASTER_KEY,
+  }}
+>
+  <App />
+</LazorkitProvider>
+```
+
+## Props
+
+| Prop              | Type                                           | Default                                | Required |
+| ----------------- | ---------------------------------------------- | -------------------------------------- | -------- |
+| `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
+| `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
+| `paymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | Devnet Kora                            | no       |
+| `children`        | `ReactNode`                                    | —                                      | yes      |
+
+### `PaymasterConfig`
+
+```ts
+interface PaymasterConfig {
+  paymasterUrl: string;                    // Kora JSON-RPC endpoint
+  apiKey?: string;                         // sent as x-api-key
+}
+```
+
+## Recipes
+
+### Next.js App Router
+
+```tsx title="app/layout.tsx"
+import { Providers } from './providers';
+
+export default function RootLayout({ children }) {
+  return <html><body><Providers>{children}</Providers></body></html>;
+}
+```
+
+```tsx title="app/providers.tsx"
+'use client';
+import { LazorkitProvider } from '@lazorkit/wallet';
+import { Buffer } from 'buffer';
+
+if (typeof window !== 'undefined') (window as any).Buffer ??= Buffer;
+
+export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <LazorkitProvider
-      rpcUrl="https://api.devnet.solana.com"
-      portalUrl="https://portal.lazor.sh"
-      paymasterConfig={{ 
-        paymasterUrl: "https://kora.devnet.lazorkit.com" 
-      }}
-    >
-      <YourApplication />
+    <LazorkitProvider rpcUrl={process.env.NEXT_PUBLIC_RPC_URL}>
+      {children}
     </LazorkitProvider>
   );
 }
 ```
 
-## Props
+### Switch networks at runtime
 
-### `rpcUrl` (required)
-- **Type**: `string`
-- **Description**: The full URL to your Solana RPC node (e.g., Helius, QuickNode, or standard Devnet).
+```tsx
+const [cluster, setCluster] = useState<'devnet' | 'mainnet'>('devnet');
 
-### `portalUrl` (optional)
-- **Type**: `string`
-- **Default**: `'https://portal.lazor.sh'`
-- **Description**: The URL for the LazorKit authentication portal. You generally don't need to change this unless you're self-hosting the portal.
+const rpcUrl = cluster === 'devnet'
+  ? 'https://api.devnet.solana.com'
+  : 'https://api.mainnet-beta.solana.com';
 
-### `paymasterConfig` (optional)
-- **Type**: `{ paymasterUrl: string, apiKey?: string }`
-- **Description**: Settings for the Paymaster service, which handles gas sponsorship.
-  - `paymasterUrl`: The API endpoint for the paymaster.
-  - `apiKey`: Your API key if the service requires one.
+return <LazorkitProvider rpcUrl={rpcUrl}>{children}</LazorkitProvider>;
+```
 
-### `children`
-- **Type**: `ReactNode`
-- **Description**: Your application components
+### Multiple environments
+
+```tsx
+const paymasterConfig = process.env.NODE_ENV === 'production'
+  ? { paymasterUrl: process.env.NEXT_PUBLIC_KORA_MAINNET!, apiKey: process.env.NEXT_PUBLIC_KORA_KEY }
+  : { paymasterUrl: 'https://kora.devnet.lazorkit.com' };
+
+<LazorkitProvider paymasterConfig={paymasterConfig}>{children}</LazorkitProvider>
+```

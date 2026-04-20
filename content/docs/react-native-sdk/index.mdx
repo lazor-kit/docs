@@ -1,14 +1,62 @@
 ---
 title: Overview
-description: LazorKit Wallet Mobile Adapter for React Native.
+description: LazorKit Wallet Mobile Adapter — passkey smart wallets for React Native & Expo.
 ---
 
-# LazorKit React Native SDK
+import { Rocket, Plug, Key, Coins, Shield, HelpCircle } from 'lucide-react'
 
-Native React Native adapter for LazorKit smart wallets.
+React Native / Expo adapter for LazorKit smart wallets on Solana. Users authenticate with a
+device passkey (Face ID, Touch ID, screen lock) through the LazorKit portal — your app never
+touches private key material.
 
-## Why LazorKit React Native?
-- **WebAuthn Security**: Secure biometric authentication
-- **Gasless Transactions**: Built-in paymaster integration
-- **Smart Wallets**: Programmable accounts with account abstraction
-- **Native Experience**: Opimitized for React Native & Expo mobile apps
+<Callout type="info" title="Package">
+  `@lazorkit/wallet-mobile-adapter` on [npm](https://www.npmjs.com/package/@lazorkit/wallet-mobile-adapter). Requires React Native ≥ 0.70 and Expo SDK ≥ 50 (or bare workflow).
+</Callout>
+
+## Why this SDK
+
+- **No seed phrase.** Passkey-based WebAuthn, synced via iCloud Keychain / Google Password Manager.
+- **No gas.** Kora paymaster sponsors every mutation — users don't need SOL.
+- **Programmable wallet.** Vault + authority PDAs, role-based access (owner / admin / spender), on-chain spending limits.
+- **Session keys.** One prompt mints a scoped Ed25519 signer — subsequent sends are prompt-free.
+- **Deferred execution.** Sign a single challenge to authorise multi-instruction payloads that exceed the single-tx size limit.
+
+## How it fits together
+
+```
+┌──────────────┐    deep link     ┌────────────────┐   signs   ┌──────────────┐
+│  your app    │─────────────────▶│ LazorKit Portal│──────────▶│   passkey    │
+│  (RN/Expo)   │◀─────────────────│  (WebAuthn)    │           │ (OS / browser)│
+└──────┬───────┘    redirect URL  └────────────────┘           └──────────────┘
+       │
+       ▼ build tx / finalize
+┌──────────────┐    relay via    ┌──────────────┐
+│   SDK        │────paymaster───▶│   Solana     │
+└──────────────┘                 └──────────────┘
+```
+
+The portal handles the WebAuthn round-trip; the SDK builds instructions, finalises the
+passkey signature, and submits through the paymaster.
+
+## Explore
+
+<Cards>
+  <Card icon={<Rocket />} title="Getting Started"
+    description="Install, configure, and send your first transaction in ~5 minutes."
+    href="/react-native-sdk/getting-started" />
+  <Card icon={<Plug />} title="LazorKitProvider"
+    description="Provider props and configuration."
+    href="/react-native-sdk/provider" />
+  <Card icon={<Key />} title="useWallet hook"
+    description="Complete API — connect, sign, sessions, authorities."
+    href="/react-native-sdk/use-wallet" />
+  <Card icon={<Coins />} title="Types"
+    description="TypeScript interfaces and constants."
+    href="/react-native-sdk/types" />
+  <Card icon={<Shield />} title="Session Keys"
+    description="Skip the passkey prompt with scoped Ed25519 keys."
+    href="/concepts/session-keys" />
+  <Card icon={<HelpCircle />} title="Troubleshooting"
+    description="Common errors and fixes."
+    href="/troubleshooting" />
+</Cards>

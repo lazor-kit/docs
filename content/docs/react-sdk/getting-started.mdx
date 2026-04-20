@@ -1,98 +1,138 @@
 ---
 title: Getting Started
-description: Complete guide to integrating the LazorKit React SDK.
+description: Ship a working LazorKit integration in under 10 minutes.
 ---
 
-# Integration Guide
+Three files total: a provider, a connect button, and a transaction handler. All three use
+the same `useWallet` hook.
 
-## Default Configuration
+<Callout type="info" title="Zero-config defaults">
+  All provider props are optional. With nothing set, the SDK targets Solana Devnet through
+  `portal.lazor.sh` and the public Kora paymaster — perfect for demos and local dev.
+</Callout>
 
-LazorKit comes with pre-configured defaults for Devnet. You can use these values to get started quickly:
+## Prerequisites
 
-```ts
-const DEFAULT_CONFIG = {
-  rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: {
-    paymasterUrl: 'https://kora.devnet.lazorkit.com'
-  }
-};
-```
+- React 18+
+- Browser with WebAuthn support (all modern browsers)
+- Client-side context — passkey APIs aren't available during SSR
 
-This guide walks through building a complete wallet integration.
+---
 
-## 1. Installation
+## Install
+
+<Steps>
+
+<Step>
+
+### Install the SDK and peer
 
 ```bash
-npm install @lazorkit/wallet @coral-xyz/anchor @solana/web3.js
+npm install @lazorkit/wallet @solana/web3.js
 ```
 
-## 2. Polyfills & Configuration
+<Callout type="warn">
+  `@solana/web3.js` is a peer dependency. Install it explicitly so your bundler resolves
+  a single version.
+</Callout>
 
-### Polyfills (Required)
+</Step>
 
-The SDK relies on Node.js globals like `Buffer`. You must polyfill these depending on your framework.
+<Step>
 
-#### Vite
+### Add a `Buffer` polyfill
 
-Use [vite-plugin-node-polyfills](https://www.npmjs.com/package/vite-plugin-node-polyfills):
+Solana libraries assume Node's `Buffer` global. Bundler-specific setup:
 
-```ts
-// vite.config.ts
+<Tabs items={['Vite', 'Next.js', 'Create React App']}>
+<Tab value="Vite">
+
+```ts title="vite.config.ts"
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [
-    nodePolyfills(),
-    // ...
-  ],
+  plugins: [nodePolyfills()],
 });
 ```
 
-#### Next.js
+</Tab>
+<Tab value="Next.js">
 
-Next.js usually handles module resolution, but ensure you are running wallet logic on the client-side (`use client`). If you encounter `Buffer` errors, add this to your `layout.tsx` or provider:
+Mark any file that uses wallet logic with `"use client"`. For the `Buffer` global, add a
+one-time shim in your providers file:
 
-```ts
-// layout.tsx or providers.tsx
+```tsx title="app/providers.tsx"
+'use client';
+
+import { Buffer } from 'buffer';
 if (typeof window !== 'undefined') {
-    window.Buffer = window.Buffer || require('buffer').Buffer;
+  (window as any).Buffer ??= Buffer;
 }
 ```
 
-### Provider Implementation
+</Tab>
+<Tab value="Create React App">
 
-```tsx
-// App.tsx
+CRA handles `Buffer` automatically for most versions. If you hit errors, install
+`buffer` and add:
+
+```ts title="src/polyfills.ts"
+import { Buffer } from 'buffer';
+(window as any).Buffer = (window as any).Buffer ?? Buffer;
+```
+
+Import `./polyfills` before anything else in `src/index.tsx`.
+
+</Tab>
+</Tabs>
+
+</Step>
+
+<Step>
+
+### Mount the provider
+
+```tsx title="app/providers.tsx"
+'use client';
+
 import { LazorkitProvider } from '@lazorkit/wallet';
 
-const CONFIG = {
-  RPC_URL: "https://api.devnet.solana.com",
-  PORTAL_URL: "https://portal.lazor.sh",
-  PAYMASTER: { 
-    paymasterUrl: "https://kora.devnet.lazorkit.com" 
-  }
-};
-
-export default function App() {
-  return (
-    <LazorkitProvider
-      rpcUrl={CONFIG.RPC_URL}
-      portalUrl={CONFIG.PORTAL_URL}
-      paymasterConfig={CONFIG.PAYMASTER}
-    >
-      <MainContent />
-    </LazorkitProvider>
-  );
+export function Providers({ children }: { children: React.ReactNode }) {
+  return <LazorkitProvider>{children}</LazorkitProvider>;
 }
 ```
 
-## 3. Connect Button
-
-Create a component to handle user authentication.
+That's the minimum. Override defaults via props:
 
 ```tsx
-// ConnectButton.tsx
+<LazorkitProvider
+  rpcUrl={process.env.NEXT_PUBLIC_RPC_URL}
+  portalUrl="https://portal.lazor.sh"
+  paymasterConfig={{
+    paymasterUrl: process.env.NEXT_PUBLIC_PAYMASTER_URL!,
+    apiKey: process.env.NEXT_PUBLIC_PAYMASTER_KEY,
+  }}
+>
+  {children}
+</LazorkitProvider>
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## First flow: connect + send
+
+<Steps>
+
+<Step>
+
+### Connect button
+
+```tsx title="components/ConnectButton.tsx"
+'use client';
 import { useWallet } from '@lazorkit/wallet';
 
 export function ConnectButton() {
@@ -101,61 +141,93 @@ export function ConnectButton() {
   if (isConnected && wallet) {
     return (
       <button onClick={() => disconnect()}>
-        Disconnect ({wallet.smartWallet.slice(0, 6)}...)
+        Disconnect ({wallet.smartWallet.slice(0, 6)}…)
       </button>
     );
   }
-
   return (
     <button onClick={() => connect()} disabled={isConnecting}>
-      {isConnecting ? 'Connecting...' : 'Connect Wallet'}
+      {isConnecting ? 'Connecting…' : 'Connect Wallet'}
     </button>
   );
 }
 ```
 
-## 4. Sending Transactions
+<Callout type="info" title="smartWallet is the vault">
+  `wallet.smartWallet` and `smartWalletPubkey` both point to the **vault PDA** — the
+  address where funds live. Show it to users and use it as `fromPubkey` for transfers.
+</Callout>
 
-Send SOL or execute instructions using the `signAndSendTransaction` method.
+</Step>
 
-```tsx
-// TransferButton.tsx
+<Step>
+
+### Transfer SOL
+
+```tsx title="components/TransferButton.tsx"
+'use client';
 import { useWallet } from '@lazorkit/wallet';
-import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 
 export function TransferButton() {
-  const { signAndSendTransaction, smartWalletPubkey } = useWallet();
+  const { smartWalletPubkey, signAndSendTransaction } = useWallet();
 
-  const handleTransfer = async () => {
-    try {
-      if (!smartWalletPubkey) return;
-
-      // 1. Create Instruction
-      const destination = new PublicKey('RECIPIENT_ADDRESS');
-      const instruction = SystemProgram.transfer({
-        fromPubkey: smartWalletPubkey,
-        toPubkey: destination,
-        lamports: 0.1 * LAMPORTS_PER_SOL
-      });
-
-      // 2. Sign and Send
-      const signature = await signAndSendTransaction({
-        instructions: [instruction],
-        transactionOptions: {
-          feeToken: 'USDC' // Optional: Pay gas in USDC
-        }
-      });
-
-      console.log('Transaction confirmed:', signature);
-    } catch (error) {
-      console.error('Transfer failed:', error);
-    }
+  const send = async () => {
+    if (!smartWalletPubkey) return;
+    const ix = SystemProgram.transfer({
+      fromPubkey: smartWalletPubkey,
+      toPubkey: new PublicKey('RECIPIENT_ADDRESS'),
+      lamports: 0.01 * LAMPORTS_PER_SOL,
+    });
+    const sig = await signAndSendTransaction({ instructions: [ix] });
+    console.log('tx', sig);
   };
 
-  return <button onClick={handleTransfer}>Send 0.1 SOL</button>;
+  return <button onClick={send}>Send 0.01 SOL</button>;
 }
 ```
 
-## 5. Next Steps
+</Step>
 
-Check out the [Troubleshooting](/docs/troubleshooting) guide if you encounter any issues, or explore the [API Reference](/docs/react-sdk/use-wallet) for more advanced usage.
+<Step>
+
+### (Optional) Display balance
+
+```tsx
+'use client';
+import { useEffect, useState } from 'react';
+import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { useWallet } from '@lazorkit/wallet';
+
+export function Balance() {
+  const { smartWalletPubkey } = useWallet();
+  const [sol, setSol] = useState(0);
+
+  useEffect(() => {
+    if (!smartWalletPubkey) return;
+    const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL!);
+    connection.getBalance(smartWalletPubkey).then((l) => setSol(l / LAMPORTS_PER_SOL));
+  }, [smartWalletPubkey?.toBase58()]);
+
+  return <span>{sol.toFixed(4)} SOL</span>;
+}
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## Next level
+
+<Cards>
+  <Card title="Session keys" href="/react-sdk/use-wallet#createsession"
+    description="One prompt → many prompt-free sends. Built-in SpendingLimits wrapper." />
+  <Card title="Deferred execution" href="/react-sdk/use-wallet#authorizeandexecute"
+    description="Authorize once, execute payloads too big for a single tx." />
+  <Card title="Verify messages" href="/react-sdk/use-wallet#verifymessage"
+    description="Verify passkey signatures in-browser with crypto.subtle." />
+  <Card title="Troubleshooting" href="/troubleshooting"
+    description="SSR errors, Buffer missing, NotAllowedError, 0xbd0." />
+</Cards>

@@ -1,40 +1,43 @@
 ---
 title: Overview
-description: LazorKit SDK for @solana/web3.js v1 — direct contract interaction via LazorKitClient.
+description: LazorKit SDK for @solana/web3.js v1 — direct contract access via LazorKitClient.
 ---
 
-# SDK — web3.js v1
+import { Rocket, KeyRound, Server, HelpCircle } from 'lucide-react'
 
-`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction. It uses `@solana/web3.js` v1 and provides `LazorKitClient` — a typed API for all on-chain operations.
+`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction. It
+ships `LazorKitClient` — a typed wrapper that builds every on-chain instruction without
+hiding the transaction flow.
 
-Use this SDK when you need low-level contract access: building transactions manually, integrating with existing web3.js v1 infrastructure, or working outside of React.
+Use this SDK when you need:
 
-For React and React Native apps, see the [React SDK](/react-sdk) and [React Native SDK](/react-native-sdk).
+- Low-level contract access outside of React
+- Integration with existing `@solana/web3.js` v1 infrastructure
+- Admin / protocol operations (`InitializeProtocol`, `RegisterPayer`, etc.)
+- Full control over signer rotation, prepare/finalize flows, and account indexing
 
----
+For application code, reach for the [React SDK](/react-sdk) or
+[React Native SDK](/react-native-sdk) — both wrap this SDK and handle the portal /
+paymaster round-trips automatically.
 
-## Installation
+## What it covers
+
+| Area                | Methods                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| Wallet management   | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership`                        |
+| Execution           | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute`                                 |
+| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`             |
+| Deferred execution  | `prepareAuthorize`, `finalizeAuthorize`, `executeDeferred`, `reclaimDeferred`                 |
+| Lookups             | `findWalletsByAuthority`                                                                      |
+| Protocol (admin)    | `initializeProtocol`, `registerPayer`, `withdrawTreasury`, `initializeTreasuryShard`          |
+
+## Install
 
 ```bash
 npm install @lazorkit/sdk-legacy @solana/web3.js
 ```
 
----
-
-## What It Covers
-
-| Area | Methods |
-|---|---|
-| Wallet management | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` |
-| Execution | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute` |
-| Session keys | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession` |
-| Deferred execution | `authorize`, `executeDeferred`, `reclaimDeferred` |
-| Wallet lookup | `findWalletsByAuthority` |
-| Protocol (admin) | `initializeProtocol`, `registerPayer`, `withdrawTreasury` |
-
----
-
-## Client Setup
+## Client setup
 
 ```typescript
 import { Connection } from '@solana/web3.js';
@@ -43,3 +46,22 @@ import { LazorKitClient } from '@lazorkit/sdk-legacy';
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 const client = new LazorKitClient(connection);
 ```
+
+`LazorKitClient` is stateless — instantiate once and reuse across your process.
+
+## Explore
+
+<Cards>
+  <Card icon={<Rocket />} title="Getting Started"
+    description="Create a wallet, execute a transaction, look up returning users."
+    href="/web3js-v1/getting-started" />
+  <Card icon={<KeyRound />} title="Session Keys"
+    description="Create, execute, and revoke sessions — including deferred execution."
+    href="/web3js-v1/session-keys" />
+  <Card icon={<Server />} title="Types"
+    description="Signer helpers, account decoders, PDA derivation."
+    href="/web3js-v1/types" />
+  <Card icon={<HelpCircle />} title="Troubleshooting"
+    description="Error codes and common pitfalls."
+    href="/troubleshooting" />
+</Cards>

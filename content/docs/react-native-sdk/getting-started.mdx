@@ -1,172 +1,256 @@
 ---
 title: Getting Started
-description: Complete guide to integrating the LazorKit React Native SDK.
+description: Wire up LazorKit in your React Native / Expo app in 5 minutes.
 ---
 
-# Integration Guide
+A complete working integration takes four steps: install dependencies, add polyfills, mount
+the provider, call the hook.
 
-## Default Configuration
+<Callout type="info" title="Zero-config defaults">
+  Every provider prop is optional. If you leave them blank the SDK uses Devnet defaults
+  (`api.devnet.solana.com`, `portal.lazor.sh`, `kora.devnet.lazorkit.com`). Ship to production
+  by overriding `rpcUrl` + `configPaymaster`.
+</Callout>
 
-Use these default values for quick integration on Devnet:
+## Prerequisites
+
+- React Native **≥ 0.70** or Expo SDK **≥ 50**
+- A physical device or a simulator with biometrics enrolled (see [Troubleshooting](/troubleshooting) if you hit `NotAllowedError`)
+- A deep-link scheme for your app (e.g. `myapp://`)
+
+---
+
+## Install
+
+<Steps>
+
+<Step>
+
+### Install the SDK and peers
+
+```bash
+npm install @lazorkit/wallet-mobile-adapter @solana/web3.js \
+  @react-native-async-storage/async-storage expo-web-browser \
+  react-native-get-random-values react-native-url-polyfill buffer
+```
+
+<Callout type="warn">
+  `@solana/web3.js` is a **peer dependency**. Install it explicitly so bundlers pick one
+  version instead of duplicating.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Add polyfills
+
+React Native is missing some Node globals that Solana libraries expect. Add these imports
+at the **very top** of your entry file (`app/_layout.tsx`, `index.js`, or `App.tsx`):
 
 ```ts
-const DEFAULT_CONFIG = {
-  rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
-  configPaymaster: {
-    paymasterUrl: 'https://kora.devnet.lazorkit.com',
-    // apiKey: 'YOUR_API_KEY' // Optional
-  }
-};
-```
-
-## 1. Installation
-
-```bash
-npm install @lazorkit/wallet-mobile-adapter
-```
-
-## 2. Polyfills & Configuration
-
-Since React Native doesn't have a standardized Node.js environment, some Solana libraries (like `@solana/web3.js`) need a little help to work correctly. You'll need to install a few polyfills.
-
-### Install Dependencies
-
-```bash
-npm install react-native-get-random-values react-native-url-polyfill buffer
-```
-
-### Configure Entry Point
-
-Add these imports to the **very top** of your entry file (e.g., `app/_layout.tsx`, `index.js`, or `App.tsx`):
-
-```tsx
 import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
 import { Buffer } from 'buffer';
-
 global.Buffer = global.Buffer || Buffer;
 ```
 
-> **Note**: If you're using Expo and run into issues with random values, make sure `expo-crypto` is installed.
+The provider itself patches `Buffer.prototype.subarray` once mounted.
 
-## 3. Setup Provider
+</Step>
 
-Wrap your application with `LazorKitProvider`. Ensure you have `expo-web-browser` installed.
+<Step>
 
-```tsx
-// App.tsx
+### Register your deep-link scheme
+
+The portal returns signature payloads via a redirect. Your app needs to own a URL scheme.
+
+<Tabs items={['Expo', 'iOS (bare)', 'Android (bare)']}>
+<Tab value="Expo">
+
+```json title="app.json"
+{
+  "expo": {
+    "scheme": "myapp"
+  }
+}
+```
+
+In dev with Expo Go you can use `exp://localhost:8081` (or your tunnel URL).
+
+</Tab>
+<Tab value="iOS (bare)">
+
+Add to `ios/<YourApp>/Info.plist`:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>myapp</string>
+    </array>
+  </dict>
+</array>
+```
+
+</Tab>
+<Tab value="Android (bare)">
+
+Add to `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<intent-filter>
+  <action android:name="android.intent.action.VIEW" />
+  <category android:name="android.intent.category.DEFAULT" />
+  <category android:name="android.intent.category.BROWSABLE" />
+  <data android:scheme="myapp" />
+</intent-filter>
+```
+
+</Tab>
+</Tabs>
+
+</Step>
+
+<Step>
+
+### Wrap your app with the provider
+
+```tsx title="app/_layout.tsx"
 import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
+import { Stack } from 'expo-router';
 
-export default function App() {
+export default function RootLayout() {
   return (
-    <LazorKitProvider
-      rpcUrl="https://api.devnet.solana.com"
-      portalUrl="https://portal.lazor.sh"
-      configPaymaster={{ 
-        paymasterUrl: "https://kora.devnet.lazorkit.com" 
-      }}
-    >
-      <HomeScreen />
+    <LazorKitProvider isDebug={__DEV__}>
+      <Stack />
     </LazorKitProvider>
   );
 }
 ```
 
-## 4. Authentication
-
-Use the `connect` method to log a user in. You'll need to provide a `redirectUrl` so the app knows where to return after the user finishes signing in on the portal.
-
-> **Important**: This `redirectUrl` must match the Custom URL Scheme you set up in your `app.json` (for Expo) or `Info.plist` (for iOS).
+That's the minimum. To override defaults:
 
 ```tsx
-// ConnectScreen.tsx
-import { useWallet } from '@lazorkit/wallet-mobile-adapter';
-import { Button, View, Text } from 'react-native';
+<LazorKitProvider
+  rpcUrl={process.env.EXPO_PUBLIC_RPC_URL}
+  portalUrl={process.env.EXPO_PUBLIC_PORTAL_URL}
+  configPaymaster={{
+    paymasterUrl: process.env.EXPO_PUBLIC_PAYMASTER_URL!,
+    apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY,
+  }}
+>
+  <Stack />
+</LazorKitProvider>
+```
 
-export function ConnectScreen() {
-  const { connect, isConnected, wallet } = useWallet();
-  const APP_SCHEME = 'myapp://home';
+</Step>
+
+</Steps>
+
+---
+
+## First flow: connect + send
+
+<Steps>
+
+<Step>
+
+### Connect
+
+```tsx title="app/index.tsx"
+import { useWallet } from '@lazorkit/wallet-mobile-adapter';
+import { Button, Text } from 'react-native';
+
+export default function HomeScreen() {
+  const { connect, isConnected, isConnecting, smartWalletPubkey } = useWallet();
 
   if (isConnected) {
-    return <Text>Welcome back, {wallet?.smartWallet}</Text>;
+    return <Text>Connected: {smartWalletPubkey!.toBase58()}</Text>;
   }
 
   return (
-    <Button 
-      title="Connect with Passkey" 
-      onPress={() => connect({ redirectUrl: APP_SCHEME })} 
+    <Button
+      title={isConnecting ? 'Connecting…' : 'Connect with Passkey'}
+      onPress={() => connect({ redirectUrl: 'myapp://home' })}
     />
   );
 }
 ```
 
-## 5. Signing Messages
+<Callout type="info" title="smartWalletPubkey = vault">
+  `smartWalletPubkey` is the **vault PDA** — the address that receives and sends funds.
+  Use it for `connection.getBalance`, for QR codes, and wherever you show the user their
+  wallet address.
+</Callout>
 
-Sign messages by directing users to the portal.
+</Step>
 
-```tsx
-// SignScreen.tsx
+<Step>
+
+### Send a transaction
+
+```tsx title="app/send.tsx"
 import { useWallet } from '@lazorkit/wallet-mobile-adapter';
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 import { Button } from 'react-native';
 
-export function SignScreen() {
-  const { signMessage } = useWallet();
+export default function SendScreen() {
+  const { smartWalletPubkey, signAndSendTransaction } = useWallet();
 
-  const handleSign = async () => {
-    try {
-      const signature = await signMessage(
-        "Welcome to LazorKit!", 
-        { redirectUrl: 'myapp://callback' }
-      );
-      console.log("Verified Signature:", signature);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  return <Button title="Sign Message" onPress={handleSign} />;
-}
-```
-
-## 6. Sending Transactions
-
-Send SOL or execute instructions on-chain.
-
-```tsx
-// TransferScreen.tsx
-import { useWallet } from '@lazorkit/wallet-mobile-adapter';
-import { SystemProgram, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { Button } from 'react-native';
-
-export function TransferScreen() {
-  const { signAndSendTransaction, wallet } = useWallet();
-
-  const handleTransfer = async () => {
-    if (!wallet) return;
-
-    // 1. Create Instruction
+  const send = async () => {
+    if (!smartWalletPubkey) return;
     const ix = SystemProgram.transfer({
-      fromPubkey: new PublicKey(wallet.smartWallet),
-      toPubkey: new PublicKey("RECIPIENT_ADDRESS"),
+      fromPubkey: smartWalletPubkey,                        // vault
+      toPubkey: new PublicKey('RECIPIENT_ADDRESS'),
       lamports: 0.01 * LAMPORTS_PER_SOL,
     });
 
-    // 2. Sign and Send
-    const signature = await signAndSendTransaction(
-      { 
-        instructions: [ix], 
-        transactionOptions: { feeToken: 'USDC' } 
-      },
-      { redirectUrl: 'myapp://callback' }
+    const sig = await signAndSendTransaction(
+      { instructions: [ix] },
+      { redirectUrl: 'myapp://home' },
     );
-    console.log("Tx:", signature);
+    console.log('tx', sig);
   };
 
-  return <Button title="Send SOL" onPress={handleTransfer} />;
+  return <Button title="Send 0.01 SOL" onPress={send} />;
 }
 ```
 
-## 7. Next Steps
+</Step>
 
-See the [Troubleshooting](/docs/troubleshooting) guide for help with common issues like deep linking configuration.
+<Step>
+
+### (Optional) Use the vault balance
+
+```tsx
+const { smartWalletPubkey, connection } = useWallet();
+
+useEffect(() => {
+  if (!smartWalletPubkey) return;
+  connection.getBalance(smartWalletPubkey).then((l) =>
+    console.log('balance (SOL):', l / LAMPORTS_PER_SOL),
+  );
+}, [smartWalletPubkey?.toBase58()]);
+```
+
+</Step>
+
+</Steps>
+
+---
+
+## Next level
+
+<Cards>
+  <Card title="Session keys" href="/react-native-sdk/use-wallet#createsession"
+    description="One passkey prompt → many prompt-free sends. Optional on-chain spending limits." />
+  <Card title="Deferred execution" href="/react-native-sdk/use-wallet#authorizeandexecute"
+    description="Authorize once, execute payloads too big for a single tx (Jupiter swaps, batches)." />
+  <Card title="Authorities" href="/react-native-sdk/use-wallet#addauthorityed25519"
+    description="Add Ed25519 device keys as admin or spender on the wallet." />
+  <Card title="Troubleshooting" href="/troubleshooting"
+    description="Common errors: NotAllowedError, Network request failed, 0xbd0, deep-link mismatches." />
+</Cards>

@@ -1,19 +1,30 @@
 ---
 title: Smart Wallet
-description: How LazorKit smart wallets work — passkey authentication, PDA structure, roles, and lifecycle.
+description: How LazorKit smart wallets work — PDA structure, vault vs wallet PDA, authentication, roles, lifecycle.
 ---
 
-# Smart Wallet
+A LazorKit smart wallet is a cluster of on-chain accounts controlled by the LazorKit
+program. The owner authenticates via WebAuthn (passkey) or Ed25519 — no seed phrase,
+no browser extension, no private key storage in your app.
 
-A LazorKit smart wallet is a group of on-chain accounts controlled by the LazorKit program. The owner authenticates via WebAuthn (passkey) or Ed25519 — no seed phrase or browser extension required.
+<Callout type="info" title="Two PDAs you'll see everywhere">
+  **`smartWallet` / vault PDA** — where SOL and tokens live. This is the address users see,
+  share, and receive funds at.
+
+  **`walletPda`** — the wallet metadata account. Stores nothing you care about directly;
+  it's the identity anchor used internally by the program.
+
+  In SDK v2 the hook returns `smartWalletPubkey = vault` and `walletPdaPubkey = metadata`,
+  matching this mental model.
+</Callout>
 
 ---
 
-## Account Structure
+## Account structure
 
 <Mermaid chart={`
 graph TD
-    W[Wallet PDA] --> V[Vault PDA]
+    W[Wallet PDA<br/>metadata, 8 bytes] --> V[Vault PDA<br/>holds SOL + tokens]
     W --> A1[Owner Authority PDA]
     W --> A2[Admin Authority PDA]
     W --> A3[Spender Authority PDA]
@@ -21,64 +32,84 @@ graph TD
     W --> S2[Session PDA - Agent]
 `} />
 
-| Account | Seeds | Size | Description |
-|---|---|---|---|
-| Wallet PDA | `["wallet", user_seed]` | 8 bytes | Identity anchor |
-| Vault PDA | `["vault", wallet]` | 0 bytes | Holds SOL and tokens |
-| Authority PDA | `["authority", wallet, id_hash]` | 48+ bytes | Per-key auth with role + counter |
-| Session PDA | `["session", wallet, session_key]` | 80+ bytes | Ephemeral sub-key with spending limits |
+| Account       | Seeds                                       | Size                                   | What it holds                                              |
+| ------------- | ------------------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| Wallet PDA    | `["wallet", user_seed]`                     | 8 bytes                                | Identity anchor; bump + version only.                      |
+| **Vault PDA** | `["vault", wallet]`                         | 0 bytes                                | **Holds all SOL and tokens.** Program signs via PDA seeds. |
+| Authority PDA | `["authority", wallet, credential_id_hash]` | 80 (Ed25519) / **145 (Secp256r1)**     | Per-key auth record + replay counter.                      |
+| Session PDA   | `["session", wallet, session_key]`          | 80+ bytes                              | Ephemeral signer + immutable action buffer.                |
 
 ### Wallet PDA
 
-Minimal 8-byte account. Acts as the identity anchor. The `user_seed` (32 bytes) is chosen at creation time.
+Minimal 8-byte account. Chosen by a 32-byte `user_seed` at creation. You don't need to
+store it client-side — look it up via `findWalletsByAuthority(credentialIdHash)`.
 
 ### Vault PDA
 
-Zero-data account that holds SOL and tokens. The program signs for it via PDA seeds during `Execute`. No rent required.
+Zero-data account that holds SOL and tokens. The program signs for it during `Execute`.
+No rent deposit required — the vault is itself a PDA with no allocated data.
+
+<Callout type="warn" title="Send funds here — not to the wallet PDA">
+  Users should receive SOL/tokens at the **vault** (`smartWallet` / `smartWalletPubkey`).
+  Sending to the wallet PDA won't fail, but the program won't recognize those funds during
+  `Execute` — it only spends from the vault.
+</Callout>
 
 ### Authority PDA
 
-Each authorized key gets its own PDA. Key fields:
+One PDA per authorised key. Header (48 bytes) + tail:
 
 - `authority_type` — `Ed25519` (0) or `Secp256r1` (1)
 - `role` — `Owner` (0) / `Admin` (1) / `Spender` (2)
 - `counter` — monotonic u32 for Secp256r1 replay protection
-- variable data — pubkey for Ed25519; `credential_id_hash` + `compressed_pubkey` + `rpId` for Secp256r1
+- tail — **32-byte pubkey** for Ed25519; **`credential_id_hash`(32) + `compressed_pubkey`(33) + `rpId_hash`(32)** for Secp256r1 (fixed 97 bytes)
 
-One PDA per authority means **different authorities on the same wallet execute in parallel** — the only writable account during `Execute` is the caller's own authority PDA (counter increment). Wallet and vault are read-only.
+<Callout type="info" title="Secp256r1 accounts are now fixed-size">
+  Post Phase 2.1, Secp256r1 authorities store `sha256(rpId)` instead of the raw `rpId`
+  string. That makes every Secp256r1 authority exactly **145 bytes**, eliminating one
+  `sol_sha256` syscall per Execute. Clients still send `rpId` as a string when creating
+  a wallet or adding an authority — the program hashes it once at write time.
+</Callout>
+
+Because each authority has its own PDA, **different authorities on the same wallet
+execute in parallel** — the only writable account during `Execute` is the caller's own
+authority PDA (counter increment). Wallet and vault are read-only.
 
 ---
 
 ## Authentication
 
-**Secp256r1 (Passkey)**
+### Secp256r1 (Passkey)
 
-WebAuthn credentials bound to the device's Secure Enclave (FaceID, TouchID, Windows Hello). The credential never leaves the device. On-chain verification uses the Secp256r1 precompile and enforces:
+WebAuthn credentials bound to the device's Secure Enclave (Face ID, Touch ID, Windows
+Hello, security keys). The credential never leaves the device. On-chain verification
+uses the native Secp256r1 precompile and enforces:
 
 - **Odometer counter** — monotonic u32 per authority. Client submits `stored_counter + 1`. Committed only after successful verification.
 - **Slot freshness** — auth payload slot must be within 150 slots of `Clock::get()`.
 - **CPI protection** — stack height check prevents passkey auth via CPI.
 - **Accounts hash** — signed payload binds to all account pubkeys, preventing account-swap attacks.
 
-**Ed25519**
+### Ed25519
 
-Standard Solana keypair. Verified by the Solana runtime. No counter required.
+Standard Solana keypair. Verified by the Solana runtime. No counter required — Solana's
+tx-level duplicate detection handles replay.
 
 ---
 
 ## Roles
 
-| Role | Value | Permissions |
-|---|---|---|
-| Owner | 0 | Full control — add/remove any authority, transfer ownership, create/revoke sessions, execute |
-| Admin | 1 | Add Spender authorities, create/revoke sessions, execute |
-| Spender | 2 | Execute only |
+| Role    | Value | Permissions                                                                          |
+| ------- | ----- | ------------------------------------------------------------------------------------ |
+| Owner   | 0     | Full control — add/remove any authority, transfer ownership, create/revoke sessions, execute |
+| Admin   | 1     | Add Spender authorities, create/revoke sessions, execute                              |
+| Spender | 2     | Execute only                                                                          |
 
-See [RBAC](./rbac) for the full permission breakdown.
+See [RBAC](/concepts/rbac) for the full permission breakdown.
 
 ---
 
-## Wallet Lifecycle
+## Wallet lifecycle
 
 ### Create
 
@@ -97,37 +128,58 @@ const { instructions, walletPda, vaultPda, authorityPda } = await client.createW
 
 Creates Wallet PDA, Vault PDA, and the first Authority PDA in one transaction.
 
-### Add Authority
+### Look up a returning user
 
-Adds an additional key. Owner can add any role; Admin can only add Spender.
-
-### Remove Authority
-
-Closes the authority PDA and refunds rent to a specified destination. Prevents self-removal and removal of the last owner.
-
-### Transfer Ownership
-
-Atomically closes the old owner PDA and creates a new owner PDA. Refunds old owner's rent to an explicit destination.
-
----
-
-## Wallet Lookup
-
-Find wallets by credential hash — no need to store `walletPda` client-side:
+No need to persist `walletPda` client-side:
 
 ```typescript
 const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
-// Returns: { walletPda, authorityPda, vaultPda, role, authorityType }
+// { walletPda, authorityPda, vaultPda, role, authorityType }
 ```
+
+### Add authority
+
+Adds another key. Owner can add any role; Admin can only add Spender.
+
+### Remove authority
+
+Closes the authority PDA and refunds rent to a specified destination. Prevents
+self-removal and removal of the last owner.
+
+### Transfer ownership
+
+Atomically closes the old owner PDA and creates a new owner PDA. Refunds the old owner's
+rent to an explicit destination.
 
 ---
 
 ## Costs
 
-| Auth Type | Wallet Creation | Execute (per tx) |
-|---|---|---|
-| Ed25519 | 0.002399 SOL | 0.000005 SOL |
-| Secp256r1 (Passkey) | 0.002713 SOL | 0.000005 SOL |
-| Session Key | 0.001453 SOL (one-time setup) | 0.000005 SOL |
+| Operation               | Cost          |
+| ----------------------- | ------------- |
+| Wallet creation (Ed25519)      | 0.002399 SOL |
+| Wallet creation (Secp256r1)    | 0.002713 SOL |
+| Execute (per tx)               | 0.000005 SOL |
+| Session setup (one-time)       | 0.001453 SOL |
 
-At $150/SOL, wallet creation is ~$0.36–$0.41. Session setup is ~$0.22, with subsequent executes at ~$0.00075 each.
+At $150/SOL, wallet creation is ~$0.36–$0.41. Session setup is ~$0.22, with subsequent
+session-signed executes at ~$0.00075 each.
+
+---
+
+## Related
+
+<Cards>
+  <Card title="Session Keys"
+    description="Scope delegation, spending limits, deferred execution."
+    href="/concepts/session-keys" />
+  <Card title="RBAC"
+    description="Who can do what — Owner, Admin, Spender."
+    href="/concepts/rbac" />
+  <Card title="Paymaster"
+    description="How gas sponsorship and fee collection work."
+    href="/concepts/paymaster" />
+  <Card title="Troubleshooting"
+    description="Common errors and fixes — including the vault/wallet confusion."
+    href="/troubleshooting" />
+</Cards>

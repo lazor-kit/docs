@@ -1,52 +1,239 @@
 ---
 title: Types
-description: API reference for common types and interfaces.
+description: TypeScript interfaces, constants, and session action builders.
 ---
 
-# Types
+Every public type grouped by what you're doing. Import anything below from
+`@lazorkit/wallet-mobile-adapter` directly.
 
-Common TypeScript interfaces used throughout the SDK.
+## Wallet state
 
-## SignAndSendTransactionPayload
+### `WalletInfo`
 
-Payload structure for transaction signing.
+The persisted record written to `AsyncStorage` after `connect`.
 
-```typescript
-interface SignAndSendTransactionPayload {
-  readonly instructions: TransactionInstruction[];
-  readonly transactionOptions: {
-    readonly feeToken?: string;
-    readonly addressLookupTableAccounts?: AddressLookupTableAccount[];
-    readonly computeUnitLimit?: number;
-    readonly clusterSimulation: 'devnet' | 'mainnet';
-  };
-}
-```
-
-## WalletInfo
-
-Represents the connected wallet's state.
-
-```typescript
+```ts
 interface WalletInfo {
-  readonly credentialId: string;      // Unique WebAuthn credential ID (Base64). Used for authentication.
-  readonly passkeyPubkey: number[];   // Raw public key bytes of the passkey.
-  readonly smartWallet: string;       // **YOUR SOLANA WALLET ADDRESS** (Base58). Use this to receive funds.
-  readonly walletDevice: string;      // Internal PDA for device management.
-  readonly platform: string;          // Origin platform ('android' | 'ios').
+  credentialId: string;         // WebAuthn credential ID (base64)
+  passkeyPubkey: number[];      // 33-byte compressed secp256r1 pubkey
+  expo: string;
+  platform: string;             // 'ios' | 'android' | …
+
+  /** Vault PDA (base58) — the address funds live at. Show this to users. */
+  smartWallet: string;
+
+  /** Wallet metadata PDA (base58). Needed for raw LazorKitClient calls. */
+  walletPda: string;
+
+  /** Authority PDA (base58) tied to this passkey credential. */
+  walletDevice: string;
 }
 ```
 
+<Callout type="info">
+  After the v2 upgrade, `smartWallet` points to the **vault PDA** rather than the wallet
+  metadata account. Existing persisted wallets are migrated automatically.
+</Callout>
 
+### `WalletConfig` / `LazorKitProviderProps`
 
-## SignOptions
+```ts
+interface WalletConfig {
+  portalUrl: string;
+  configPaymaster: { paymasterUrl: string; apiKey?: string };
+  rpcUrl?: string;
+  rpId?: string;
+}
 
-Options passed to `signMessage`.
+interface LazorKitProviderProps {
+  rpcUrl?: string;
+  portalUrl?: string;
+  configPaymaster?: { paymasterUrl: string; apiKey?: string };
+  rpId?: string;
+  isDebug?: boolean;
+  children: ReactNode;
+}
+```
 
-```typescript
+---
+
+## Options & payloads
+
+### `SignOptions`
+
+Trailing argument on every passkey-signed method.
+
+```ts
 interface SignOptions {
-  redirectUrl: string;
+  redirectUrl: string;                    // your app deep-link scheme
   onSuccess?: (result: any) => void;
   onFail?: (error: Error) => void;
 }
 ```
+
+### Transaction payloads
+
+```ts
+interface TransactionOptions {
+  feeToken?: string;                                       // SPL mint base58
+  addressLookupTableAccounts?: AddressLookupTableAccount[];
+  computeUnitLimit?: number;
+  clusterSimulation?: 'devnet' | 'mainnet';
+}
+
+interface SignAndSendTransactionPayload {
+  instructions: TransactionInstruction[];
+  transactionOptions?: TransactionOptions;
+}
+
+interface AuthorizeExecutePayload extends SignAndSendTransactionPayload {
+  expiryOffset?: number;                  // slots; default 300 ≈ 2 min
+}
+
+interface SessionSignPayload {
+  sessionKeypair: Keypair;                // Ed25519 keypair from createSession
+  sessionPda: PublicKey;
+  instructions: TransactionInstruction[];
+  transactionOptions?: TransactionOptions;
+}
+
+interface TransferSolPayload {
+  recipient: PublicKey;
+  lamports: bigint | number;
+  transactionOptions?: TransactionOptions;
+}
+```
+
+### Session payloads
+
+```ts
+interface CreateSessionPayload {
+  sessionKey: PublicKey;                  // fresh Ed25519 public key
+  expiresAtSlot: bigint;                  // absolute slot
+  actions?: SessionAction[];              // optional on-chain policy
+}
+
+interface RevokeSessionPayload {
+  sessionPda: PublicKey;
+  refundDestination?: PublicKey;          // default: paymaster fee payer
+}
+```
+
+### Authority payloads
+
+```ts
+interface AddAuthorityPayload {
+  newEd25519Pubkey: PublicKey;
+  role?: number;                          // ROLE_ADMIN (1) | ROLE_SPENDER (2 — default)
+}
+
+interface RemoveAuthorityPayload {
+  targetAuthorityPda: PublicKey;
+  refundDestination?: PublicKey;
+}
+
+interface AuthorityEntry {
+  authorityPda: PublicKey;
+  authorityType: number;                  // 0 = ed25519, 1 = secp256r1
+  role: number;                           // 0 = owner, 1 = admin, 2 = spender
+  credential: Uint8Array;                 // 32 bytes
+  secp256r1Pubkey?: Uint8Array;           // 33 bytes, secp256r1 only
+}
+
+type ListAuthoritiesResult = AuthorityEntry[];
+```
+
+---
+
+## Session actions
+
+Actions are **immutable policies** attached to a session at creation. The on-chain program
+enforces them on every `Execute` signed by the session key.
+
+### Builder — `Actions`
+
+Prefer these helpers over hand-building the raw object:
+
+```ts
+import { Actions } from '@lazorkit/wallet-mobile-adapter';
+
+// SOL
+Actions.solLimit(remainingLamports, expiresAt?)
+Actions.solRecurringLimit({ limit, window, expiresAt? })
+Actions.solMaxPerTx(maxLamports, expiresAt?)
+
+// SPL tokens
+Actions.tokenLimit({ mint, remaining, expiresAt? })
+Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
+Actions.tokenMaxPerTx({ mint, max, expiresAt? })
+
+// CPI filters
+Actions.programWhitelist(programId, expiresAt?)
+Actions.programBlacklist(programId, expiresAt?)
+```
+
+### Raw enum / union
+
+```ts
+enum SessionActionType {
+  SolLimit            = 1,
+  SolRecurringLimit   = 2,
+  SolMaxPerTx         = 3,
+  TokenLimit          = 4,
+  TokenRecurringLimit = 5,
+  TokenMaxPerTx       = 6,
+  ProgramWhitelist    = 10,
+  ProgramBlacklist    = 11,
+}
+
+type SessionAction =
+  | { type: SessionActionType.SolLimit; remaining: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolRecurringLimit; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolMaxPerTx; max: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenLimit; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenMaxPerTx; mint: PublicKey; max: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.ProgramWhitelist; programId: PublicKey; expiresAt?: bigint }
+  | { type: SessionActionType.ProgramBlacklist; programId: PublicKey; expiresAt?: bigint };
+```
+
+### Common limits (cheat sheet)
+
+| Slot window   | Minutes (≈) | Hours (≈) | Days (≈) |
+| ------------- | ----------- | --------- | -------- |
+| `9_000n`      | 60          | 1         | —        |
+| `54_000n`     | —           | 6         | —        |
+| `216_000n`    | —           | —         | 1        |
+| `1_512_000n`  | —           | —         | 7        |
+
+Slot time ≈ 400 ms — these are approximations. Use on-chain slot math for precision.
+
+---
+
+## Roles & auth types
+
+```ts
+export const ROLE_OWNER   = 0;   // can transfer ownership
+export const ROLE_ADMIN   = 1;   // manage authorities + sessions
+export const ROLE_SPENDER = 2;   // execute only
+
+export const AUTH_TYPE_ED25519   = 0;
+export const AUTH_TYPE_SECP256R1 = 1;
+```
+
+---
+
+## Errors
+
+SDK-level errors live on a small hierarchy:
+
+```ts
+class LazorKitError extends Error {
+  code?: string;                  // e.g. 'WALLET_CONNECTION_ERROR' | 'SIGNING_ERROR'
+}
+class WalletConnectionError extends LazorKitError { /* code: WALLET_CONNECTION_ERROR */ }
+class SigningError          extends LazorKitError { /* code: SIGNING_ERROR */ }
+```
+
+On-chain program errors appear inside `SendTransactionError` messages as hex codes —
+`0xbd0`, `0xbd1`, etc. See [Troubleshooting](/troubleshooting) for the full map.

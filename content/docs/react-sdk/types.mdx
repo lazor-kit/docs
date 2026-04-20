@@ -1,41 +1,229 @@
 ---
-title: Type Definitions
-description: TypeScript definitions for LazorKit React SDK.
+title: Types
+description: TypeScript interfaces, constants, and the SpendingLimits wrapper.
 ---
 
-# Type Definitions
+All public types from `@lazorkit/wallet`, grouped by what you're doing.
 
-## Core Types
+## Wallet state
 
-### SignAndSendTransactionPayload
+### `WalletInfo`
 
-Payload structure for transaction signing.
+```ts
+interface WalletInfo {
+  credentialId: string;        // WebAuthn credential ID (base64)
+  passkeyPubkey: number[];     // 33-byte compressed secp256r1 pubkey
+  smartWallet: string;         // vault PDA (base58) — where funds live
+  walletDevice: string;        // authority PDA for the active passkey
+  platform: string;            // 'macIntel' | 'linux' | …
+  accountName?: string;        // optional WebAuthn display name
+}
+```
 
-```typescript
+### `LazorkitProviderProps`
+
+```ts
+interface LazorkitProviderProps {
+  children: ReactNode;
+  rpcUrl?: string;
+  portalUrl?: string;
+  paymasterConfig?: PaymasterConfig;
+}
+
+interface PaymasterConfig {
+  paymasterUrl: string;
+  apiKey?: string;
+}
+```
+
+---
+
+## Transaction payloads
+
+```ts
+interface TransactionOptions {
+  feeToken?: string;                                       // SPL mint base58
+  addressLookupTableAccounts?: AddressLookupTableAccount[];
+  computeUnitLimit?: number;
+  clusterSimulation?: 'devnet' | 'mainnet';
+}
+
 interface SignAndSendTransactionPayload {
   instructions: TransactionInstruction[];
-  transactionOptions?: {
-    feeToken?: string;
-    addressLookupTableAccounts?: AddressLookupTableAccount[];
-    computeUnitLimit?: number;
-    clusterSimulation?: 'devnet' | 'mainnet';
+  transactionOptions?: TransactionOptions;
+}
+```
+
+---
+
+## Session payloads
+
+```ts
+interface CreateSessionPayload {
+  expiresInSlots?: bigint;
+  spendingLimits?: SpendingLimits;
+  onSuccess?: (sessionPda: string, sessionPublicKey: string) => void;
+  onFail?: (error: Error) => void;
+}
+
+interface RevokeSessionPayload {
+  onSuccess?: () => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+### `SpendingLimits`
+
+High-level wrapper around the on-chain action catalogue. Every field is optional —
+omitted limits mean "no cap" on that axis. The SDK translates `SpendingLimits` into
+concrete `SessionAction[]` before submission.
+
+```ts
+interface SpendingLimits {
+  /** Lifetime SOL cap (lamports) — session dies once spent. */
+  solLifetimeCap?: bigint;
+
+  /** Maximum lamports per single execute. */
+  solPerTxMax?: bigint;
+
+  /** SOL cap that resets every `windowSlots` slots. */
+  solRecurring?: {
+    limit: bigint;
+    windowSlots: bigint;
   };
 }
 ```
 
-### WalletInfo
+<Callout type="info" title="Need token or program limits?">
+  The high-level `SpendingLimits` covers SOL. For token caps, program whitelisting, or
+  per-action expiries, drop to the raw [`SessionAction`](#low-level-sessionaction) catalogue
+  via `LazorKitClient.createSession` directly.
+</Callout>
 
-Connected wallet information.
+### Common windows
 
-```typescript
-interface WalletInfo {
-  credentialId: string;           // Unique WebAuthn credential ID (Base64). Authentication.
-  passkeyPubkey: number[];        // Raw public key bytes of the passkey.
-  smartWallet: string;            // **YOUR SOLANA WALLET ADDRESS** (Base58). Use this for funds.
-  walletDevice: string;           // Internal PDA for device management.
-  platform: string;               // Platform info (e.g. 'web', 'macIntel').
-  accountName?: string;           // The user's account name (if available).
+| `windowSlots`  | Minutes | Hours | Days |
+| -------------- | ------- | ----- | ---- |
+| `9_000n`       | 60      | 1     | —    |
+| `54_000n`      | —       | 6     | —    |
+| `216_000n`     | —       | —     | 1    |
+| `1_512_000n`   | —       | —     | 7    |
+
+Slot time ≈ 400 ms — these are approximations. Use on-chain clock math for precise
+enforcement windows.
+
+---
+
+## Authority payloads
+
+```ts
+interface AddAuthorityPayload {
+  role?: number;                        // ROLE_ADMIN (1) | ROLE_SPENDER (2, default)
+  onSuccess?: (authorityPda: string, authorityPublicKey: string) => void;
+  onFail?: (error: Error) => void;
 }
 ```
 
+`removeAuthority` takes a single positional `targetAuthorityPda: string`.
 
+---
+
+## Roles & auth types
+
+```ts
+export const ROLE_OWNER   = 0;   // can transfer ownership
+export const ROLE_ADMIN   = 1;   // manage authorities + sessions
+export const ROLE_SPENDER = 2;   // execute only
+
+export const AUTH_TYPE_ED25519   = 0;
+export const AUTH_TYPE_SECP256R1 = 1;
+```
+
+---
+
+## Low-level `SessionAction`
+
+Drop-down to the raw action catalogue when `SpendingLimits` isn't expressive enough
+(token caps, program filters, per-action expiries). Pass `SessionAction[]` when calling
+`LazorKitClient.createSession` directly.
+
+```ts
+enum SessionActionType {
+  SolLimit            = 1,
+  SolRecurringLimit   = 2,
+  SolMaxPerTx         = 3,
+  TokenLimit          = 4,
+  TokenRecurringLimit = 5,
+  TokenMaxPerTx       = 6,
+  ProgramWhitelist    = 10,
+  ProgramBlacklist    = 11,
+}
+
+import { Actions } from '@lazorkit/wallet';
+
+Actions.solLimit(lamports, expiresAt?)
+Actions.solRecurringLimit({ limit, window, expiresAt? })
+Actions.solMaxPerTx(lamports, expiresAt?)
+
+Actions.tokenLimit({ mint, remaining, expiresAt? })
+Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
+Actions.tokenMaxPerTx({ mint, max, expiresAt? })
+
+Actions.programWhitelist(programId, expiresAt?)
+Actions.programBlacklist(programId, expiresAt?)
+```
+
+---
+
+## Hook interface
+
+Full return type of `useWallet`:
+
+```ts
+interface WalletHookInterface {
+  // State
+  smartWalletPubkey: PublicKey | null;
+  wallet: WalletInfo | null;
+  isConnected: boolean;
+  isLoading: boolean;
+  isConnecting: boolean;
+  isSigning: boolean;
+  error: Error | null;
+
+  // Core
+  connect: (options?: { feeMode?: 'paymaster' | 'user' }) => Promise<WalletInfo>;
+  disconnect: () => Promise<void>;
+  signAndSendTransaction: (payload: SignAndSendTransactionPayload) => Promise<string>;
+  signMessage: (message: string) => Promise<{ signature: string; signedPayload: string }>;
+  verifyMessage: (args: {
+    signedPayload: Uint8Array;
+    signature: Uint8Array;
+    publicKey: Uint8Array;
+  }) => Promise<boolean>;
+
+  // Session
+  createSession: (payload?: {
+    expiresInSlots?: bigint;
+    spendingLimits?: SpendingLimits;
+  }) => Promise<{ sessionPda: string; sessionPublicKey: string }>;
+  revokeSession: () => Promise<void>;
+  signAndSendWithSession: (payload: {
+    instructions: TransactionInstruction[];
+  }) => Promise<string>;
+
+  // Authority
+  addAuthority: (payload?: { role?: number }) => Promise<{
+    authorityPda: string;
+    authorityPublicKey: string;
+  }>;
+  removeAuthority: (targetAuthorityPda: string) => Promise<void>;
+  signAndSendWithAuthority: (payload: {
+    instructions: TransactionInstruction[];
+  }) => Promise<string>;
+
+  // Deferred execution
+  authorizeAndExecute: (payload: {
+    instructions: TransactionInstruction[];
+  }) => Promise<string>;
+}
+```

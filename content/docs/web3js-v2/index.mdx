@@ -3,10 +3,28 @@ title: Overview
 description: LazorKit SDK for @solana/web3.js v2 — coming soon.
 ---
 
-# SDK — web3.js v2
+import { ArrowRight } from 'lucide-react'
 
-> _This SDK is in development. Content will be added when available._
+<Callout type="info" title="In development">
+  The web3.js v2 SDK is not yet published. Use [`@lazorkit/sdk-legacy`](/web3js-v1)
+  (web3.js v1) today — the protocol feature set is identical.
+</Callout>
 
-The web3.js v2 SDK will provide the same LazorKit contract interaction capabilities as [`@lazorkit/sdk-legacy`](/web3js-v1) but built on `@solana/web3.js` v2 — the new Solana web3 library with tree-shakeable modules, functional APIs, and improved TypeScript types.
+## What's coming
 
-For now, use the [web3.js v1 SDK](/web3js-v1).
+The v2 SDK will expose the same LazorKit contract capabilities as
+[`@lazorkit/sdk-legacy`](/web3js-v1), rebuilt on `@solana/web3.js` v2. Expect:
+
+- **Tree-shakeable builders** — only pay for the instructions you use.
+- **Functional signer API** — composable signer primitives instead of class instances.
+- **Stricter TypeScript types** — branded addresses, typed instruction fragments.
+- **First-class RPC types** — uses `@solana/rpc` interfaces directly.
+- **Same on-chain program** — fully compatible with wallets and sessions created through v1 or the React/React-Native SDKs.
+
+## Use v1 today
+
+<Cards>
+  <Card title="web3.js v1 SDK"
+    description="Full-featured client for the current Solana web3.js v1 stack."
+    href="/web3js-v1" />
+</Cards>

@@ -1,21 +1,26 @@
 ---
 title: Session Keys
-description: Create, use, and revoke session keys with the web3.js v1 SDK.
+description: Create, use, and revoke session keys with the low-level web3.js v1 SDK.
 ---
 
-# Session Keys
-
-Session keys let an app or agent execute transactions on behalf of a wallet without passkey re-authentication. See [Session Keys concept page](/concepts/session-keys) for the full protocol explanation.
+Session keys let an app or agent execute on a wallet's behalf without passkey
+re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` API — see
+[Session Keys concept](/concepts/session-keys) for the protocol-level explanation and
+[React SDK](/react-sdk/use-wallet#createsession) / [React Native SDK](/react-native-sdk/use-wallet#createsession)
+for higher-level wrappers.
 
 ---
 
-## Create a Session
+## Create a session
 
-### Ed25519 Admin
+<Tabs items={['Ed25519 admin', 'Passkey admin', 'Unrestricted']}>
+<Tab value="Ed25519 admin">
+
+When the admin is an Ed25519 keypair, sign immediately with a single call:
 
 ```typescript
 import { Keypair, SystemProgram } from '@solana/web3.js';
-import { ed25519 } from '@lazorkit/sdk-legacy';
+import { Actions, ed25519 } from '@lazorkit/sdk-legacy';
 
 const sessionKp = Keypair.generate();
 const slot = await connection.getSlot();
@@ -25,53 +30,77 @@ const { instructions, sessionPda } = await client.createSession({
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 216_000n,   // ~1 day
+  expiresAt: BigInt(slot) + 216_000n,           // ~1 day
   actions: [
-    { type: 'SolMaxPerTx', max: 1_000_000_000n },
-    { type: 'SolLimit', remaining: 10_000_000_000n },
-    { type: 'ProgramWhitelist', programId: SystemProgram.programId },
+    Actions.solMaxPerTx(1_000_000_000n),        // 1 SOL per tx
+    Actions.solLimit(10_000_000_000n),          // 10 SOL lifetime
+    Actions.programWhitelist(SystemProgram.programId),
   ],
 });
 ```
 
-`expiresAt` is a **slot number**, not a Unix timestamp. Max duration ~30 days.
+`expiresAt` is an **absolute slot**, not a Unix timestamp. Max duration ~30 days.
 
-### Passkey Admin (Two-Phase)
+</Tab>
+<Tab value="Passkey admin">
+
+For Secp256r1 (passkey) admins, use the two-phase prepare / finalize flow:
 
 ```typescript
+import { Actions } from '@lazorkit/sdk-legacy';
+
+// 1. Compute the challenge
 const prepared = await client.prepareCreateSession({
   payer: payer.publicKey,
   walletPda,
   secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 432_000n,
+  expiresAt: BigInt(slot) + 432_000n,           // ~2 days
   actions: [
-    { type: 'TokenLimit', mint: USDC_MINT, remaining: 1_000_000_000n },
-    { type: 'TokenMaxPerTx', mint: USDC_MINT, max: 100_000_000n },
+    Actions.tokenLimit({ mint: USDC_MINT, remaining: 1_000_000_000n }),
+    Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 100_000_000n }),
   ],
 });
 
-const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+// 2. Authenticator signs the challenge
+const webauthnResponse = await getWebAuthnResponse(
+  prepared.challenge,
+  'your-app.com',
+  credentialId,
+);
+
+// 3. Build the transaction
 const { instructions, sessionPda } = client.finalizeCreateSession(prepared, webauthnResponse);
 ```
 
-### Unrestricted Session
+</Tab>
+<Tab value="Unrestricted">
 
-Omit `actions` for a fully open session:
+Omit `actions` for a session with no on-chain limits — still bounded by expiry:
 
 ```typescript
+import { ed25519 } from '@lazorkit/sdk-legacy';
+
 const { instructions, sessionPda } = await client.createSession({
   payer: payer.publicKey,
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 9_000n,
+  expiresAt: BigInt(slot) + 9_000n,             // ~1 hour
 });
 ```
 
+</Tab>
+</Tabs>
+
+<Callout type="warn" title="Actions are immutable">
+  A session's action list can't be modified after creation. To change limits, revoke and
+  recreate.
+</Callout>
+
 ---
 
-## Execute via Session Key
+## Execute via session key
 
 ```typescript
 import { session } from '@lazorkit/sdk-legacy';
@@ -81,46 +110,97 @@ const { instructions } = await client.transferSol({
   walletPda,
   signer: session(sessionPda, sessionKp.publicKey),
   recipient,
-  lamports: 500_000_000n,
+  lamports: 500_000_000n,                       // 0.5 SOL — within the 1 SOL per-tx cap
 });
 ```
 
-No passkey prompt. The session keypair signs the transaction directly.
+No passkey prompt — the session keypair signs at transaction level.
+
+For arbitrary instructions, use `client.execute`:
+
+```typescript
+const { instructions } = await client.execute({
+  payer: payer.publicKey,
+  walletPda,
+  signer: session(sessionPda, sessionKp.publicKey),
+  instructions: [jupiterSwapIx],
+});
+```
 
 ---
 
-## Deferred Execution
+## Deferred execution
 
-For large payloads exceeding the ~574 bytes available in a single Secp256r1 Execute (e.g. Jupiter swaps).
+For payloads exceeding the ~574 bytes available in a single Secp256r1 `Execute`
+(e.g. Jupiter swaps with routes + ATAs), use the 2-transaction deferred flow.
 
-### TX1 — Authorize
+<Callout type="info" title="Only Secp256r1 Owner/Admin can authorize">
+  `Authorize` (TX1) is restricted to Secp256r1 Owner or Admin signers. Ed25519 admins
+  and Spenders can't call it.
+</Callout>
+
+### TX1 — Authorize (passkey signs)
 
 ```typescript
-const { instructions: authIx } = await client.prepareAuthorize({
+const prepared = await client.prepareAuthorize({
   payer: payer.publicKey,
   walletPda,
   secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
-  instructions: innerInstructions,   // the instructions to pre-authorize
+  instructions: innerInstructions,              // payload to pre-authorize
 });
 
-const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+const webauthnResponse = await getWebAuthnResponse(prepared.challenge, 'your-app.com', credentialId);
 const { instructions, deferredExecPda } = client.finalizeAuthorize(prepared, webauthnResponse);
+
+await sendAndConfirm(connection, instructions, [payer]);
 ```
 
-### TX2 — ExecuteDeferred
+### TX2 — ExecuteDeferred (any signer)
 
 ```typescript
 const { instructions } = await client.executeDeferred({
   payer: payer.publicKey,
   walletPda,
   deferredExecPda,
-  instructions: innerInstructions,   // must match what was authorized in TX1
+  instructions: innerInstructions,              // MUST match TX1's instructions
 });
 ```
 
-### Reclaim Expired Authorization
+<Callout type="warn" title="Hashes must match">
+  The program verifies TX2's instructions + accounts hash matches what TX1 recorded.
+  Any mismatch is rejected with `DeferredHashMismatch` (`0xbc7`).
+</Callout>
 
-If TX2 is never submitted, recover the DeferredExec account rent:
+### Cross-machine deferred flows
+
+TX1 and TX2 don't need to run on the same machine. You can sign TX1 on the user's device,
+serialize the deferred payload, POST it to a relayer, and submit TX2 from there:
+
+```typescript
+import {
+  serializeDeferredPayload,
+  deserializeDeferredPayload,
+} from '@lazorkit/sdk-legacy';
+
+// User device (after finalizing TX1):
+const { deferredPayload } = client.finalizeAuthorize(prepared, webauthnResponse);
+const wire = serializeDeferredPayload(deferredPayload);   // JSON-safe string
+await fetch('/relayer', { method: 'POST', body: wire });
+
+// Relayer:
+const payload = deserializeDeferredPayload(await req.text());
+const { instructions } = await client.executeDeferredFromPayload({
+  payer: relayerKeypair.publicKey,
+  deferredPayload: payload,
+});
+```
+
+All fields serialize as base58 (pubkeys) or base64 (raw bytes) — safe over HTTP, WebSocket,
+or any store-and-forward channel.
+
+### Reclaim an expired authorization
+
+If TX2 is never submitted, recover the DeferredExec account rent after expiry:
 
 ```typescript
 const { instructions } = await client.reclaimDeferred({
@@ -134,9 +214,11 @@ Only the original payer can reclaim, and only after the deferred account expires
 
 ---
 
-## Revoke a Session
+## Revoke a session
 
 ```typescript
+import { ed25519 } from '@lazorkit/sdk-legacy';
+
 const { instructions } = await client.revokeSession({
   payer: payer.publicKey,
   walletPda,
@@ -146,21 +228,40 @@ const { instructions } = await client.revokeSession({
 });
 ```
 
-Closes the session PDA and refunds rent. Works on active or already-expired sessions. Only Owner or Admin can revoke.
+Closes the session PDA and refunds rent. Works on active or already-expired sessions.
+Owner or Admin only.
 
 ---
 
-## Action Types Reference
+## Action types reference
 
-| Type | Fields |
-|---|---|
-| `SolLimit` | `remaining: bigint` |
-| `SolRecurringLimit` | `limit: bigint`, `window: bigint` |
-| `SolMaxPerTx` | `max: bigint` |
-| `TokenLimit` | `mint: PublicKey`, `remaining: bigint` |
-| `TokenRecurringLimit` | `mint: PublicKey`, `limit: bigint`, `window: bigint` |
-| `TokenMaxPerTx` | `mint: PublicKey`, `max: bigint` |
-| `ProgramWhitelist` | `programId: PublicKey` |
-| `ProgramBlacklist` | `programId: PublicKey` |
+| Type                     | Fields                                               | Builder                                                     |
+| ------------------------ | ---------------------------------------------------- | ----------------------------------------------------------- |
+| `SolLimit`               | `remaining`                                          | `Actions.solLimit(remaining, expiresAt?)`                   |
+| `SolRecurringLimit`      | `limit`, `window`                                    | `Actions.solRecurringLimit({ limit, window, expiresAt? })`  |
+| `SolMaxPerTx`            | `max`                                                | `Actions.solMaxPerTx(max, expiresAt?)`                      |
+| `TokenLimit`             | `mint`, `remaining`                                  | `Actions.tokenLimit({ mint, remaining, expiresAt? })`       |
+| `TokenRecurringLimit`    | `mint`, `limit`, `window`                            | `Actions.tokenRecurringLimit({ mint, limit, window, … })`    |
+| `TokenMaxPerTx`          | `mint`, `max`                                        | `Actions.tokenMaxPerTx({ mint, max, expiresAt? })`          |
+| `ProgramWhitelist`       | `programId`                                          | `Actions.programWhitelist(programId, expiresAt?)`           |
+| `ProgramBlacklist`       | `programId`                                          | `Actions.programBlacklist(programId, expiresAt?)`           |
 
-All SOL/token amounts are in **lamports** (`bigint`). Max 16 actions per session.
+All SOL/token amounts are **bigint** (lamports for SOL; base units for tokens). Max 16
+actions per session, 2048-byte total buffer.
+
+See [Session Keys concept](/concepts/session-keys#actions-reference) for semantics and
+edge cases (expired actions, gross outflow tracking, etc.).
+
+---
+
+## Common session errors
+
+| Code      | Name                                | Fix                                                                |
+| --------- | ----------------------------------- | ------------------------------------------------------------------ |
+| `0xbd0`   | `ActionSolLimitExceeded`            | Lifetime cap hit. Revoke + recreate with higher `solLimit`.         |
+| `0xbd1`   | `ActionSolRecurringLimitExceeded`   | Window cap hit. Wait for reset or raise the limit.                 |
+| `0xbc1`   | `SessionExpired`                    | Past `expiresAtSlot`. Close and create a new session.              |
+| `0xbcd`   | `ActionProgramNotWhitelisted`       | CPI target isn't in the whitelist. Add it or drop the filter.      |
+| `0xbc7`   | `DeferredHashMismatch`              | TX2 instructions differ from TX1's authorization.                   |
+
+Full map in [Troubleshooting › Program errors](/troubleshooting#program-errors-0xbd0-0xbd1-).

@@ -1,9 +1,15 @@
 ---
 title: Getting Started
-description: Create a wallet, execute a transaction, and look up a wallet by credential.
+description: Create a wallet, execute a transaction, look up a wallet by credential.
 ---
 
-# Getting Started
+Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
+`TransactionInstruction[]` — you wrap them into a `Transaction`, sign, and submit.
+
+<Callout type="info" title="Vault PDA holds funds">
+  `createWallet` returns `vaultPda` — the address where SOL and tokens live. Send/receive
+  funds there. `walletPda` is the metadata PDA, used internally.
+</Callout>
 
 ## Prerequisites
 
@@ -16,12 +22,11 @@ npm install @lazorkit/sdk-legacy @solana/web3.js
 
 ---
 
-## 1. Initialize the Client
+## 1. Initialize the client
 
 ```typescript
 import { Connection } from '@solana/web3.js';
-import { LazorKitClient, ed25519, session } from '@lazorkit/sdk-legacy';
-import * as crypto from 'crypto';
+import { LazorKitClient } from '@lazorkit/sdk-legacy';
 
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 const client = new LazorKitClient(connection);
@@ -29,53 +34,90 @@ const client = new LazorKitClient(connection);
 
 ---
 
-## 2. Create a Wallet
+## 2. Create a wallet
 
-### Ed25519 Owner
+<Tabs items={['Ed25519 owner', 'Secp256r1 (passkey) owner']}>
+<Tab value="Ed25519 owner">
 
 ```typescript
 import { Keypair } from '@solana/web3.js';
+import * as crypto from 'crypto';
 
 const ownerKp = Keypair.generate();
 
 const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
   payer: payer.publicKey,
   userSeed: crypto.randomBytes(32),
-  owner: {
-    type: 'ed25519',
-    pubkey: ownerKp.publicKey,
-  },
+  owner: { type: 'ed25519', pubkey: ownerKp.publicKey },
 });
 ```
 
-### Secp256r1 (Passkey) Owner
+</Tab>
+<Tab value="Secp256r1 (passkey) owner">
 
 ```typescript
+import * as crypto from 'crypto';
+
 const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
   payer: payer.publicKey,
   userSeed: crypto.randomBytes(32),
   owner: {
     type: 'secp256r1',
-    credentialIdHash,     // 32-byte SHA256 of WebAuthn credential ID
-    compressedPubkey,     // 33-byte compressed Secp256r1 public key
+    credentialIdHash,    // 32-byte SHA256 of WebAuthn credential ID
+    compressedPubkey,    // 33-byte compressed Secp256r1 public key
     rpId: 'your-app.com',
   },
 });
 ```
 
+See [Smart Wallet concept](/concepts/smart-wallet#authentication) for how passkey
+registration produces these fields.
+
+</Tab>
+</Tabs>
+
+Send the returned `instructions` as a single transaction. `vaultPda` is the address your
+users send funds to; `walletPda` is their metadata PDA anchor.
+
 ---
 
-## 3. Execute a Transaction
+## 3. Execute a transaction
 
-### Ed25519 Signer
+<Tabs items={['Ed25519 signer', 'Secp256r1 (passkey) signer']}>
+<Tab value="Ed25519 signer">
 
 ```typescript
 import { SystemProgram } from '@solana/web3.js';
+import { ed25519 } from '@lazorkit/sdk-legacy';
 
 const { instructions } = await client.execute({
   payer: payer.publicKey,
   walletPda,
   signer: ed25519(ownerKp.publicKey),
+  instructions: [
+    SystemProgram.transfer({
+      fromPubkey: vaultPda,                 // funds live at the vault
+      toPubkey: recipient,
+      lamports: 1_000_000n,
+    }),
+  ],
+});
+```
+
+`ownerKp` signs at transaction level alongside the `fee_payer`.
+
+</Tab>
+<Tab value="Secp256r1 (passkey) signer">
+
+Passkey signing is two-phase — the authenticator can only sign after the challenge is
+computed:
+
+```typescript
+// 1. Compute the challenge
+const prepared = await client.prepareExecute({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, publicKeyBytes: compressedPubkey, authorityPda },
   instructions: [
     SystemProgram.transfer({
       fromPubkey: vaultPda,
@@ -84,46 +126,51 @@ const { instructions } = await client.execute({
     }),
   ],
 });
-```
 
-### Secp256r1 (Passkey) — Two-Phase Flow
+// 2. Authenticator signs the challenge
+const webauthnResponse = await getWebAuthnResponse(
+  prepared.challenge,
+  'your-app.com',
+  credentialId,
+);
 
-Passkey signing requires a prepare/finalize pattern because the WebAuthn challenge must be computed before the authenticator signs:
-
-```typescript
-// Step 1: Compute the challenge
-const prepared = await client.prepareExecute({
-  payer: payer.publicKey,
-  walletPda,
-  secp256r1: { credentialIdHash, publicKeyBytes: compressedPubkey, authorityPda },
-  instructions: [
-    SystemProgram.transfer({ fromPubkey: vaultPda, toPubkey: recipient, lamports: 1_000_000n }),
-  ],
-});
-
-// Step 2: Browser authenticator signs the challenge
-const webauthnResponse = await getWebAuthnResponse(prepared.challenge, 'your-app.com', credentialId);
-
-// Step 3: Build the transaction
+// 3. Build the final transaction
 const { instructions } = client.finalizeExecute(prepared, webauthnResponse);
 ```
 
+</Tab>
+</Tabs>
+
 ---
 
-## 4. Look Up a Wallet (Returning Users)
+## 4. Look up a returning user
 
-No need to store `walletPda` client-side — look it up by credential hash:
+No need to store `walletPda` / `authorityPda` client-side — look them up by the credential
+hash the user authenticates with:
 
 ```typescript
 const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
-// Returns: { walletPda, authorityPda, vaultPda, role, authorityType }
+// {
+//   walletPda,
+//   authorityPda,
+//   vaultPda,
+//   role,              // 0=Owner, 1=Admin, 2=Spender
+//   authorityType,     // 0=Ed25519, 1=Secp256r1
+// }
 ```
+
+Returns an array — a single credential can authorise multiple wallets. Most flows care
+about the first entry.
 
 ---
 
-## 5. Transfer SOL (Shorthand)
+## 5. Transfer SOL (shorthand)
+
+`transferSol` wraps `execute` with a `SystemProgram.transfer` from the vault:
 
 ```typescript
+import { ed25519 } from '@lazorkit/sdk-legacy';
+
 const { instructions } = await client.transferSol({
   payer: payer.publicKey,
   walletPda,
@@ -135,9 +182,23 @@ const { instructions } = await client.transferSol({
 
 ---
 
-## Program ID
+## 6. Program constants
 
 ```typescript
 import { PROGRAM_ID } from '@lazorkit/sdk-legacy';
 // 4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS
 ```
+
+## Next steps
+
+<Cards>
+  <Card title="Session Keys"
+    description="Delegate execution to a scoped Ed25519 signer with on-chain spending limits."
+    href="/web3js-v1/session-keys" />
+  <Card title="Types"
+    description="Signer helpers, PDA derivation, account decoders, error parsing."
+    href="/web3js-v1/types" />
+  <Card title="Smart Wallet"
+    description="How vault / wallet / authority PDAs fit together."
+    href="/concepts/smart-wallet" />
+</Cards>

@@ -1,189 +1,189 @@
 ---
 title: Wallet Standard
-description: Integration with Solana Wallet Adapter and other frameworks.
+description: Integrate LazorKit with @solana/wallet-adapter-react and other Wallet Standard clients.
 ---
 
-# Wallet Standard Support
+LazorKit implements the [Solana Wallet Standard](https://github.com/wallet-standard/wallet-standard),
+so you can drop it into any Wallet Adapter setup alongside Phantom, Solflare, Backpack,
+and friends.
 
-The LazorKit SDK supports the [Solana Wallet Standard](https://github.com/wallet-standard/wallet-standard), enabling compatibility with popular libraries like `@solana/wallet-adapter-react`.
+<Callout type="info" title="When to use Wallet Standard">
+  Pick this path if you already have a Wallet Adapter-powered app and want LazorKit to
+  appear in the standard wallet picker. For a purpose-built integration, use the
+  [React SDK](/react-sdk) or [React Native SDK](/react-native-sdk) directly — both expose
+  session keys, deferred execution, and authority management that Wallet Standard
+  doesn't cover.
+</Callout>
 
-## Integration with `@solana/wallet-adapter-react`
-
-### Default Configuration
-
-// Standard Devnet Configuration
-```ts
-export const DEFAULT_CONFIG = {
-  rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: {
-    paymasterUrl: 'https://kora.devnet.lazorkit.com',
-    // apiKey: 'YOUR_API_KEY' // Optional
-  },
-  clusterSimulation: 'devnet'
-};
-```
-
-You can use LazorKit seamlessly alongside other standard wallets (like Phantom, Solflare) in your existing provider setup.
-
-### 1. Installation
-
-Install the necessary dependencies:
+## Install
 
 ```bash
-npm install @lazorkit/wallet @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
+npm install @lazorkit/wallet \
+  @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
 ```
 
-### 2. Register the Wallet
+## Setup
 
-Call `registerLazorkitWallet` with your config. This adds LazorKit to the list of wallets so your adapter can find it.
+<Steps>
 
-#### For Next.js / SSR Apps (Recommended)
+<Step>
 
-Use `useEffect` to ensure registration happens only on the client-side, as the Wallet Standard relies on the global `window` object.
+### Register LazorKit as a standard wallet
 
-#### For Create React App / Vite (SPA)
+Call `registerLazorkitWallet` once on the client. The Wallet Standard relies on the
+global `window` object, so mount registration inside an effect:
 
-You can call this at the top level of your entry file if you don't need runtime configuration.
+```tsx title="app/providers.tsx"
+'use client';
 
-### 3. Setup Provider
-
-Here is an example setup using `ConnectionProvider` and `WalletProvider`:
-
-```tsx
-import { useMemo, useEffect } from 'react';
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
+import { useEffect, useMemo } from 'react';
+import {
+  ConnectionProvider,
+  WalletProvider,
+} from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { registerLazorkitWallet } from '@lazorkit/wallet';
 
-// Configuration
 const CONFIG = {
-  RPC_URL: "https://api.devnet.solana.com",
-  PORTAL_URL: "https://portal.lazor.sh",
-  PAYMASTER: {
-    paymasterUrl: "https://kora.devnet.lazorkit.com",
-    apiKey: "YOUR_API_KEY" 
-  },
-  CLUSTER: 'devnet'
+  RPC_URL: 'https://api.devnet.solana.com',
+  PORTAL_URL: 'https://portal.lazor.sh',
+  PAYMASTER: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  CLUSTER: 'devnet' as const,
 };
 
-export function AppProviders({ children }) {
-  // Register LazorKit once on mount
+export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     registerLazorkitWallet({
-        rpcUrl: CONFIG.RPC_URL,
-        portalUrl: CONFIG.PORTAL_URL,
-        paymasterConfig: CONFIG.PAYMASTER,
-        clusterSimulation: CONFIG.CLUSTER,
+      rpcUrl: CONFIG.RPC_URL,
+      portalUrl: CONFIG.PORTAL_URL,
+      paymasterConfig: CONFIG.PAYMASTER,
+      clusterSimulation: CONFIG.CLUSTER,
     });
   }, []);
 
-  const wallets = useMemo(
-    () => [
-      // Standard wallets are automatically detected. 
-      // LazorKit will appear here after registration.
-    ],
-    []
-  );
+  const wallets = useMemo(() => [/* other adapters here */], []);
 
   return (
     <ConnectionProvider endpoint={CONFIG.RPC_URL}>
       <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>
-          {children}
-        </WalletModalProvider>
+        <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
   );
 }
 ```
 
-### Usage in Components
+</Step>
 
-Once connected, you can use the standard `useWallet` hook from `@solana/wallet-adapter-react`:
+<Step>
+
+### Use the standard hook anywhere
+
+Once registered, LazorKit appears in the standard wallet picker. Consume it with the
+usual `useWallet` hook from `@solana/wallet-adapter-react`:
 
 ```tsx
-import { useWallet } from '@solana/wallet-adapter-react';
-import { SystemProgram, PublicKey } from '@solana/web3.js';
+'use client';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import {
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from '@solana/web3.js';
 
 export function TransferButton() {
+  const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
 
-  const handleSend = async () => {
+  const send = async () => {
     if (!publicKey) return;
-
-    const transaction = new Transaction().add(
+    const tx = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: publicKey,
-        toPubkey: new PublicKey("RECIPIENT"),
-        lamports: 1000,
-      })
+        fromPubkey: publicKey,                 // vault PDA — where funds live
+        toPubkey: new PublicKey('RECIPIENT'),
+        lamports: 0.01 * LAMPORTS_PER_SOL,
+      }),
     );
-
-    // LazorKit abstracts the Paymaster logic internally here
-    const signature = await sendTransaction(transaction, connection);
-    console.log("Sig:", signature);
+    const sig = await sendTransaction(tx, connection);
+    console.log('tx', sig);
   };
 
-  return <button onClick={handleSend}>Send SOL</button>;
+  return <button onClick={send}>Send SOL</button>;
 }
 ```
 
-### Message Signing & Verification (P256)
+LazorKit handles the paymaster relay internally — you don't need to set `feePayer` or
+call `signTransaction` yourself.
 
-WebAuthn keys use the P256 curve (secp256r1), which works differently than standard Solana Ed25519 keys. The `signMessage` function returns a JSON object containing two critical pieces of data:
+</Step>
 
-1.  **`signature`**: The signature produced by the WebAuthn authenticator.
-2.  **`signedPayload`**: The exact byte sequence that was signed by the authenticator, encoded as base64
+</Steps>
 
-**Why two values?**
+---
 
-In WebAuthn, the authenticator does not sign the challenge directly.
-Instead, the browser constructs clientDataJSON (which includes the challenge, origin, and operation type), and the authenticator signs a payload derived from both:
+## Message signing (P256)
 
-- Browser data (clientDataJSON)
-
-- Authenticator data (authenticatorData)
-
-Because this signed payload cannot be reconstructed from the challenge alone, the verifier must know the exact bytes that were signed in order to validate the signature.
-
-For this reason, signedPayload is returned alongside the signature.
-
-Here's how to decode and use them:
+WebAuthn signs over derived WebAuthn payloads, not the raw challenge. `signMessage`
+returns a JSON-encoded `{ signature, signedPayload }` pair so consumers can verify both
+pieces.
 
 ```tsx
+'use client';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 export function SignAndVerify() {
   const { signMessage } = useWallet();
 
-  const handleSign = async () => {
+  const handle = async () => {
     if (!signMessage) return;
 
-    const message = new TextEncoder().encode("Please verify ownership");
-    
-    // 1. Sign the message
+    const message = new TextEncoder().encode('Please verify ownership');
     const result = await signMessage(message);
 
-    // 2. Decode the result
-    const jsonString = new TextDecoder().decode(result);
-    const { signature, signedPayload } = JSON.parse(jsonString);
+    // result is a UTF-8 JSON blob — decode it:
+    const { signature, signedPayload } = JSON.parse(new TextDecoder().decode(result));
 
-    console.log("Signature:", signature);
-    console.log("Original Callenge:", signedPayload);
-
-    // 3. Verify (Conceptual)
-    // verify(publicKey, signedPayload, signature);
+    console.log('signature:', signature);
+    console.log('signed payload:', signedPayload);
+    // Verify with `crypto.subtle` against the wallet's P256 public key
   };
 
-  return <button onClick={handleSign}>Sign Message</button>;
+  return <button onClick={handle}>Sign Message</button>;
 }
 ```
 
-## How It Works
+<Callout type="warn" title="Why two fields?">
+  The authenticator doesn't sign the challenge directly — it signs
+  `sha256(authenticatorData || sha256(clientDataJSON))`. The verifier needs the exact
+  bytes that were signed. `signedPayload` gives you that byte sequence; `signature` is
+  the P256 signature over it.
+</Callout>
 
-1.  **Register**: The `register` function sets up the LazorKit adapter.
-2.  **Discover**: Your wallet provider sees the new adapter and adds it to the list.
-3.  **Transact**: When you send a transaction, LazorKit handles the gas sponsorship (Paymaster) and signing logic automatically.
+See the [React SDK's `verifyMessage`](/react-sdk/use-wallet#verifymessage) for an
+in-browser verifier that wraps `crypto.subtle`.
 
-> **Note**: LazorKit behaves like any other wallet to your app, but uses smart contracts and passkeys under the hood.
+---
+
+## What Wallet Standard supports
+
+| Feature                              | Available |
+| ------------------------------------ | --------- |
+| `connect` / `disconnect`             | yes       |
+| `signTransaction` / `signAllTransactions` | yes (via paymaster) |
+| `sendTransaction`                    | yes       |
+| `signMessage`                        | yes (P256 — see above) |
+| Session keys                         | **no** — use React/RN SDK |
+| Deferred execution                   | **no** — use React/RN SDK |
+| Authority management                 | **no** — use React/RN SDK |
+
+If you need advanced features, drop to the [React SDK](/react-sdk) — it composes
+cleanly on top of the same wallet.
+
+---
+
+## How it works
+
+1. **Register** — `registerLazorkitWallet` publishes the LazorKit adapter on `window`.
+2. **Discover** — Wallet Adapter detects the new standard wallet and lists it in the picker.
+3. **Transact** — When the user sends a transaction, LazorKit handles passkey signing and paymaster relay under the hood, then returns the confirmed signature.

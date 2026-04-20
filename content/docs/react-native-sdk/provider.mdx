@@ -1,55 +1,111 @@
 ---
 title: LazorKitProvider
-description: API reference for the LazorKitProvider component.
+description: Provider component — initialises config, RPC, and the wallet store.
 ---
 
-# LazorKitProvider
-
-The `LazorKitProvider` component wraps your application to provide wallet context and handle SDK initialization.
-
-## Import
+Wrap your app **once** at the root with `LazorKitProvider`. It sets up the Zustand store,
+builds the `Connection`, installs Buffer polyfills, and holds the portal / paymaster config.
 
 ```tsx
 import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 ```
 
-## Usage
+## Minimum setup
 
 ```tsx
-function App() {
-  return (
-    <LazorKitProvider
-      rpcUrl="https://api.devnet.solana.com"
-      portalUrl="https://portal.lazor.sh"
-      configPaymaster={{ 
-        paymasterUrl: "https://kora.devnet.lazorkit.com" 
-      }}
-    >
-      <YourApplication />
-    </LazorKitProvider>
-  );
-}
+<LazorKitProvider>
+  <App />
+</LazorKitProvider>
+```
+
+<Callout type="info" title="Devnet defaults">
+  With no props, the provider connects to Solana Devnet through `portal.lazor.sh` and the
+  public Kora paymaster at `kora.devnet.lazorkit.com`. Perfect for demos and local development.
+</Callout>
+
+## Production setup
+
+```tsx
+<LazorKitProvider
+  rpcUrl={process.env.EXPO_PUBLIC_RPC_URL}
+  portalUrl="https://portal.lazor.sh"
+  configPaymaster={{
+    paymasterUrl: process.env.EXPO_PUBLIC_PAYMASTER_URL!,
+    apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY,
+  }}
+  rpId="portal.lazor.sh"
+  isDebug={__DEV__}
+>
+  <App />
+</LazorKitProvider>
 ```
 
 ## Props
 
-### `rpcUrl` (optional)
-- **Type**: `string`
-- **Description**: Solana RPC endpoint URL. If not provided, defaults to mainnet-beta or devnet based on configuration? (Inferred from types, please verify default behavior if known, otherwise leave as identifying the endpoint).
+| Prop              | Type                                           | Default                                | Required |
+| ----------------- | ---------------------------------------------- | -------------------------------------- | -------- |
+| `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
+| `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
+| `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | Devnet Kora                            | no       |
+| `rpId`            | `string`                                       | `portal.lazor.sh`                      | no       |
+| `isDebug`         | `boolean`                                      | `false`                                | no       |
+| `children`        | `ReactNode`                                    | —                                      | yes      |
 
-### `portalUrl` (optional)
-- **Type**: `string`
-- **Default**: `"https://portal.lazor.sh"`
-- **Description**: LazorKit portal URL for wallet dialogs.
+### Prop details
 
-### `configPaymaster` (optional)
-- **Type**: `{ paymasterUrl: string, apiKey?: string }`
-- **Description**: Configuration for the paymaster service.
+<Callout type="warn" title="rpId must match">
+  `rpId` is the WebAuthn Relying Party ID baked into each passkey at registration time.
+  Changing it between `connect` calls invalidates existing passkeys. Keep it stable in
+  production.
+</Callout>
 
-### `isDebug` (optional)
-- **Type**: `boolean`
-- **Description**: Enable debug logging.
+- **`rpcUrl`** — Any Solana RPC. Falsy values fall back to the Devnet default.
+- **`portalUrl`** — The WebAuthn-enabled web page the SDK opens via `expo-web-browser`. Self-hosters can point this at their own portal.
+- **`configPaymaster`** — Kora JSON-RPC endpoint. `apiKey` is sent as `x-api-key` on every request.
+- **`isDebug`** — Enables verbose logs via the built-in `logger`.
 
-### `children`
-- **Type**: `ReactNode`
-- **Description**: Your application components.
+## Recipes
+
+### Switch networks at runtime
+
+```tsx
+const [network, setNetwork] = useState<'devnet' | 'mainnet'>('devnet');
+
+const rpcUrl = network === 'devnet'
+  ? 'https://api.devnet.solana.com'
+  : 'https://api.mainnet-beta.solana.com';
+
+return (
+  <LazorKitProvider rpcUrl={rpcUrl}>
+    <App />
+  </LazorKitProvider>
+);
+```
+
+Changing `rpcUrl` recreates the `Connection`. The persisted wallet record is untouched — it
+continues to work on whichever cluster holds the on-chain wallet account.
+
+### Hide behind an env-driven config
+
+```tsx
+const isProd = !__DEV__;
+
+<LazorKitProvider
+  rpcUrl={isProd
+    ? process.env.EXPO_PUBLIC_MAINNET_RPC!
+    : 'https://api.devnet.solana.com'}
+  configPaymaster={{
+    paymasterUrl: isProd
+      ? process.env.EXPO_PUBLIC_MAINNET_PAYMASTER!
+      : 'https://kora.devnet.lazorkit.com',
+  }}
+>
+  <App />
+</LazorKitProvider>
+```
+
+## Runtime notes
+
+- Memoizes the `Connection` on `rpcUrl`, so rebuilds are cheap.
+- Persists `{ wallet, config }` to `AsyncStorage` under key `lazor-wallet-store`.
+- Runs a state migration on v0 → v1 to move `smartWallet` from the wallet PDA to the vault PDA. Users who connected before v2 keep their wallet transparently.

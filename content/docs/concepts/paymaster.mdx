@@ -39,16 +39,20 @@ The end user never needs to hold SOL. The developer acts as the economic bridge:
 
 LazorKit captures a protocol fee on sponsored transactions. The fee is deducted from the transaction's `fee_payer` — which is the Paymaster, not the end user.
 
-Fee collection is **opt-in per fee_payer**. If a `fee_payer` has no `FeeRecord` on-chain, no fee is charged — the protocol behaves identically to the open-source version.
+Fee collection applies to **every transaction** whenever `ProtocolConfig` is enabled — no opt-in required. What *is* opt-in is **reward tracking**: the integrator's cumulative contribution only accumulates in a `FeeRecord` PDA if one has been registered for that `fee_payer`. Unregistered payers still pay the fee, they just don't accrue towards early-contributor rewards.
 
-When a `fee_payer` is registered:
+<Callout type="info" title="Register your FeeRecord to earn">
+  The protocol fee is charged either way. Registering a `FeeRecord` for your `fee_payer`
+  pubkey is what turns those fees into a reward claim at token launch. No registration →
+  no on-chain accumulation → no share.
+</Callout>
 
-1. SDK detects the `FeeRecord` PDA keyed by the `fee_payer`'s pubkey (RPC call, cached)
-2. SDK appends 4 accounts to the transaction: `[protocol_config, fee_record, treasury_shard, system_program]`
-3. Entrypoint detects these trailing accounts and collects the configured fee
-4. SOL is transferred from the `fee_payer` (the Paymaster) to a randomly selected treasury shard
-5. `FeeRecord` counters are updated (`tx_count`, `wallet_count`, `total_fees_paid`)
-6. The 4 protocol accounts are stripped before passing to the processor — processor is unchanged
+Flow per transaction:
+
+1. SDK always appends 4 accounts (`ProtocolConfig`, `FeeRecord` PDA derived from the payer, `TreasuryShard`, `SystemProgram`) when the protocol is enabled.
+2. Entrypoint detects them and transfers SOL from the `fee_payer` to a randomly-selected treasury shard.
+3. If `FeeRecord` is a valid program-owned account, bump `total_fees_paid`, `tx_count`, `wallet_count`. Otherwise skip the counter update.
+4. The 4 protocol accounts are stripped before passing to the processor — processor is unchanged.
 
 Fee collection applies to: `CreateWallet`, `Execute`, and `ExecuteDeferred`.
 

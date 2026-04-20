@@ -1,140 +1,277 @@
 ---
 title: Session Keys
-description: How session keys work in LazorKit — delegation, scope, action types, deferred execution, and revocation.
+description: Scoped, time-bound delegation keys — action types, spending limits, deferred execution, and revocation.
 ---
 
-# Session Keys
-
-A session key is an ephemeral keypair with an expiry slot and optional action constraints. It lets an app or agent execute transactions on behalf of a wallet without triggering a passkey prompt on every operation.
+A session key is an ephemeral Ed25519 keypair with an expiry slot and optional action
+constraints. It lets an app or agent execute on behalf of a wallet **without a passkey
+prompt per transaction**.
 
 <Callout type="info" title="When to use session keys">
-  Session keys are for **delegation** — giving an app or agent the ability to execute on a user's behalf within a defined scope. They are not required for direct user execution. A wallet owner can execute transactions at any time using their passkey authority directly, with no session key involved.
+  Session keys are for **delegation** — giving an app or agent scoped permission to act on
+  the user's behalf. You don't need one for direct user execution: a passkey owner can
+  always sign a transaction themselves.
 
-  Use a session key when:
-  - An agent or bot needs to execute on a schedule without the user present
-  - An app needs to batch or automate actions without prompting the user on every transaction
-  - You want to constrain what an executor can do (program, value, expiry)
+  Reach for a session key when:
+  - An agent / bot executes on a schedule without the user present
+  - An app wants to batch or automate actions without prompting every time
+  - You need to constrain *what* an executor can do (which programs, what value, until when)
+</Callout>
+
+## Mental model
+
+```
+1. Owner/Admin creates Session PDA with a fresh Ed25519 keypair + action list
+2. App stores the session keypair locally (expo-secure-store, IndexedDB, etc.)
+3. App signs Execute with the session key — no passkey prompt
+4. Program enforces the action list on every CPI
+5. Session expires at the stored slot; account can be closed to reclaim rent
+```
+
+Sessions are the **cheapest** execution path — **~4,105 CU** vs ~9,495 CU for passkey
+execution, because no Secp256r1 precompile verification is involved (measured post
+Phase 2.1 optimizations).
+
+---
+
+## Creating a session
+
+### From the React Native hook
+
+The RN SDK uses the raw `SessionAction[]` catalogue for maximum flexibility:
+
+```ts
+import { Actions, Keypair, useWallet } from '@lazorkit/wallet-mobile-adapter';
+
+const sessionKp = Keypair.generate();
+const currentSlot = BigInt(await connection.getSlot());
+
+const { sessionPda } = await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 216_000n,   // ~24h
+    actions: [
+      Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
+      Actions.solMaxPerTx(500_000_000n),
+      Actions.programWhitelist(JUPITER_PROGRAM_ID),
+    ],
+  },
+  { redirectUrl: 'myapp://cb' },
+);
+```
+
+Persist `sessionKp.secretKey` in secure storage along with `sessionPda`.
+
+### From the React hook
+
+The React SDK ships a higher-level `SpendingLimits` wrapper for common SOL limits:
+
+```ts
+import { useWallet } from '@lazorkit/wallet';
+
+const { sessionPda, sessionPublicKey } = await createSession({
+  expiresInSlots: 216_000n,                 // ~24h
+  spendingLimits: {
+    solLifetimeCap: 5_000_000_000n,         // 5 SOL total
+    solPerTxMax: 500_000_000n,              // 0.5 SOL per tx
+    solRecurring: {
+      limit: 1_000_000_000n,                // 1 SOL per window
+      windowSlots: 216_000n,                // 24h window
+    },
+  },
+});
+```
+
+For token caps or program filters, drop to the `Actions` catalogue via
+`LazorKitClient.createSession` directly.
+
+### From the low-level SDK
+
+```ts
+import { client, ed25519, secp256r1 } from '@lazorkit/sdk-legacy';
+
+// Ed25519 admin signs immediately:
+const { instructions, sessionPda } = await client.createSession({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  sessionKey: sessionKp.publicKey,
+  expiresAt: currentSlot + 216_000n,
+  actions: [/* SessionAction[] */],
+});
+```
+
+For Secp256r1 (passkey) admins, use the two-phase `prepareCreateSession` /
+`finalizeCreateSession` flow — see [web3.js v1 › Session Keys](/web3js-v1/session-keys).
+
+<Callout type="warn" title="Actions are immutable">
+  Once a session is created, its action list can't be modified. To change limits, revoke
+  the session and create a new one.
 </Callout>
 
 ---
 
-## How It Works
+## Actions reference
 
-1. An Owner or Admin creates a session, specifying a keypair and expiry slot
-2. Optional action rules are attached at creation time (spending limits, program filters)
-3. The session keypair holder calls `Execute` — no passkey prompt
-4. At expiry the session is invalid. The account can be closed to recover rent.
+Actions constrain what a session key can do. The program validates them before and after
+every CPI during `Execute`. **Max 16 actions per session**, up to 2048 bytes total.
 
-Sessions are the cheapest execution path: **4,483–5,983 CU** vs 9,441 CU for passkey execution.
+| Action                   | Enforces                                                                    |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `SolLimit`               | Lifetime SOL cap — decrements until exhausted.                              |
+| `SolRecurringLimit`      | SOL cap per window (e.g. 1 SOL/day). Resets each window.                    |
+| `SolMaxPerTx`            | Max SOL gross outflow per execute.                                          |
+| `TokenLimit`             | Lifetime token cap per mint.                                                |
+| `TokenRecurringLimit`    | Token cap per window per mint.                                              |
+| `TokenMaxPerTx`          | Max tokens per execute per mint.                                            |
+| `ProgramWhitelist`       | Session can only CPI to this program (repeatable).                          |
+| `ProgramBlacklist`       | Session cannot CPI to this program (repeatable).                            |
+
+<Callout type="info" title="Gross outflow tracking">
+  `SolMaxPerTx` uses **per-CPI lamport snapshotting**, not net flow. A DeFi round-trip
+  (swap out + swap back) can't bypass the cap by ending at the same balance.
+</Callout>
+
+### Builder helpers
+
+```ts
+import { Actions } from '@lazorkit/wallet-mobile-adapter';
+// or '@lazorkit/wallet' / '@lazorkit/sdk-legacy'
+
+Actions.solLimit(lamports, expiresAt?)
+Actions.solRecurringLimit({ limit, window, expiresAt? })
+Actions.solMaxPerTx(lamports, expiresAt?)
+
+Actions.tokenLimit({ mint, remaining, expiresAt? })
+Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
+Actions.tokenMaxPerTx({ mint, max, expiresAt? })
+
+Actions.programWhitelist(programId, expiresAt?)
+Actions.programBlacklist(programId, expiresAt?)
+```
+
+### Expired action behaviour
+
+Actions have their own `expiresAt` independent of session expiry.
+
+| Action type                 | On expiry                                                  |
+| --------------------------- | ---------------------------------------------------------- |
+| Spending limits (SOL/token) | Treated as **fully exhausted** — any spend rejected.        |
+| `ProgramWhitelist`          | **Hard deny** — all programs blocked.                      |
+| `ProgramBlacklist`          | **Silently dropped** — ban lifted.                         |
 
 ---
 
-## Actions
+## Common session patterns
 
-Actions constrain what a session key can do. They are validated before and after each CPI during `Execute`. Max 16 actions per session, stored in a flat byte buffer up to 2048 bytes.
+### Unrestricted session (no limits)
 
-| Type | Description |
-|---|---|
-| `SolLimit` | Lifetime SOL spending cap — decrements until exhausted |
-| `SolRecurringLimit` | Per-window SOL cap (e.g. 1 SOL/day) — resets each window |
-| `SolMaxPerTx` | Max SOL gross outflow per transaction |
-| `TokenLimit` | Lifetime token cap per mint |
-| `TokenRecurringLimit` | Per-window token cap per mint |
-| `TokenMaxPerTx` | Max tokens per transaction per mint |
-| `ProgramWhitelist` | Session can only CPI to this program (repeatable) |
-| `ProgramBlacklist` | Session cannot CPI to this program (repeatable) |
-
-`SolMaxPerTx` uses **gross outflow tracking** — per-CPI lamport snapshotting prevents DeFi round-trips from bypassing the cap.
-
-### Expired Action Behavior
-
-Actions have their own `expires_at` independent of session expiry.
-
-| Action Type | On Expiry |
-|---|---|
-| Spending limits (SolLimit, TokenLimit, etc.) | Treated as **fully exhausted** — any spend rejected |
-| ProgramWhitelist | **Hard deny** — all programs blocked |
-| ProgramBlacklist | **Silently dropped** — ban lifted |
-
----
-
-## Creating a Session
-
-### Ed25519 Admin
-
-```typescript
-const { instructions, sessionPda } = await client.createSession({
-  payer: payer.publicKey,
-  walletPda,
-  adminSigner: ed25519(ownerKp.publicKey),
-  sessionKey: sessionKp.publicKey,
-  expiresAt: currentSlot + 216_000n,  // ~1 day in slots
-  actions: [
-    { type: 'SolMaxPerTx', max: 1_000_000_000n },           // 1 SOL per tx
-    { type: 'SolLimit', remaining: 10_000_000_000n },        // 10 SOL lifetime
-    { type: 'ProgramWhitelist', programId: SystemProgram.programId },
-  ],
-});
+```ts
+await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 9_000n,     // 1 hour
+  },
+  { redirectUrl: 'myapp://cb' },
+);
 ```
 
-`expiresAt` is an **absolute slot number**, not a Unix timestamp. Max duration is ~30 days (~2,592,000 slots).
+No `actions` means "session can do anything the wallet can". Still bounded by expiry.
 
-### Passkey Admin (Two-Phase)
+### Jupiter-only swapper
 
-When the authorizer is a Secp256r1 passkey, use prepare/finalize:
-
-```typescript
-const prepared = await client.prepareCreateSession({
-  payer: payer.publicKey,
-  walletPda,
-  secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
-  sessionKey: sessionKp.publicKey,
-  expiresAt: currentSlot + 432_000n,  // ~2 days
-  actions: [
-    { type: 'TokenLimit', mint: USDC_MINT, remaining: 1_000_000_000n },
-    { type: 'TokenMaxPerTx', mint: USDC_MINT, max: 100_000_000n },
-  ],
-});
-
-const webauthnResponse = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
-const { instructions, sessionPda } = client.finalizeCreateSession(prepared, webauthnResponse);
+```ts
+await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 216_000n,
+    actions: [
+      Actions.programWhitelist(JUPITER_V6_PROGRAM_ID),
+      Actions.programWhitelist(TOKEN_PROGRAM_ID),  // SPL transfers for ATAs
+      Actions.solMaxPerTx(1_000_000_000n),
+    ],
+  },
+  { redirectUrl: 'myapp://cb' },
+);
 ```
 
-### Unrestricted Session
+### Usage-capped session (1 SOL per day)
 
-Omit `actions` for a fully open session — the session key can do anything the wallet can:
+```ts
+await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 1_512_000n, // ~7 days
+    actions: [
+      Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
+    ],
+  },
+  { redirectUrl: 'myapp://cb' },
+);
+```
 
-```typescript
-const { instructions, sessionPda } = await client.createSession({
-  payer: payer.publicKey,
-  walletPda,
-  adminSigner: ed25519(ownerKp.publicKey),
-  sessionKey: sessionKp.publicKey,
-  expiresAt: currentSlot + 9_000n,
-});
+### Stablecoin-only spender
+
+```ts
+await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 216_000n,
+    actions: [
+      Actions.tokenLimit({ mint: USDC_MINT, remaining: 100_000_000n }),     // 100 USDC
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 10_000_000n }),         // 10 USDC per tx
+      Actions.programBlacklist(SUSPICIOUS_PROGRAM_ID),
+    ],
+  },
+  { redirectUrl: 'myapp://cb' },
+);
 ```
 
 ---
 
-## Executing via Session Key
+## Executing with a session
 
-```typescript
+### React Native
+
+```ts
+const sig = await signAndSendWithSession({
+  sessionKeypair: sessionKp,
+  sessionPda,
+  instructions: [ix],
+});
+```
+
+No passkey prompt. The Ed25519 keypair signs at transaction level.
+
+### React
+
+```ts
+const sig = await signAndSendWithSession({ instructions: [ix] });
+```
+
+The SDK uses the session keypair it persisted internally during `createSession`.
+
+### Low-level
+
+```ts
+import { session } from '@lazorkit/sdk-legacy';
+
 const { instructions } = await client.transferSol({
   payer: payer.publicKey,
   walletPda,
   signer: session(sessionPda, sessionKp.publicKey),
   recipient,
-  lamports: 500_000_000n,  // 0.5 SOL — within the 1 SOL per-tx limit
+  lamports: 500_000_000n,
 });
 ```
 
-The session keypair signs the transaction. No passkey prompt.
-
 ---
 
-## Deferred Execution
+## Deferred execution
 
-For payloads exceeding ~574 bytes in a single Secp256r1 Execute transaction (e.g. Jupiter swaps with complex routing), LazorKit provides a 2-transaction deferred flow.
+For payloads too big to fit in a single Secp256r1 Execute transaction (~574 bytes of inner
+instructions — Jupiter swaps with complex routing), LazorKit provides a 2-transaction
+deferred flow.
 
 <Mermaid chart={`
 sequenceDiagram
@@ -142,13 +279,13 @@ sequenceDiagram
     participant P as LazorKit
     participant S as Solana
 
-    Note over C: Compute instruction and account hashes
+    Note over C: Compute instruction + account hashes
     C->>P: TX1 Authorize(hashes, expiry)
     Note over P: Verify Secp256r1 signature
     Note over P: Increment odometer counter
     P->>S: Create DeferredExec PDA
 
-    Note over C: Prepare full instructions
+    Note over C: Send original instructions
     C->>P: TX2 ExecuteDeferred(instructions)
     P->>P: Verify hashes match
     P->>S: Close DeferredExec PDA
@@ -156,17 +293,34 @@ sequenceDiagram
     Note over S: Rent refunded to payer
 `} />
 
+### From the SDKs
 
-| Metric | Immediate Execute | Deferred (2 txs) |
-|---|---|---|
-| Inner instruction capacity | ~574 bytes | ~1,100 bytes (1.9×) |
-| Total CU | 9,441 | 15,613 |
-| Tx fee | 0.000005 SOL | 0.00001 SOL |
-| Temp rent (refunded) | — | 0.002116 SOL |
+The React and React Native SDKs wrap both transactions into a single method that takes
+one passkey prompt:
 
-Expired DeferredExec accounts can be reclaimed via `ReclaimDeferred` — the original payer recovers the rent.
+```ts
+// React Native
+const sig = await authorizeAndExecute(
+  { instructions: jupiterSwapIxs },
+  { redirectUrl: 'myapp://cb' },
+);
 
-Only Secp256r1 Owner or Admin can call `Authorize` (TX1). TX2 can be submitted by any signer.
+// React
+const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
+```
+
+### Trade-offs
+
+| Metric                        | Immediate Execute | Deferred (2 txs)   |
+| ----------------------------- | ----------------- | ------------------ |
+| Inner instruction capacity    | ~574 bytes        | ~1,100 bytes (1.9×)|
+| Total CU (post Phase 2.1)     | ~9,495            | ~15,667            |
+| Tx fee                        | 0.000005 SOL      | 0.00001 SOL        |
+| Temp rent (refunded to payer) | —                 | 0.002116 SOL       |
+
+Expired `DeferredExec` accounts can be reclaimed via `ReclaimDeferred` — the original
+payer recovers the rent. Only Secp256r1 Owner or Admin can call `Authorize` (TX1);
+TX2 can be submitted by any signer.
 
 ---
 
@@ -174,27 +328,42 @@ Only Secp256r1 Owner or Admin can call `Authorize` (TX1). TX2 can be submitted b
 
 Sessions can be revoked early by Owner or Admin:
 
-```typescript
-const { instructions } = await client.revokeSession({
-  payer: payer.publicKey,
-  walletPda,
-  adminSigner: ed25519(ownerKp.publicKey),
-  sessionPda,
-  refundDestination: payer.publicKey,
-});
+```ts
+// React Native
+await revokeSession(
+  { sessionPda, refundDestination: smartWalletPubkey },
+  { redirectUrl: 'myapp://cb' },
+);
+
+// React
+await revokeSession();
 ```
 
 Closes the session PDA and refunds rent. Works on active or already-expired sessions.
+Use `refundDestination: smartWalletPubkey` (vault) to keep the funds in-wallet.
 
 ---
 
-## Cost
+## Costs
 
-| Item | Cost |
-|---|---|
-| Session account rent (one-time) | 0.001448 SOL |
-| CreateSession tx fee | 0.000005 SOL |
-| **Total setup** | **0.001453 SOL** |
-| Execute via session (per tx) | 0.000005 SOL |
+| Item                               | Cost            |
+| ---------------------------------- | --------------- |
+| Session account rent (one-time)    | 0.001448 SOL    |
+| `CreateSession` tx fee             | 0.000005 SOL    |
+| **Total setup**                    | **0.001453 SOL**|
+| `Execute` via session (per tx)     | 0.000005 SOL    |
 
-Session rent is refundable after expiry via `RevokeSession`.
+Session rent is refundable after expiry or revocation via `RevokeSession`.
+
+---
+
+## Troubleshooting session errors
+
+| Error                                   | Cause                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `0xbd0 ActionSolLimitExceeded`          | Lifetime SOL cap exhausted — revoke + recreate with higher `solLimit`.      |
+| `0xbd1 ActionSolRecurringLimitExceeded` | Window cap hit. Wait for reset or raise `solRecurringLimit`.                |
+| `0xbc1 SessionExpired`                  | Session past its `expiresAtSlot` — close via `revokeSession`, make a new one.|
+| `0xbcd ActionProgramNotWhitelisted`     | CPI target not in the session's whitelist — add the program or remove the filter. |
+
+Full error map in [Troubleshooting](/troubleshooting#program-errors-0xbd0-0xbd1-).

@@ -1,14 +1,64 @@
 ---
 title: Overview
-description: Introduction to the LazorKit React SDK.
+description: LazorKit React SDK — passkey smart wallets for web apps.
 ---
 
-# LazorKit React SDK
+import { Rocket, Plug, Key, Coins, Shield, HelpCircle } from 'lucide-react'
 
-LazorKit is the standard for WebAuthn smart wallets on Solana.
+Drop-in React hook + provider for LazorKit smart wallets on Solana. Users authenticate with
+a device passkey (Face ID, Touch ID, Windows Hello, security key) via the native
+`navigator.credentials` API — no popups, no extensions, no seed phrase.
 
-## Why LazorKit?
-- **WebAuthn Security**: Passkey authentication replaces seed phrases
-- **Gasless Transactions**: Built-in paymaster integration
-- **Smart Wallets**: Programmable accounts with account abstraction
-- **Better UX**: Seamless session persistence and auto-reconnect
+<Callout type="info" title="Package">
+  `@lazorkit/wallet` on [npm](https://www.npmjs.com/package/@lazorkit/wallet). Requires
+  React 18+ and a browser that supports WebAuthn.
+</Callout>
+
+## Why this SDK
+
+- **Passkey auth** — synced via iCloud Keychain / Google Password Manager for cross-device continuity.
+- **Gasless by default** — Kora paymaster sponsors every mutation. Users never need SOL.
+- **Session keys** — a single tap mints a scoped Ed25519 signer; subsequent txs are prompt-free.
+- **On-chain spending limits** — optional lifetime caps, per-tx caps, recurring windows, program allow/block-lists.
+- **Ed25519 authorities** — delegate admin / spender roles to companion keys.
+- **Deferred execution** — one tap authorises multi-instruction payloads too big for a single tx.
+
+## How it fits together
+
+```
+┌─────────────┐   navigator.   ┌──────────┐
+│  your app   │◀─credentials──▶│  passkey │
+│  (React)    │    (WebAuthn)  │ (device) │
+└──────┬──────┘                └──────────┘
+       │
+       ▼ build tx / finalize
+┌─────────────┐   relay via    ┌─────────┐
+│   SDK       │─── paymaster ─▶│ Solana  │
+└─────────────┘                └─────────┘
+```
+
+The SDK talks to the passkey directly through the browser — no redirect flow, no portal
+window. Once signed, transactions are relayed by the Kora paymaster.
+
+## Explore
+
+<Cards>
+  <Card icon={<Rocket />} title="Getting Started"
+    description="Install, mount the provider, send your first transaction."
+    href="/react-sdk/getting-started" />
+  <Card icon={<Plug />} title="LazorkitProvider"
+    description="Provider props and configuration."
+    href="/react-sdk/provider" />
+  <Card icon={<Key />} title="useWallet hook"
+    description="Complete API — connect, sign, sessions, authorities."
+    href="/react-sdk/use-wallet" />
+  <Card icon={<Coins />} title="Types"
+    description="TypeScript interfaces, SpendingLimits, constants."
+    href="/react-sdk/types" />
+  <Card icon={<Shield />} title="Session Keys"
+    description="Skip the passkey prompt with scoped Ed25519 keys."
+    href="/concepts/session-keys" />
+  <Card icon={<HelpCircle />} title="Troubleshooting"
+    description="Common issues: polyfills, SSR, WebAuthn errors, 0xbd0."
+    href="/troubleshooting" />
+</Cards>
