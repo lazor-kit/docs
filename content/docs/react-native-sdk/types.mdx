@@ -61,12 +61,24 @@ interface LazorKitProviderProps {
 
 ### `SignOptions`
 
-Trailing argument on every passkey-signed method.
+Trailing argument on every passkey-signed method (opens the portal).
 
 ```ts
 interface SignOptions {
   redirectUrl: string;                    // your app deep-link scheme
   onSuccess?: (result: any) => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+### `TxCallbacks`
+
+Trailing argument on **non-passkey** flows — session-signed txs, `executeDeferred`,
+`reclaimDeferred`. No `redirectUrl` needed.
+
+```ts
+interface TxCallbacks {
+  onSuccess?: (signature: string) => void;
   onFail?: (error: Error) => void;
 }
 ```
@@ -90,12 +102,61 @@ interface AuthorizeExecutePayload extends SignAndSendTransactionPayload {
   expiryOffset?: number;                  // slots; default 300 ≈ 2 min
 }
 
+// For `authorizeDeferred` — TX1 only, returns payload for later TX2.
+interface AuthorizePayload {
+  instructions: TransactionInstruction[];
+  expiryOffset?: number;                  // slots; default 300 ≈ 2 min
+  transactionOptions?: TransactionOptions;
+}
+
+// Returned from `authorizeDeferred`.
+interface AuthorizeResult {
+  signature: string;                      // TX1 signature
+  deferredPayload: DeferredPayload;       // feed to executeDeferred later
+  deferredExecPda: PublicKey;
+  counter: number;
+}
+
+// For `executeDeferred` — TX2 only.
+interface ExecuteDeferredPayload {
+  deferredPayload: DeferredPayload;
+  refundDestination?: PublicKey;          // where TX2's DeferredExec rent lands
+  transactionOptions?: TransactionOptions;
+}
+
+// For `reclaimDeferred` — cleanup path.
+interface ReclaimDeferredPayload {
+  deferredExecPda: PublicKey;
+  refundDestination?: PublicKey;
+}
+
 interface SessionSignPayload {
   sessionKeypair: Keypair;                // Ed25519 keypair from createSession
   sessionPda: PublicKey;
   instructions: TransactionInstruction[];
   transactionOptions?: TransactionOptions;
 }
+
+// Internal shape produced by authorize*/used by executeDeferred. Re-exported from
+// the SDK so you can persist it across sessions / machines via the wire helpers.
+interface DeferredPayload {
+  walletPda: PublicKey;
+  deferredExecPda: PublicKey;
+  compactInstructions: {
+    programIdIndex: number;
+    accountIndexes: number[];
+    data: Uint8Array;
+  }[];
+  remainingAccounts: {
+    pubkey: PublicKey;
+    isSigner: boolean;
+    isWritable: boolean;
+  }[];
+}
+
+// Wire helpers (JSON-safe strings) for cross-machine deferred flows.
+serializeDeferredPayload(p: DeferredPayload): string;
+deserializeDeferredPayload(s: string): DeferredPayload;
 
 interface TransferSolPayload {
   recipient: PublicKey;

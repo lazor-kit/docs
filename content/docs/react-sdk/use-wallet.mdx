@@ -25,7 +25,13 @@ Returns wallet state and every mutation method. WebAuthn runs inline through
 | `addAuthority`             | yes              | Grant an Ed25519 admin / spender (keypair generated + stored)|
 | `signAndSendWithAuthority` | **no**           | Send signed by a stored Ed25519 authority                    |
 | `removeAuthority`          | yes              | Remove any authority by PDA                                  |
-| `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads                    |
+| `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads (atomic)           |
+| `authorizeDeferred`        | yes              | **TX1 only** — returns serialized payload for later TX2      |
+| `executeDeferred`          | **no**           | **TX2 only** — submit from a previously-authorized payload   |
+
+All send-tx methods share the same [`SendTxPayload`](/react-sdk/types#sendtxpayload) shape and
+accept `transactionOptions.txVersion: 'legacy' | 'v0'` (default `'v0'`) so you can pick the
+wire format per call.
 
 ---
 
@@ -33,13 +39,20 @@ Returns wallet state and every mutation method. WebAuthn runs inline through
 
 | Field               | Type                 | Notes                                                      |
 | ------------------- | -------------------- | ---------------------------------------------------------- |
-| `smartWalletPubkey` | `PublicKey \| null`  | Vault PDA — where funds live.                              |
-| `wallet`            | `WalletInfo \| null` | Full persisted record.                                     |
+| `smartWalletPubkey` | `PublicKey \| null`  | **Wallet PDA** (internal authority). Not the fund account. |
+| `wallet`            | `WalletInfo \| null` | Full persisted record. Use `wallet.vaultPda` for funds.    |
 | `isConnected`       | `boolean`            |                                                            |
 | `isLoading`         | `boolean`            | `isConnecting \|\| isSigning \|\| ...`                     |
 | `isConnecting`      | `boolean`            |                                                            |
 | `isSigning`         | `boolean`            |                                                            |
 | `error`             | `Error \| null`      |                                                            |
+
+<Callout type="warn" title="smartWalletPubkey ≠ vault">
+  `smartWalletPubkey` is the Wallet PDA the program uses to resolve authorities. The
+  SOL-holding account is **`wallet.vaultPda`** — always use that as `fromPubkey` and as
+  the address you display to users. If `wallet.vaultPda` is absent on an older cached
+  record, derive it with `findVaultPda(smartWalletPubkey)`.
+</Callout>
 
 ---
 
@@ -82,13 +95,20 @@ const sig = await signAndSendTransaction({
   transactionOptions: {
     feeToken: 'USDC',                   // optional — pay fees in any SPL mint
     computeUnitLimit: 400_000,
-    addressLookupTableAccounts: [alt],
+    addressLookupTableAccounts: [alt],  // auto-switches wire format to v0
     clusterSimulation: 'devnet',
+    txVersion: 'v0',                    // 'legacy' | 'v0' (default 'v0')
   },
 });
 ```
 
 **Returns** `Promise<string>` — confirmed signature.
+
+<Callout type="info" title="legacy vs v0">
+  The SDK defaults to v0 (matches the mobile SDK and supports ALT). Use `txVersion: 'legacy'`
+  only if your downstream RPC/indexer requires the older wire format. ALT is v0-only — passing
+  `addressLookupTableAccounts` with legacy throws.
+</Callout>
 
 ### `authorizeAndExecute`
 
@@ -104,6 +124,39 @@ const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
   replays the exact instructions — any mismatch is rejected. The SDK submits both and
   returns TX2's signature.
 </Callout>
+
+### `authorizeDeferred` + `executeDeferred`
+
+Same protocol mechanism as `authorizeAndExecute`, but split into two callable steps so you
+can defer or delegate TX2. `authorizeDeferred` returns a **serialized payload** that any
+party (server, bot, another device) can redeem later via `executeDeferred` — no passkey
+required for the second step.
+
+```ts
+// Step 1 — on the device with the passkey (requires user gesture):
+const { signature: authSig, deferredPayload } = await authorizeDeferred({
+  instructions: jupiterSwapIxs,
+});
+
+// Persist / transport — deferredPayload is a plain JSON string.
+await saveToBackend(deferredPayload);
+
+// Step 2 — can run later, anywhere, without the passkey:
+const execSig = await executeDeferred({
+  deferredPayload,
+  transactionOptions: { txVersion: 'v0' },   // optional
+});
+```
+
+<Callout type="info" title="When to prefer this">
+  Use `authorizeDeferred` + `executeDeferred` when TX2 is driven by an external condition
+  (cron job, order fill, deposit detected) rather than submitted immediately. For the happy
+  path where both tx fire back-to-back, `authorizeAndExecute` is simpler.
+</Callout>
+
+**Authorization has an on-chain expiry** — if TX2 doesn't land in time, anyone can call
+`reclaimDeferred` (via `LazorKitClient`) to reclaim rent. See
+[`DeferredPayload`](/react-sdk/types#deferredpayload).
 
 ---
 

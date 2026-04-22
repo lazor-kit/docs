@@ -13,12 +13,26 @@ All public types from `@lazorkit/wallet`, grouped by what you're doing.
 interface WalletInfo {
   credentialId: string;        // WebAuthn credential ID (base64)
   passkeyPubkey: number[];     // 33-byte compressed secp256r1 pubkey
-  smartWallet: string;         // vault PDA (base58) — where funds live
+
+  /** Wallet PDA — internal authority account (used for signing context). */
+  smartWallet: string;
+
+  /** Vault PDA — the SOL-holding account users deposit into. base58. */
+  vaultPda?: string;
+
   walletDevice: string;        // authority PDA for the active passkey
   platform: string;            // 'macIntel' | 'linux' | …
+  expo: string;                // 'web' for React SDK
   accountName?: string;        // optional WebAuthn display name
 }
 ```
+
+<Callout type="info" title="smartWallet ≠ vaultPda">
+  `smartWallet` is the **internal** Wallet PDA (used by the program for authority lookup).
+  Funds live at **`vaultPda`** — that's what you pass as `fromPubkey` for transfers and
+  what users should see / fund. Derive it with `findVaultPda(walletPda)` if the field is
+  missing on an older cached `WalletInfo`.
+</Callout>
 
 ### `LazorkitProviderProps`
 
@@ -43,15 +57,92 @@ interface PaymasterConfig {
 ```ts
 interface TransactionOptions {
   feeToken?: string;                                       // SPL mint base58
-  addressLookupTableAccounts?: AddressLookupTableAccount[];
+  addressLookupTableAccounts?: AddressLookupTableAccount[];// v0 only
   computeUnitLimit?: number;
   clusterSimulation?: 'devnet' | 'mainnet';
+  /** Wire format. Defaults to 'v0'. */
+  txVersion?: 'legacy' | 'v0';
 }
+```
 
-interface SignAndSendTransactionPayload {
+### `SendTxPayload`
+
+Shared payload shape for every send-tx method on the hook — `signAndSendTransaction`,
+`signAndSendWithSession`, `signAndSendWithAuthority`, `authorizeAndExecute`, and
+`authorizeDeferred`.
+
+```ts
+interface SendTxPayload {
   instructions: TransactionInstruction[];
   transactionOptions?: TransactionOptions;
 }
+```
+
+### `SignAndSendTransactionPayload`
+
+Internal alias for `SendTxPayload` used by the action layer. Adds optional callbacks when
+calling actions directly (outside the React hook):
+
+```ts
+interface SignAndSendTransactionPayload extends SendTxPayload {
+  onSuccess?: (signature: string) => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+---
+
+## Deferred execution payloads
+
+Returned/consumed by `authorizeDeferred` and `executeDeferred`.
+
+### `AuthorizeDeferredPayload`
+
+```ts
+interface AuthorizeDeferredPayload {
+  instructions: TransactionInstruction[];
+  transactionOptions?: TransactionOptions;
+  onSuccess?: (result: { signature: string; deferredPayload: string }) => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+### `ExecuteDeferredPayload`
+
+```ts
+interface ExecuteDeferredPayload {
+  /** Serialized DeferredPayload string returned by authorizeDeferred. */
+  deferredPayload: string;
+  transactionOptions?: TransactionOptions;
+  onSuccess?: (signature: string) => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+### `DeferredPayload`
+
+Internal representation of what TX1 registered on-chain. The SDK converts to/from its
+wire form via `serializeDeferredPayload` / `deserializeDeferredPayload`.
+
+```ts
+interface DeferredPayload {
+  walletPda: PublicKey;
+  deferredExecPda: PublicKey;
+  compactInstructions: {
+    programIdIndex: number;
+    accountIndexes: number[];
+    data: Uint8Array;
+  }[];
+  remainingAccounts: {
+    pubkey: PublicKey;
+    isSigner: boolean;
+    isWritable: boolean;
+  }[];
+}
+
+// Wire helpers — re-exported from '@lazorkit/wallet'
+serializeDeferredPayload(p: DeferredPayload): string;
+deserializeDeferredPayload(s: string): DeferredPayload;
 ```
 
 ---
@@ -193,7 +284,7 @@ interface WalletHookInterface {
   // Core
   connect: (options?: { feeMode?: 'paymaster' | 'user' }) => Promise<WalletInfo>;
   disconnect: () => Promise<void>;
-  signAndSendTransaction: (payload: SignAndSendTransactionPayload) => Promise<string>;
+  signAndSendTransaction: (payload: SendTxPayload) => Promise<string>;
   signMessage: (message: string) => Promise<{ signature: string; signedPayload: string }>;
   verifyMessage: (args: {
     signedPayload: Uint8Array;
@@ -207,9 +298,7 @@ interface WalletHookInterface {
     spendingLimits?: SpendingLimits;
   }) => Promise<{ sessionPda: string; sessionPublicKey: string }>;
   revokeSession: () => Promise<void>;
-  signAndSendWithSession: (payload: {
-    instructions: TransactionInstruction[];
-  }) => Promise<string>;
+  signAndSendWithSession: (payload: SendTxPayload) => Promise<string>;
 
   // Authority
   addAuthority: (payload?: { role?: number }) => Promise<{
@@ -217,13 +306,17 @@ interface WalletHookInterface {
     authorityPublicKey: string;
   }>;
   removeAuthority: (targetAuthorityPda: string) => Promise<void>;
-  signAndSendWithAuthority: (payload: {
-    instructions: TransactionInstruction[];
-  }) => Promise<string>;
+  signAndSendWithAuthority: (payload: SendTxPayload) => Promise<string>;
 
   // Deferred execution
-  authorizeAndExecute: (payload: {
-    instructions: TransactionInstruction[];
+  authorizeAndExecute: (payload: SendTxPayload) => Promise<string>;
+  authorizeDeferred: (payload: SendTxPayload) => Promise<{
+    signature: string;
+    deferredPayload: string;
+  }>;
+  executeDeferred: (payload: {
+    deferredPayload: string;
+    transactionOptions?: TransactionOptions;
   }) => Promise<string>;
 }
 ```

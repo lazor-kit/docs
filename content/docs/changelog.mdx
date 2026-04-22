@@ -6,6 +6,106 @@ description: Protocol and SDK changes that affect integrators.
 A running log of the changes that move user-visible SDK or on-chain behaviour. Internal
 refactors and perf work are summarised when they affect CU budgets or account sizes.
 
+## 2026-04-22 — React Native SDK: deferred split, cross-device fix, RPC opt
+
+`@lazorkit/wallet-mobile-adapter@2.0.0-beta.2`.
+
+### New
+
+- **`authorizeDeferred` + `executeDeferred` + `reclaimDeferred` exposed on `useWallet`.**
+  The 2-tx deferred flow can now run in pieces across devices / servers / scheduled
+  jobs. `authorizeAndExecute` stays as the atomic one-call shortcut.
+  - `authorizeDeferred(payload, options)` — passkey-signed TX1. Returns
+    `{ signature, deferredPayload, deferredExecPda, counter }`.
+  - `executeDeferred({ deferredPayload, refundDestination?, transactionOptions? }, callbacks?)`
+    — no passkey. Submit TX2 from a prior payload (same app, another device, or a relayer).
+  - `reclaimDeferred({ deferredExecPda, refundDestination? }, callbacks?)` — no passkey.
+    Close an expired `DeferredExec` PDA and reclaim its rent.
+- **`DeferredPayload` + wire helpers re-exported.** `serializeDeferredPayload()` /
+  `deserializeDeferredPayload()` turn the in-memory payload into a JSON-safe string —
+  unblocks cross-machine deferred flows.
+- **`TxCallbacks` interface.** Shared shape (`{ onSuccess?, onFail? }`) for flows that
+  don't go through the passkey portal (no `redirectUrl` required).
+
+### Fixed
+
+- **Cross-device passkey recovery → `0x2 InvalidSignature`.** When a user signs in on a
+  secondary device with an iCloud-synced / Google Password Manager passkey, the
+  portal-reported compressed pubkey can drift from what the on-chain Authority stored
+  — the secp256r1 precompile rejects the tx with `0x2`. Two-part fix:
+  - `buildSecp256r1Params` no longer forwards the cached `wallet.passkeyPubkey`. The
+    client reads the authoritative pubkey off-chain via `readAuthorityPubkey`.
+  - `saveWallet` refreshes `WalletInfo.passkeyPubkey` from `readAuthorityPubkey` on
+    every recovery (when `findWalletsByAuthority` returns a match), so persisted
+    records stay in sync with the Authority account.
+
+### Performance
+
+- **Single `getAccountInfo` for counter + pubkey.** New `readAuthorityState(connection,
+  authorityPda)` helper decodes both fields in one round-trip. `resolveSecp256r1` now
+  uses it when the caller doesn't pre-cache `publicKeyBytes` — **one fewer RPC per
+  passkey-signed tx** in the default path (and after the cross-device recovery fix,
+  that default path is now the common path).
+
+### Note on `WalletInfo` convention
+
+The RN SDK's `WalletInfo` keeps `smartWallet` pointing to the **vault PDA** (where
+funds live) plus a separate `walletPda` field for the internal metadata account. The
+React SDK's latest convention flipped this: `smartWallet` = internal wallet PDA,
+`vaultPda` = vault. The two SDKs are therefore semantically different at the storage
+layer — [file an issue](https://github.com/lazor-kit/wallet-mobile-adapter/issues) if
+you need them aligned on your project.
+
+---
+
+## 2026-04-22 — React SDK: v0/legacy, deferred split, cross-device fixes
+
+### New
+
+- **`txVersion: 'legacy' | 'v0'` per-call** in `transactionOptions` (default `'v0'`).
+  Every send-tx method — `signAndSendTransaction`, `signAndSendWithSession`,
+  `signAndSendWithAuthority`, `authorizeAndExecute`, `authorizeDeferred`,
+  `executeDeferred` — accepts it. ALT is v0-only; passing
+  `addressLookupTableAccounts` with legacy throws.
+- **`authorizeDeferred` + `executeDeferred` split the 2-tx flow.**
+  `authorizeDeferred` returns a **serialized `deferredPayload`** string that any party
+  (server relayer, another device, a cron job) can later submit via `executeDeferred`
+  without the passkey. `authorizeAndExecute` stays as the atomic one-call shortcut.
+- **Unified `SendTxPayload`.** All send-tx methods now share the same payload shape.
+
+### Fixed
+
+- **Cross-device passkey recovery** (e.g. iCloud Keychain: wallet created on iPhone,
+  reused on Mac). The recovery branch now reads the on-chain compressed pubkey via
+  `readAuthorityPubkey` on the authority account matched by `findWalletsByAuthority`,
+  instead of the previous `listAuthorities(walletPda).find(...)` which could return a
+  non-matching authority on wallets with multiple secp256r1 entries.
+- **`smartWallet` semantics.** `smartWallet` is the **internal Wallet PDA**; the
+  SOL-holding account is `vaultPda`. An earlier branch wrote `vaultPda` into the
+  `smartWallet` slot which then caused `findVault` to be applied twice, producing a
+  bogus signer at tx-level and failing sig verification. Guide and examples updated to
+  always surface `wallet.vaultPda` to users.
+- **Stale passkey pubkey cache.** All passkey-signing actions
+  (`signAndSendTransaction`, `createSession`, `revokeSession`, `addAuthority`,
+  `removeAuthority`, `authorizeAndExecute`, `authorizeDeferred`) now source
+  `publicKeyBytes` from the on-chain authority (via `resolvePasskeyWallet` →
+  `readAuthorityPubkey`) instead of the cached `wallet.passkeyPubkey`. Prevents
+  custom program error **0x2 (InvalidSignature)** from the secp256r1 precompile when
+  the cache drifts across sessions or devices.
+- **Paymaster request format.** Requests now use object params
+  (`{ transaction, signer_key }`) and include `signer_key = feePayer.toBase58()` so
+  multi-signer Kora pools always sign with the signer that matches the tx's
+  `feePayer` position. Fixes tx-level `-32002 Transaction did not pass signature
+  verification` seen with remote Kora deployments.
+
+### Developer experience
+
+- Iframe signing re-enabled by default in `DialogManager`; Safari/mobile `connect`
+  still falls back to popup. Fixes the earlier "both branches opened a popup" bug in
+  the `sign` path.
+- Session / authority flows default to **v0 `VersionedTransaction` + `tx.sign([...])`**
+  instead of legacy `partialSign`, aligning web SDK with `wallet-mobile-adapter`.
+
 ## 2026-04-20 — Phase 2.1 & API unification
 
 ### Breaking

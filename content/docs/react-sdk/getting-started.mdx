@@ -139,9 +139,10 @@ export function ConnectButton() {
   const { connect, disconnect, isConnected, isConnecting, wallet } = useWallet();
 
   if (isConnected && wallet) {
+    const vault = wallet.vaultPda ?? wallet.smartWallet;
     return (
       <button onClick={() => disconnect()}>
-        Disconnect ({wallet.smartWallet.slice(0, 6)}…)
+        Disconnect ({vault.slice(0, 6)}…)
       </button>
     );
   }
@@ -153,9 +154,12 @@ export function ConnectButton() {
 }
 ```
 
-<Callout type="info" title="smartWallet is the vault">
-  `wallet.smartWallet` and `smartWalletPubkey` both point to the **vault PDA** — the
-  address where funds live. Show it to users and use it as `fromPubkey` for transfers.
+<Callout type="warn" title="vaultPda is the user-facing address">
+  `wallet.vaultPda` is the SOL-holding account — show this to users and use it as
+  `fromPubkey` for transfers. `wallet.smartWallet` (and `smartWalletPubkey`) is the
+  **internal** Wallet PDA used by the program for authority resolution, not where funds
+  live. On older cached `WalletInfo` records without `vaultPda`, derive it with
+  `findVaultPda(new PublicKey(wallet.smartWallet))[0]`.
 </Callout>
 
 </Step>
@@ -166,16 +170,21 @@ export function ConnectButton() {
 
 ```tsx title="components/TransferButton.tsx"
 'use client';
-import { useWallet } from '@lazorkit/wallet';
+import { useWallet, findVaultPda } from '@lazorkit/wallet';
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 
 export function TransferButton() {
-  const { smartWalletPubkey, signAndSendTransaction } = useWallet();
+  const { wallet, signAndSendTransaction } = useWallet();
 
   const send = async () => {
-    if (!smartWalletPubkey) return;
+    if (!wallet) return;
+    // vaultPda is the SOL-holding address — use it as the transfer source.
+    const vault = wallet.vaultPda
+      ? new PublicKey(wallet.vaultPda)
+      : findVaultPda(new PublicKey(wallet.smartWallet))[0];
+
     const ix = SystemProgram.transfer({
-      fromPubkey: smartWalletPubkey,
+      fromPubkey: vault,
       toPubkey: new PublicKey('RECIPIENT_ADDRESS'),
       lamports: 0.01 * LAMPORTS_PER_SOL,
     });
@@ -195,19 +204,26 @@ export function TransferButton() {
 
 ```tsx
 'use client';
-import { useEffect, useState } from 'react';
-import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { useWallet } from '@lazorkit/wallet';
+import { useEffect, useMemo, useState } from 'react';
+import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import { useWallet, findVaultPda } from '@lazorkit/wallet';
 
 export function Balance() {
-  const { smartWalletPubkey } = useWallet();
+  const { wallet } = useWallet();
+  const vault = useMemo(() => {
+    if (!wallet) return null;
+    return wallet.vaultPda
+      ? new PublicKey(wallet.vaultPda)
+      : findVaultPda(new PublicKey(wallet.smartWallet))[0];
+  }, [wallet?.smartWallet, wallet?.vaultPda]);
+
   const [sol, setSol] = useState(0);
 
   useEffect(() => {
-    if (!smartWalletPubkey) return;
+    if (!vault) return;
     const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL!);
-    connection.getBalance(smartWalletPubkey).then((l) => setSol(l / LAMPORTS_PER_SOL));
-  }, [smartWalletPubkey?.toBase58()]);
+    connection.getBalance(vault).then((l) => setSol(l / LAMPORTS_PER_SOL));
+  }, [vault?.toBase58()]);
 
   return <span>{sol.toFixed(4)} SOL</span>;
 }

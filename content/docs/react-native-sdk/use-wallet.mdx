@@ -33,7 +33,10 @@ the paymaster.
 | `addAuthorityEd25519`      | yes           | Grant an Ed25519 key admin / spender rights              |
 | `removeAuthority`          | yes           | Remove any authority by PDA                              |
 | `listAuthorities`          | no            | Read all authorities on the wallet                       |
-| `authorizeAndExecute`      | yes (×1)      | Deferred 2-tx flow for oversized payloads                |
+| `authorizeAndExecute`      | yes (×1)      | Deferred 2-tx flow for oversized payloads (atomic, bundled) |
+| `authorizeDeferred`        | yes           | **TX1 only** — returns `DeferredPayload` to run TX2 later elsewhere |
+| `executeDeferred`          | **no**        | **TX2 only** — submit from a previously-authorized payload   |
+| `reclaimDeferred`          | **no**        | Close an expired `DeferredExec` and reclaim its rent         |
 | `transferSol`              | yes           | Convenience — SOL transfer from the vault                |
 
 ---
@@ -53,14 +56,19 @@ the paymaster.
 | `error`              | `Error \| null`      |                                                          |
 | `connection`         | `Connection`         | The `@solana/web3.js` connection from the provider.      |
 
-## `SignOptions`
-
-Every mutation that opens the portal takes this as its last argument:
+## Option shapes
 
 ```ts
+// Passkey-signed flows (open the portal). Every mutation that prompts the user uses this.
 interface SignOptions {
   redirectUrl: string;                  // your app's deep-link scheme
   onSuccess?: (result: any) => void;
+  onFail?: (error: Error) => void;
+}
+
+// No-passkey flows (session / executeDeferred / reclaimDeferred). No redirectUrl needed.
+interface TxCallbacks {
+  onSuccess?: (signature: string) => void;
   onFail?: (error: Error) => void;
 }
 ```
@@ -119,7 +127,8 @@ const sig = await signAndSendTransaction(
 ### `authorizeAndExecute`
 
 Two-transaction **deferred flow** for payloads that don't fit in a single transaction
-(Jupiter swaps with routes + ATAs, multi-CPI batches). One passkey prompt covers both txs.
+(Jupiter swaps with routes + ATAs, multi-CPI batches). One passkey prompt covers both txs,
+and the SDK submits them back-to-back. Use this when everything runs in the same process.
 
 ```ts
 const sig = await authorizeAndExecute(
@@ -134,9 +143,80 @@ const sig = await authorizeAndExecute(
 
 <Callout type="info" title="How it works">
   TX1 `Authorize` records a SHA-256 hash of your instruction set. TX2 `ExecuteDeferred`
-  replays those exact instructions — the program rejects any mismatch. The SDK submits
-  both transactions automatically and returns TX2's signature.
+  replays those exact instructions — the program rejects any mismatch. `authorizeAndExecute`
+  submits both transactions automatically and returns TX2's signature.
 </Callout>
+
+---
+
+### `authorizeDeferred`
+
+**TX1 only.** Passkey-signed `Authorize`. Returns the payload needed for TX2 so you can
+run it elsewhere — a server relayer, another device, a scheduled job.
+
+```ts
+const { signature, deferredPayload, deferredExecPda, counter } = await authorizeDeferred(
+  {
+    instructions: jupiterSwapIxs,
+    expiryOffset: 600,                       // 10 min
+    transactionOptions: { clusterSimulation: 'devnet' },
+  },
+  { redirectUrl: 'myapp://callback' },
+);
+```
+
+Returns `Promise<AuthorizeResult>`.
+
+### `executeDeferred`
+
+**TX2 only.** No passkey prompt. Submit `ExecuteDeferred` from a payload produced by a
+prior `authorizeDeferred` call (either from this device, or deserialized from a wire
+format — see `serializeDeferredPayload`).
+
+```ts
+// Same machine — use the object directly:
+const txSig = await executeDeferred({
+  deferredPayload,                           // from authorizeDeferred result
+  refundDestination: smartWalletPubkey,      // optional — rent goes to vault
+  transactionOptions: { clusterSimulation: 'devnet' },
+});
+```
+
+### `reclaimDeferred`
+
+**No passkey prompt.** Close an expired `DeferredExec` PDA and recover its rent. Gated
+on the original payer.
+
+```ts
+await reclaimDeferred({
+  deferredExecPda,                           // from authorizeDeferred result
+  refundDestination: smartWalletPubkey,
+});
+```
+
+<Callout type="info" title="Cross-machine deferred flows">
+  Any party holding a serialized `deferredPayload` can submit TX2 — the program verifies
+  the instruction / accounts hash. Use `serializeDeferredPayload()` to get a JSON-safe
+  string; `deserializeDeferredPayload()` to reconstruct it before calling
+  `executeDeferred`.
+
+  ```ts
+  import {
+    serializeDeferredPayload,
+    deserializeDeferredPayload,
+  } from '@lazorkit/wallet-mobile-adapter';
+
+  // Device A:
+  const { deferredPayload } = await authorizeDeferred(...);
+  await fetch('/relayer', { method: 'POST', body: serializeDeferredPayload(deferredPayload) });
+
+  // Relayer / device B:
+  const payload = deserializeDeferredPayload(await req.text());
+  const sig = await executeDeferred({ deferredPayload: payload });
+  ```
+</Callout>
+
+---
 
 ### `transferSol`
 
@@ -291,14 +371,27 @@ doesn't cover (admin protocol ops, manual prepare/finalize, custom signer layout
 ```ts
 import {
   LazorKitClient,
+  // PDAs
   findWalletPda, findVaultPda, findAuthorityPda,
   findSessionPda, findDeferredExecPda,
+  // On-chain state readers (single RPC, combined counter + pubkey)
+  readAuthorityState, readAuthorityCounter, readAuthorityPubkey,
+  // Session policy builders
   Actions,
+  // Constants
   ROLE_OWNER, ROLE_ADMIN, ROLE_SPENDER,
   AUTH_TYPE_ED25519, AUTH_TYPE_SECP256R1,
+  // Cross-machine deferred helpers
+  serializeDeferredPayload, deserializeDeferredPayload,
 } from '@lazorkit/wallet-mobile-adapter';
 
 const client = new LazorKitClient(connection);
 const [walletPda] = findWalletPda(userSeed);
 const authorities = await client.listAuthorities(walletPda);
 ```
+
+<Callout type="info" title="Use `readAuthorityState` for custom flows">
+  If you're building your own prepare/finalize loop, call `readAuthorityState(connection,
+  authorityPda)` to get `{ counter, publicKeyBytes }` in a single `getAccountInfo` — saves
+  an RPC round-trip over calling `readAuthorityCounter` and `readAuthorityPubkey` separately.
+</Callout>

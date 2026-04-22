@@ -239,6 +239,41 @@ await signAndSendTransaction(payload, {
 
 ---
 
+## Precompile errors (`0x0` – `0x5`)
+
+Low-numbered error codes are from Solana's native precompile programs, not LazorKit.
+The most common one you'll see with passkey signing:
+
+| Hex   | Source program             | Cause                                                                           |
+| ----- | -------------------------- | ------------------------------------------------------------------------------- |
+| `0x2` | `Secp256r1SigVerify111...` | **`InvalidSignature`** — the precompile couldn't verify the r/s/pubkey/message tuple. |
+
+### Debugging `0x2 InvalidSignature`
+
+The secp256r1 precompile verifies `sig` against `(publicKey, authenticatorData ‖ sha256(clientDataJSON))`.
+Any of these being wrong produces `0x2`:
+
+- **Stale cached pubkey.** The SDK signed with an old `publicKeyBytes` that doesn't
+  match the on-chain Authority. Common trigger: **cross-device passkey recovery** (user
+  signs in on a second device with an iCloud-synced passkey, the portal-reported pubkey
+  drifts from what was stored on-chain).
+
+  _Fix (RN SDK ≥ 2.0.0-beta.2)_: `buildSecp256r1Params` no longer forwards the cached
+  `wallet.passkeyPubkey` — the client reads the authoritative pubkey off-chain via
+  `readAuthorityPubkey`, and `saveWallet` refreshes the cached pubkey on every
+  recovery. Upgrade and `disconnect` + `connect` once to re-hydrate.
+
+- **`authenticatorData` from the wrong authenticator.** Make sure the portal returns
+  bytes from the same credential the user just touched, not a cached response.
+
+- **`clientDataJSON` tampered.** The program hashes the raw bytes; any proxy that
+  rewrites headers or trims whitespace breaks the signature.
+
+Log the prepared challenge, the raw `clientDataJSON`, and the compressed pubkey —
+comparing them against the on-chain Authority usually pinpoints the desync in seconds.
+
+---
+
 ## Program errors (0xbd0, 0xbd1, …)
 
 Custom program errors come back from Solana as hex codes inside

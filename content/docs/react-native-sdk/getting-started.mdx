@@ -242,6 +242,47 @@ useEffect(() => {
 
 ---
 
+## 8. Deferred execution — split TX1 / TX2
+
+For flows where TX1 and TX2 don't run in the same process — a relayer on your server,
+a scheduled job, a secondary device — use the split API instead of `authorizeAndExecute`:
+
+```tsx
+import {
+  useWallet,
+  serializeDeferredPayload,
+  deserializeDeferredPayload,
+} from '@lazorkit/wallet-mobile-adapter';
+
+// Device A — passkey-signed TX1 only, returns payload
+const { signature: tx1Sig, deferredPayload } = await authorizeDeferred(
+  { instructions: jupiterSwapIxs, expiryOffset: 600 },
+  { redirectUrl: 'myapp://cb' },
+);
+
+// Send the payload to your relayer as a JSON-safe string
+await fetch('/api/relayer', {
+  method: 'POST',
+  body: serializeDeferredPayload(deferredPayload),
+});
+
+// Relayer / server / other device — no passkey required
+const payload = deserializeDeferredPayload(await req.text());
+const tx2Sig = await executeDeferred({ deferredPayload: payload });
+```
+
+If the authorization expires before TX2 is submitted, reclaim the rent:
+
+```tsx
+await reclaimDeferred({
+  deferredExecPda,                         // from authorizeDeferred result
+  refundDestination: smartWalletPubkey,    // refund to vault
+});
+```
+
+See [`useWallet` → Deferred execution](/react-native-sdk/use-wallet#authorizeanddexecute)
+for the full API.
+
 ## Next level
 
 <Cards>
@@ -252,5 +293,5 @@ useEffect(() => {
   <Card title="Authorities" href="/react-native-sdk/use-wallet#addauthorityed25519"
     description="Add Ed25519 device keys as admin or spender on the wallet." />
   <Card title="Troubleshooting" href="/troubleshooting"
-    description="Common errors: NotAllowedError, Network request failed, 0xbd0, deep-link mismatches." />
+    description="Common errors: NotAllowedError, Network request failed, 0x2, 0xbd0, deep-link mismatches." />
 </Cards>
