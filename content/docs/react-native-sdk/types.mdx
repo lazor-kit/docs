@@ -57,6 +57,122 @@ interface LazorKitProviderProps {
 
 ---
 
+## Wallet confirmation
+
+<Callout type="warn" title="Version note">
+  Everything in this section is in the protocol-v2 major release of
+  `@lazorkit/wallet-mobile-adapter` (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier
+  versions — `1.x`, and the `2.0.0` betas up to `2.0.0-beta.4` — do not have it. How it is
+  used: [Wallet Confirmation](/react-native-sdk/wallet-confirmation).
+</Callout>
+
+### Provider and `connect` options
+
+```ts
+interface LazorKitProviderProps {
+  // ...the props above, plus:
+  onConfirmWallet?: OnConfirmWallet;      // default 'builtin'
+  trustedAuthorities?: readonly string[]; // your own Ed25519 keys, base58
+  watchMints?: readonly string[];         // SPL Token mints your app receives, base58
+}
+
+interface ConnectOptions {
+  redirectUrl: string;
+  confirmWallet?: string;                 // vault (or wallet PDA) the user chose
+  onConfirmWallet?: OnConfirmWallet;      // overrides the provider's for this call
+  onSuccess?: (wallet: WalletInfo) => void;
+  onFail?: (error: Error) => void;
+}
+```
+
+### `WalletChoice`
+
+A wallet the passkey is proven to hold a key of, that `connect` will not adopt without the
+user. Show the vault address; the order is not a recommendation.
+
+```ts
+interface WalletChoice {
+  wallet: string;                         // wallet PDA
+  vault: string;                          // vault PDA — where the funds are. Show this one.
+  version: 1 | 2;                         // 1 = made before LazorKit v2, not migrated yet
+  lamports: number;                       // vault balance
+  signatureCount: number;                 // 0 = not used with this passkey yet
+  vaultIsSystemAccount: boolean;          // false: vault handed to another program
+  otherAuthorities: {                     // every authority except this passkey's
+    address: string;                      // the authority account
+    type: 'passkey' | 'key';              // passkey = secp256r1, key = Ed25519
+    role: 'owner' | 'admin' | 'spender' | 'unknown';
+    key?: string;                         // 'key' only: the Ed25519 key
+    sameRelyingParty?: boolean;           // 'passkey' only: same relying party
+    trusted: boolean;                     // in trustedAuthorities; a passkey never is
+  }[];
+  liveSessions: {                         // sessions that can still sign
+    address: string;
+    sessionKey: string | null;            // null when unreadable
+    approxExpiresAt: number | null;       // ms since the epoch (slots × 400 ms)
+    trusted: boolean;
+  }[];
+  pendingDeferred: {                      // authorized, not yet run or expired. Never trusted.
+    address: string;
+    approxExpiresAt: number | null;
+  }[];
+  tokenGrants: {                          // rights over the vault's token accounts
+    tokenAccount: string;
+    tokenProgram: string;
+    mint: string | null;
+    kind: 'delegate' | 'closeAuthority' | 'owner' | 'unreadable';
+    grantee: string | null;
+    trusted: boolean;
+  }[];
+}
+```
+
+### `ConfirmWalletRequest`
+
+```ts
+interface ConfirmWalletRequest {
+  credentialId: string;
+  candidates: WalletChoice[];
+}
+```
+
+### `ConfirmWalletHandler`
+
+Your own chooser. Resolve with the chosen candidate's `vault` (or `wallet`), or `null` when
+the user recognises none of them. Never choose for the user.
+
+```ts
+type ConfirmWalletHandler = (
+  request: ConfirmWalletRequest,
+) => Promise<{ wallet: string } | null> | { wallet: string } | null;
+```
+
+### `OnConfirmWallet`
+
+```ts
+type OnConfirmWallet = ConfirmWalletHandler | 'builtin' | 'throw';
+```
+
+### `<WalletChooser />`
+
+The built-in chooser, for rendering inside your own `<Modal>` on iOS — while it is mounted
+it draws instead of the provider's. See
+[Wallet Confirmation › iOS](/react-native-sdk/wallet-confirmation#ios-shows-one-modal-at-a-time).
+
+### Errors
+
+```ts
+class WalletNeedsConfirmationError extends Error {      // onConfirmWallet: 'throw'
+  readonly credentialId: string;
+  readonly candidates: WalletChoice[];
+}
+class WalletConfirmationDeclinedError extends Error {}  // the user chose none; nothing saved
+class PortalCancelledError extends LazorKitError {}     // code 'PORTAL_CANCELLED'
+class WalletChooserNotShownError extends LazorKitError {} // code 'WALLET_CHOOSER_NOT_SHOWN' (iOS)
+```
+
+---
+
 ## Options & payloads
 
 ### `SignOptions`

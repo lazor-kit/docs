@@ -122,6 +122,37 @@ call `signTransaction` yourself.
 
 ---
 
+## Confirming the user's wallet
+
+<Callout type="warn" title="Version note">
+  These options are in the protocol-v2 major release of `@lazorkit/wallet` (built on
+  `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and before) do not have them.
+</Callout>
+
+When a returning user's wallet cannot be used without asking — it has never been used with
+their passkey, the passkey has signed for more than one wallet, or something else can also
+spend from it — `connect` asks the user which wallet is theirs. `registerLazorkitWallet` takes the same options for this as
+`LazorkitProvider` (`onConfirmWallet`, `trustedAuthorities`, `watchMints`), **except
+`onConfirmWallet: 'throw'`, which it rejects**: `standard:connect` cannot pass
+`confirmWallet`, so the user could never finish. Keep the default (`'builtin'`, the SDK's
+own chooser) or pass your own handler:
+
+```tsx
+registerLazorkitWallet({
+  rpcUrl: CONFIG.RPC_URL,
+  portalUrl: CONFIG.PORTAL_URL,
+  paymasterConfig: CONFIG.PAYMASTER,
+  clusterSimulation: CONFIG.CLUSTER,
+  trustedAuthorities: [BACKEND_ADMIN_KEY], // optional: your own Ed25519 keys, base58
+  watchMints: [MY_TOKEN_MINT],             // optional: SPL mints your app receives
+});
+```
+
+See [React SDK › Wallet Confirmation](/react-sdk/wallet-confirmation) for the rule, the
+chooser, and the errors `connect` can reject with.
+
+---
+
 ## Message signing (P256)
 
 WebAuthn signs over derived WebAuthn payloads, not the raw challenge. `signMessage`

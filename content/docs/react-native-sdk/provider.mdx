@@ -64,6 +64,25 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 - **`configPaymaster`** — Kora JSON-RPC endpoint. `apiKey` is sent as `x-api-key` on every request.
 - **`isDebug`** — Enables verbose logs via the built-in `logger`.
 
+### Wallet confirmation props
+
+<Callout type="warn" title="Version note">
+  These props are in the protocol-v2 major release of `@lazorkit/wallet-mobile-adapter`
+  (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions — `1.x`, and the `2.0.0` betas
+  up to `2.0.0-beta.4` — do not have them.
+</Callout>
+
+| Prop                 | Type                                           | Default     |
+| -------------------- | ---------------------------------------------- | ----------- |
+| `onConfirmWallet`    | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'` |
+| `trustedAuthorities` | `readonly string[]` — your own Ed25519 keys    | none        |
+| `watchMints`         | `readonly string[]` — SPL Token mints you receive | none     |
+
+`connect` uses a returning user's wallet on its own only when it is the one wallet the
+passkey has signed for and nothing else can spend from it; otherwise it asks the user.
+`onConfirmWallet` picks how: the provider's built-in chooser, your own UI, or a thrown
+`WalletNeedsConfirmationError`. See [Wallet Confirmation](/react-native-sdk/wallet-confirmation).
+
 ## Recipes
 
 ### Switch networks at runtime

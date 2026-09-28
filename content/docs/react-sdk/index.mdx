@@ -3,7 +3,7 @@ title: Overview
 description: LazorKit React SDK — passkey smart wallets for web apps.
 ---
 
-import { Rocket, Plug, Key, Coins, Shield, HelpCircle } from 'lucide-react'
+import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck } from 'lucide-react'
 
 Drop-in React hook + provider for LazorKit smart wallets on Solana. Users authenticate with
 a device passkey (Face ID, Touch ID, Windows Hello, security key) via the native
@@ -55,6 +55,9 @@ window. Once signed, transactions are relayed by the Kora paymaster.
   <Card icon={<Coins />} title="Types"
     description="TypeScript interfaces, SpendingLimits, constants."
     href="/react-sdk/types" />
+  <Card icon={<UserCheck />} title="Wallet Confirmation"
+    description="How connect finds a returning user's wallet, and the built-in chooser."
+    href="/react-sdk/wallet-confirmation" />
   <Card icon={<Shield />} title="Session Keys"
     description="Skip the passkey prompt with scoped Ed25519 keys."
     href="/concepts/session-keys" />

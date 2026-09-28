@@ -41,8 +41,11 @@ graph TD
 
 ### Wallet PDA
 
-Minimal 8-byte account. Chosen by a 32-byte `user_seed` at creation. You don't need to
-store it client-side — look it up via `findWalletsByAuthority(credentialIdHash)`.
+Minimal 8-byte account. Chosen by a 32-byte `user_seed` at creation. A wallet your app has
+just created, you already know — keep its address. To find a returning passkey user's
+wallet, prove the passkey and check who else can spend from it (see
+[Look up a returning user](#look-up-a-returning-user)); a lookup by credential hash alone
+can return a wallet someone else planted.
 
 ### Vault PDA
 
@@ -130,12 +133,67 @@ Creates Wallet PDA, Vault PDA, and the first Authority PDA in one transaction.
 
 ### Look up a returning user
 
-No need to persist `walletPda` client-side:
+<Callout type="warn" title="Version note">
+  `findOwnPasskeyWallet` ships in `@lazorkit/sdk-legacy` **1.2.0** (protocol v2). The React
+  and React Native SDKs apply the same rule inside `connect` from the protocol-v2 major of
+  `@lazorkit/wallet` and `@lazorkit/wallet-mobile-adapter`. Earlier versions — `sdk-legacy`
+  `0.3.x` / `1.1.x`, `wallet` `2.x`, `wallet-mobile-adapter` `1.x` and the `2.0.0` betas up
+  to `beta.4` — do not have it.
+</Callout>
+
+Do **not** take the first wallet that lists the passkey's credential-id hash:
 
 ```typescript
+// Unsafe: the first match can be a wallet someone planted for this passkey.
 const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
-// { walletPda, authorityPda, vaultPda, role, authorityType }
 ```
+
+The credential-id hash is public — it sits in every authority account the passkey has —
+and `CreateWallet`, `AddAuthority` and `TransferOwnership` take any key without that key's
+consent. So anyone can create a wallet that lists a user's credential next to their own
+public key, add the user's real passkey to a wallet they control, or hand the user a
+wallet after quietly keeping a way into its vault. A lookup by hash returns all of them.
+
+`findOwnPasskeyWallet` takes one passkey assertion over a challenge you generated, and
+uses a wallet on its own only when all three hold:
+
+1. **Proven.** The passkey is an Owner on it, created under your `rpId`, and the public key
+   stored there is the one that just signed.
+2. **Nothing untrusted can spend from it.** No other authority, no live session, no pending
+   deferred execution, no delegate or foreign close authority on the vault's token
+   accounts, and a vault that is still a plain system account — apart from Ed25519 keys
+   you declare trusted (a backend admin, session keys you issue).
+3. **The one wallet this passkey has signed for.** The replay counter on its authority is
+   above zero — only a signature by the key it stores advances it — and no other wallet of
+   this passkey's has one.
+
+Anything else goes to the user to confirm, by vault address:
+
+```typescript
+const { adopt, needsConfirmation, unproven } = await client.findOwnPasskeyWallet({
+  credentialIdHash,
+  rpId,
+  proof, // an assertion over createOwnershipChallenge()
+});
+// adopt → use it · needsConfirmation → let the user choose · both empty → create a wallet
+```
+
+Why "signed for": `TransferOwnership` hands a wallet to a passkey without asking it, and
+not everything its earlier Owner did through the vault can be read back — an SPL Token
+account moved off the vault with `SetAuthority` is only found for a few watched mints
+(wSOL, USDC, USDT, and any you add). A passkey signs only for a wallet its user chose.
+That includes the user's own wallet before its first transaction: it has never been
+signed for, so **the user confirms it once**, and after its first transaction it is used
+without asking.
+
+Why "the one": the v2 program names the wallet in the passkey challenge, so a signature
+made now verifies only on the wallet it was made for. v1 never did, nor did v2 before that
+change, and counters raised then are still on chain — a user's signature could have been
+replayed onto a planted wallet. When two wallets have been signed for, neither is adopted.
+
+The full flow is in [SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
+The [React SDK](/react-sdk/wallet-confirmation) and [React Native SDK](/react-native-sdk/wallet-confirmation)
+apply the same rule inside `connect` and ask the user with a built-in chooser.
 
 ### Add authority
 

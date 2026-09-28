@@ -52,6 +52,111 @@ interface PaymasterConfig {
 
 ---
 
+## Wallet confirmation
+
+<Callout type="warn" title="Version note">
+  Everything in this section is in the protocol-v2 major release of `@lazorkit/wallet`
+  (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and before) do not have
+  it. How it is used: [Wallet Confirmation](/react-sdk/wallet-confirmation).
+</Callout>
+
+### Provider and `connect` options
+
+```ts
+interface LazorkitProviderProps {
+  // ...the props above, plus:
+  onConfirmWallet?: OnConfirmWallet;   // default 'builtin'
+  trustedAuthorities?: string[];       // your own Ed25519 keys, base58
+  watchMints?: string[];               // SPL Token mints your app receives, base58
+}
+
+interface ConnectHookOptions {
+  feeMode?: 'paymaster' | 'user';
+  confirmWallet?: string;              // vault (or wallet PDA) the user chose
+  onConfirmWallet?: OnConfirmWallet;   // overrides the provider's for this call
+}
+```
+
+### `WalletChoice`
+
+A wallet the passkey is proven to hold, offered for the user to recognise.
+
+```ts
+interface WalletChoice {
+  wallet: string;                      // wallet PDA — an internal account
+  vault: string;                       // vault PDA — where the funds are. Show this one.
+  version: 1 | 2;                      // 1 = made before LazorKit v2, not migrated yet
+  lamports: number;                    // vault balance
+  signatureCount: number;              // 0 = not used with this passkey yet
+  vaultIsSystemAccount: boolean;       // false: vault handed to another program
+  otherAuthorities: {                  // every authority besides this passkey
+    address: string;                   // the authority account
+    type: 'passkey' | 'key';           // passkey = secp256r1, key = Ed25519
+    role: 'owner' | 'admin' | 'spender' | 'unknown';
+    key?: string;                      // 'key' only: the Ed25519 public key
+    sameRelyingParty?: boolean;        // 'passkey' only: same portal as this passkey
+    trusted: boolean;                  // listed in trustedAuthorities; a passkey never is
+  }[];
+  liveSessions: {                      // session keys that can still sign
+    address: string;
+    sessionKey: string | null;         // null when unreadable
+    approxExpiresAt: number | null;    // ms since the epoch (400 ms a slot)
+    trusted: boolean;
+  }[];
+  pendingDeferred: {                   // authorized, not yet executed. Never trusted.
+    address: string;
+    approxExpiresAt: number | null;
+  }[];
+  tokenGrants: {                       // rights over the vault's token accounts
+    tokenAccount: string;
+    tokenProgram: string;
+    mint: string | null;
+    kind: 'delegate' | 'closeAuthority' | 'owner' | 'unreadable';
+    grantee: string | null;
+    trusted: boolean;
+  }[];
+}
+```
+
+### `ConfirmWalletRequest`
+
+```ts
+interface ConfirmWalletRequest {
+  credentialId: string;                // the passkey's credential id (base64)
+  candidates: WalletChoice[];          // in the order found — not a recommendation
+}
+```
+
+### `ConfirmWalletHandler`
+
+Your own chooser. Resolve with the chosen wallet's `vault` (or `wallet`), or `null` when the
+user recognises none. A throw is passed on as `connect`'s error.
+
+```ts
+type ConfirmWalletHandler = (
+  request: ConfirmWalletRequest,
+) => Promise<{ wallet: string } | null> | { wallet: string } | null;
+```
+
+### `OnConfirmWallet`
+
+```ts
+type OnConfirmWallet = ConfirmWalletHandler | 'builtin' | 'throw';
+```
+
+### Errors
+
+```ts
+class WalletNeedsConfirmationError extends Error {   // onConfirmWallet: 'throw'
+  readonly credentialId: string;
+  readonly candidates: WalletChoice[];
+}
+class WalletConfirmationDeclinedError extends Error {} // the user chose none; nothing saved
+class PortalCancelledError extends Error {}            // portal closed, or disconnect mid-connect
+```
+
+---
+
 ## Transaction payloads
 
 ```ts

@@ -73,6 +73,32 @@ const wallet = await connect({ feeMode: 'paymaster' });
 
 **Returns** `Promise<WalletInfo>`.
 
+#### Confirming a returning user's wallet
+
+<Callout type="warn" title="Version note">
+  `confirmWallet` and `onConfirmWallet` are in the protocol-v2 major release of
+  `@lazorkit/wallet` (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and
+  before) do not have them.
+</Callout>
+
+With no stored wallet, `connect` proves the passkey and uses a wallet on its own only when
+it is the one wallet this passkey has signed for and nothing else can spend from it.
+Otherwise it asks the user — by default with a built-in "Which wallet is yours?" chooser.
+A user's own wallet that has never been used is confirmed once.
+
+```ts
+// After catching WalletNeedsConfirmationError (onConfirmWallet: 'throw'):
+await connect({ confirmWallet: choice.vault });
+```
+
+| Option            | Type                                           | Notes                                                        |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| `confirmWallet`   | `string`                                       | Vault (or wallet PDA) the user chose. Within 2 minutes of the error, no second passkey prompt. Naming a wallet the passkey is not proven to hold throws. |
+| `onConfirmWallet` | `'builtin' \| 'throw' \| ConfirmWalletHandler` | Overrides the provider's for this call.                      |
+
+`connect` can reject with `WalletNeedsConfirmationError`, `WalletConfirmationDeclinedError`
+or `PortalCancelledError`. Full flow: [Wallet Confirmation](/react-sdk/wallet-confirmation).
+
 ### `disconnect`
 
 ```ts

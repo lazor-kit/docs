@@ -1,0 +1,211 @@
+---
+title: Wallet Confirmation
+description: How connect finds a returning user's wallet, when it asks the user to confirm it, and how to shape that step.
+---
+
+<Callout type="warn" title="Version note">
+  This page describes the protocol-v2 major release of `@lazorkit/wallet-mobile-adapter`,
+  the first built on `@lazorkit/sdk-legacy` 1.2.0. Earlier versions — `1.x`, and the
+  `2.0.0` betas up to `2.0.0-beta.4` — have none of `onConfirmWallet`, `confirmWallet`,
+  `trustedAuthorities`, `watchMints`, `<WalletChooser />` or the built-in chooser.
+</Callout>
+
+A passkey's credential id is public — it sits in every account the passkey has touched —
+and anyone can create a wallet that lists it, add it to a wallet of their own, or hand it
+a wallet they have used first. So `connect` never takes "the wallet this credential is
+on" at face value.
+
+## What `connect` does
+
+1. **Proves the passkey.** The passkey signs a challenge the SDK chose — in the connect
+   reply when the portal supports it, otherwise in one more portal prompt. Only wallets
+   whose stored key verifies that signature count. (Mobile always proves: a deep link can
+   be forged.)
+2. **Uses a wallet on its own** only when it is **the one wallet this passkey has signed
+   for, and nothing else can spend from it**: no other authority, live session, pending
+   transaction or token approval, and a vault that is still a plain system account.
+3. **Otherwise asks the user** which wallet is theirs — see
+   [`onConfirmWallet`](#onconfirmwallet).
+4. **Creates a new (v2) wallet** only when the passkey is proven on no live wallet. It is
+   saved as created, never looked up again.
+
+This runs only on a fresh `connect`; a stored wallet and sign actions never come through
+it. While a wallet is connected, `connect` returns it without opening the portal — a
+`confirmWallet` naming another wallet throws, so disconnect first to connect another
+passkey's wallet. The lookup reads with `getProgramAccounts`, so `rpcUrl` must allow it;
+a failed read fails `connect` rather than counting as "no wallet".
+
+### A never-used wallet is confirmed once
+
+A passkey signs only for a wallet its user chose, so a wallet it has **never signed for**
+is never used without asking — even when it is the only one, and even with
+`trustedAuthorities`. That includes the user's own wallet before its first transaction:
+
+- a user whose wallet was created but not used yet confirms it once if they connect
+  afresh before its first transaction — on another device, or after `disconnect` (the
+  `connect` that created it saves it directly, without asking);
+- a wallet made on the LazorKit migration page is confirmed once;
+- after the wallet's first transaction, it is used on its own.
+
+The user is also asked whenever the passkey has signed for **two** wallets: signatures
+made before the v2 program bound the wallet into the passkey challenge could be replayed
+onto a planted copy.
+
+Why a never-used wallet cannot be trusted by looking at it: its earlier holder could have
+moved the vault's SPL Token account for some mint to themselves before handing the wallet
+over, and nothing on chain leads back to that account. The SDK checks it for wSOL, USDC,
+USDT and devnet USDC, plus every mint in [`watchMints`](#trustedauthorities-and-watchmints);
+for any other mint it cannot be seen.
+
+---
+
+## Configure
+
+```tsx
+<LazorKitProvider
+  onConfirmWallet="builtin"                // default
+  trustedAuthorities={[BACKEND_ADMIN_KEY]} // your own Ed25519 keys, base58
+  watchMints={[MY_TOKEN_MINT]}             // SPL mints your app receives
+>
+  <App />
+</LazorKitProvider>
+```
+
+| Prop                 | Type                                           | Default     |
+| -------------------- | ---------------------------------------------- | ----------- |
+| `onConfirmWallet`    | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'` |
+| `trustedAuthorities` | `readonly string[]` (base58 Ed25519 keys)      | none        |
+| `watchMints`         | `readonly string[]` (base58 SPL Token mints)   | none        |
+
+`connect({ redirectUrl, onConfirmWallet })` overrides it for one call. A malformed
+`trustedAuthorities` or `watchMints` entry fails every fresh `connect`, not only a
+returning user's.
+
+---
+
+## `onConfirmWallet`
+
+How `connect` asks the user when it will not pick a wallet on its own.
+
+<Tabs items={['Built-in chooser (default)', 'Your own UI', 'Throw']}>
+<Tab value="Built-in chooser (default)">
+
+`onConfirmWallet="builtin"` — `LazorKitProvider` shows a chooser, **"Which wallet is
+yours?"**, as a React Native `Modal`. Each wallet shows its vault address (selectable), SOL
+balance, a **"Legacy (v1)"** tag for a wallet not yet migrated, a note for a wallet not
+used with this passkey yet, and **"Also controlled by: …"** for anything else that can
+spend from it.
+
+Nothing is pre-selected or marked as safe, and the order is not a recommendation. A wallet
+whose vault was handed to another program is shown with a warning and cannot be chosen
+there. **"None of these"** and the Android back button decline — `connect` rejects with
+`WalletConfirmationDeclinedError`, and no wallet is created.
+
+</Tab>
+<Tab value="Your own UI">
+
+Pass a function ([`ConfirmWalletHandler`](/react-native-sdk/types#confirmwallethandler)):
+`(request) => { wallet } | null`, or a promise of it. `request.candidates` are
+[`WalletChoice`](/react-native-sdk/types#walletchoice)s — vault, balance,
+`signatureCount`, `vaultIsSystemAccount`, every pending transaction, and every other
+authority, session and token grant, each marked `trusted` or not. Resolve with the chosen
+`vault` (or `wallet`), or `null`. Never pick for the user.
+
+```tsx
+<LazorKitProvider
+  onConfirmWallet={async ({ candidates }) => {
+    const chosen = await myWalletPicker(candidates); // show c.vault
+    return chosen ? { wallet: chosen.vault } : null;
+  }}
+>
+```
+
+</Tab>
+<Tab value="Throw">
+
+`onConfirmWallet="throw"` — `connect` throws `WalletNeedsConfirmationError` with
+`credentialId` and `candidates`. Show them, then call
+`connect({ redirectUrl, confirmWallet: choice.vault })`. Within **two minutes** that adopts
+it without opening the portal again; an address that is none of them throws at once, and
+the candidates stay remembered. Disconnecting, or any `connect` that opens the portal,
+forgets them.
+
+```tsx
+import { WalletNeedsConfirmationError } from '@lazorkit/wallet-mobile-adapter';
+
+try {
+  await connect({ redirectUrl: 'myapp://home', onConfirmWallet: 'throw' });
+} catch (e) {
+  if (e instanceof WalletNeedsConfirmationError) {
+    const choice = await askUser(e.candidates);
+    if (choice) await connect({ redirectUrl: 'myapp://home', confirmWallet: choice.vault });
+  } else throw e;
+}
+```
+
+</Tab>
+</Tabs>
+
+While the chooser (or your function) waits for the user, `isLoading` is `false` and
+`isConnecting` stays `true`, so an overlay you show while loading does not cover it.
+
+### iOS shows one modal at a time
+
+The built-in chooser is a React Native `Modal` that `LazorKitProvider` renders beside your
+app, and iOS will not present it over another modal that is open — your own `<Modal>`, or
+a screen presented modally (`presentation: 'modal'` in Expo Router / React Navigation). If
+you connect from inside one, render the chooser there as well; while it is mounted it
+draws instead of the provider's:
+
+```tsx
+import { WalletChooser } from '@lazorkit/wallet-mobile-adapter';
+
+<Modal visible={signInOpen}>
+  <SignInScreen />
+  <WalletChooser />
+</Modal>
+```
+
+If the chooser still is not on screen within a few seconds, `connect` rejects with
+`WalletChooserNotShownError` instead of waiting for an answer nobody can give. Android
+shows it over anything.
+
+### `confirmWallet`
+
+The user's pick, by **vault or wallet PDA**. It must be a wallet this passkey is proven to
+hold a key of; any other address throws rather than being ignored. While a wallet is
+connected it must name that one.
+
+### `trustedAuthorities` and `watchMints`
+
+- **`trustedAuthorities`** — Ed25519 keys you control (a backend admin, session keys your
+  app issues). An authority, session or token approval held by one of them does not stop
+  a wallet from being used. Passkeys, pending transactions and a vault handed to another
+  program are never waived.
+- **`watchMints`** — the vault's token account for each of these mints (on top of wSOL,
+  USDC, USDT and devnet USDC) is checked for having been handed to someone else. A
+  handed-away account for a mint nobody watches cannot be seen at all, which is why a
+  wallet this passkey never signed for always goes to the user.
+
+---
+
+## Errors
+
+| Error                                        | When                                                                                                      |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `WalletNeedsConfirmationError`               | `onConfirmWallet: 'throw'` and the user has to choose.                                                    |
+| `WalletConfirmationDeclinedError`            | The user chose "None of these" (or your handler returned `null`). Nothing was saved, and no wallet was created. |
+| `PortalCancelledError`                       | The user closed the portal (iOS cancel, or an Android Custom Tab dismissed without a redirect), or `disconnect` was called while `connect` ran — then that connect saves and remembers nothing, and its chooser closes. Also for sign actions. |
+| `WalletChooserNotShownError`                 | iOS could not show the built-in chooser (another modal is open); see above. Nothing was saved.            |
+| `LazorKitError` with `code: 'PORTAL_ERROR'`  | The portal redirected with an `error`; its text is the message.                                           |
+
+All are exported from `@lazorkit/wallet-mobile-adapter`.
+
+---
+
+## Finding wallets yourself
+
+Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
+`findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
+`LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()`; see
+[SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
