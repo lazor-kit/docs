@@ -142,7 +142,7 @@ Within **2 minutes** that adopts it without a second passkey prompt; after that,
 import { WalletNeedsConfirmationError } from '@lazorkit/wallet';
 
 try {
-  await connect();
+  await connect({ onConfirmWallet: 'throw' }); // or set it on <LazorkitProvider>
 } catch (e) {
   if (e instanceof WalletNeedsConfirmationError) {
     const choice = await askUser(e.candidates);
@@ -202,8 +202,10 @@ await adapter.connect({ confirmWallet, onConfirmWallet });
 
 With `'throw'`, catch the error (wallet-adapter's `onError`), then set
 `adapter.confirmWallet = choice.vault` and connect again. The adapter clears
-`confirmWallet` once a wallet is connected, and on disconnect. A second `connect` while
-one is running waits for it rather than opening another portal.
+`confirmWallet` once a wallet is connected, and on disconnect. A second `connect` without
+options while one is running waits for it rather than opening another portal. One that
+passes `confirmWallet` or `onConfirmWallet` throws `WalletConnectionError` (and emits it as
+`error`) until the first finishes.
 
 [`registerLazorkitWallet`](/wallet-standard) takes the same options **except
 `onConfirmWallet: 'throw'`**, which it rejects: `standard:connect` cannot pass

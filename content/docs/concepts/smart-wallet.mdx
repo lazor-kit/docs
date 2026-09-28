@@ -175,7 +175,9 @@ const { adopt, needsConfirmation, unproven } = await client.findOwnPasskeyWallet
   rpId,
   proof, // an assertion over createOwnershipChallenge()
 });
-// adopt → use it · needsConfirmation → let the user choose · both empty → create a wallet
+// adopt → use it · needsConfirmation → let the user choose
+// both empty → none proven: create a wallet once the proof verifies against its key
+// (a proof that fails proves nothing, and also leaves both empty)
 ```
 
 Why "signed for": `TransferOwnership` hands a wallet to a passkey without asking it, and
