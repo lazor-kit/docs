@@ -15,7 +15,7 @@ A permissioned execution layer that defines who can execute, how execution happe
 - **Session keys** — scoped, time-bound delegation keys that let apps or agents act on a user's behalf without repeated signing prompts
 - **Paymaster** — a gas abstraction service that sponsors or routes transaction fees, so users never need to hold SOL to interact
 - **Programmable execution** — RBAC roles define who can execute; session action constraints define what a delegated session key can do, to which programs, up to what value, and for how long
-- **Live on Solana** — deployed in production with two reference products: Seedless (onboarding) and session.money (agent execution)
+- **Live on Solana** — deployed on mainnet, with Seedless (passkey onboarding) in production
 
 ---
 
@@ -225,10 +225,9 @@ LazorKit does not take a cut from app-level revenue. The developer keeps everyth
 
 ## Current Status
 
-LazorKit is live on Solana mainnet. Two products are in production:
+LazorKit is live on Solana mainnet. In production:
 
-- **[Seedless](https://www.seedlesslabs.xyz)** — a reference implementation of gasless passkey onboarding. Users create a smart wallet with biometrics in under 10 seconds.
-- **[session.money](https://session.money)** — an agent execution interface using LazorKit session keys. Demonstrates scoped delegation for automated on-chain actions.
+- **[Seedless](https://www.seedlesslabs.xyz)** — a passkey wallet built on LazorKit, with gasless onboarding. Users create a smart wallet with biometrics in under 10 seconds.
 
 The core protocol (smart wallet program, session key validation, Paymaster service) is deployed and actively used.
 
