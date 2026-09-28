@@ -115,19 +115,177 @@ Actions.programBlacklist(programId, expiresAt?)
 
 ---
 
-## `WalletLookupResult`
+## `WalletAuthorityRecord`
 
-Returned by `findWalletsByAuthority`:
+Returned by `findWalletsByAuthority` — a raw lookup: every wallet that lists the key, at
+any rank, including wallets someone else created or added the key to.
 
 ```typescript
-interface WalletLookupResult {
+interface WalletAuthorityRecord {
   walletPda: PublicKey;
   authorityPda: PublicKey;
   vaultPda: PublicKey;                       // ← the address funds live at
-  role: 0 | 1 | 2;                           // 0=Owner, 1=Admin, 2=Spender
-  authorityType: 0 | 1;                      // 0=Ed25519, 1=Secp256r1
+  role: number;                              // 0=Owner, 1=Admin, 2=Spender
+  authorityType: number;                     // 0=Ed25519, 1=Secp256r1
 }
 ```
+
+<Callout type="warn" title="Not how to find a returning passkey user">
+  Don't adopt the first record for a credential-id hash: the hash is public, and anyone can
+  create a wallet that lists it. Use [`findOwnPasskeyWallet`](#returning-user-lookup).
+</Callout>
+
+---
+
+## Returning-user lookup
+
+<Callout type="warn" title="Version note">
+  Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later. The versions
+  published before it — `0.3.x` (`latest`) and `1.1.x` (`next`) — do not have it.
+</Callout>
+
+How to use them together: [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
+
+### Client methods
+
+```typescript
+// Find, prove, describe and decide in one call.
+client.findOwnPasskeyWallet(params: {
+  credentialIdHash: Uint8Array;
+  rpId: string;
+  proof: OwnershipProof;
+  trustedKeys?: (PublicKey | string)[];      // your own Ed25519 keys on users' wallets
+  watchMints?: (PublicKey | string)[];       // SPL Token mints your app receives
+  includeV1?: boolean;                       // also scan the paired v1 deployment (default true)
+}): Promise<{
+  adopt: WalletFacts | null;                 // use it
+  needsConfirmation: WalletFacts[];          // let the user choose, by vault address
+  unproven: number;                          // listed the credential with another key: ignored
+}>;
+
+// The steps on their own.
+client.findPasskeyWalletCandidates(params: {
+  credentialIdHash: Uint8Array;
+  rpId: string;
+  includeV1?: boolean;
+}): Promise<PasskeyWalletCandidate[]>;      // Owner-rank, under rpId — not proven yet
+
+client.describeWalletCandidates(
+  candidates: PasskeyWalletCandidate[],
+  options?: { trustedKeys?: (PublicKey | string)[]; watchMints?: (PublicKey | string)[] },
+): Promise<WalletFacts[]>;                   // a wallet whose account is gone is left out
+```
+
+Both empty (`adopt: null`, `needsConfirmation: []`): the passkey provably owns no wallet,
+so create one.
+
+### Helpers
+
+```typescript
+import {
+  createOwnershipChallenge,
+  verifyOwnershipProof,
+  pickOwnWallet,
+  selectWalletByAddress,
+} from '@lazorkit/sdk-legacy';
+
+// 32 random bytes. Fresh for every proof; never reuse one.
+createOwnershipChallenge(): Uint8Array;
+
+// Pure. The candidates whose stored key produced the proof: a `webauthn.get` over exactly
+// `proof.challenge`, under `rpId`, with the user present. [] on any failure; never throws.
+verifyOwnershipProof<T extends { publicKey: Uint8Array }>(
+  candidates: T[], proof: OwnershipProof, rpId: string,
+): T[];
+
+// Pure. The rule: adopt only the one wallet with signatureCount > 0, when it is
+// controlledAlone. Otherwise every wallet goes to needsConfirmation, ordered signed-for
+// first, then v1 before v2, then the fuller vault, then the wallet address.
+pickOwnWallet(facts: WalletFacts[]): {
+  adopt: WalletFacts | null;
+  needsConfirmation: WalletFacts[];
+};
+
+// Pure. The candidate whose vault OR wallet PDA equals `address`, else null.
+selectWalletByAddress<T extends { walletPda: PublicKey; vaultPda: PublicKey }>(
+  candidates: T[], address: string | PublicKey,
+): T | null;
+```
+
+### `OwnershipProof`
+
+```typescript
+/** A WebAuthn assertion over a challenge the caller chose. */
+interface OwnershipProof {
+  challenge: Uint8Array;           // >= 16 bytes; use createOwnershipChallenge()
+  signature: Uint8Array;           // DER or 64-byte r||s
+  authenticatorData: Uint8Array;
+  clientDataJson: Uint8Array;
+}
+```
+
+### `PasskeyWalletCandidate`
+
+```typescript
+interface PasskeyWalletCandidate {
+  version: 1 | 2;                  // 1 = pre-v2 wallet on the paired v1 deployment
+  programId: PublicKey;
+  walletPda: PublicKey;
+  vaultPda: PublicKey;
+  authorityPda: PublicKey;         // this passkey's authority on the wallet
+  publicKey: Uint8Array;           // the 33-byte compressed P-256 key stored there
+}
+```
+
+### `WalletFacts`
+
+What `describeWalletCandidates` reads about each candidate — what to show the user, and
+everything besides this passkey that can spend from the wallet.
+
+```typescript
+type AuthorityRoleName = 'owner' | 'admin' | 'spender' | 'unknown';
+
+interface WalletFacts extends PasskeyWalletCandidate {
+  lamports: number;                // vault balance
+  slot: bigint;                    // slot the reads were made at
+  otherAuthorities: {              // every authority except this passkey's
+    authorityPda: PublicKey;
+    type: 'ed25519' | 'secp256r1';
+    role: AuthorityRoleName;
+    publicKey?: PublicKey;         // Ed25519 only
+    sameRelyingParty?: boolean;    // Secp256r1 only: created under the same rpId
+    trusted: boolean;              // Ed25519 key in trustedKeys; a passkey never is
+  }[];
+  liveSessions: {                  // expiry at or after `slot`
+    sessionPda: PublicKey;
+    sessionKey: PublicKey;
+    expiresAtSlot: bigint;
+    trusted: boolean;
+  }[];
+  pendingDeferred: {               // expiry at or after `slot`
+    deferredPda: PublicKey;
+    authorizedBy: PublicKey;       // the authority PDA that authorized it
+    expiresAtSlot: bigint;
+    trusted: boolean;              // always false
+  }[];
+  vaultIsSystemAccount: boolean;   // false: the vault was handed to another program
+  tokenGrants: {                   // rights over the vault's token accounts
+    tokenAccount: PublicKey;
+    tokenProgram: PublicKey;
+    mint: PublicKey | null;        // null when too short to read
+    kind: 'delegate' | 'closeAuthority' | 'owner' | 'unreadable';
+    grantee: PublicKey | null;
+    trusted: boolean;              // grantee is in trustedKeys
+  }[];
+  controlledAlone: boolean;        // nothing but this passkey and trusted keys can spend
+  signatureCount: number;          // times this passkey has signed for it; 0 = never
+}
+```
+
+A pending deferred execution is never trusted — the program does not tie it to the key
+that signed it — and no key makes up for `vaultIsSystemAccount: false`. `tokenGrants`
+cannot be complete: a vault token account handed away for a mint nobody watches does not
+show, which is why a wallet with `signatureCount: 0` is never adopted.
 
 ---
 

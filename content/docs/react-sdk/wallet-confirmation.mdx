@@ -1,0 +1,221 @@
+---
+title: Wallet Confirmation
+description: How connect finds a returning user's wallet, when it asks the user to confirm it, and how to shape that step.
+---
+
+<Callout type="warn" title="Version note">
+  This page describes the protocol-v2 major release of `@lazorkit/wallet`, the first built on
+  `@lazorkit/sdk-legacy` 1.2.0. Earlier versions (`2.x` and before) have none of
+  `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints` or the built-in
+  chooser.
+</Callout>
+
+When nothing is stored yet, `connect` looks the passkey's wallet up on chain. Looking it
+up is not enough: the credential-id hash that finds it is public, and `CreateWallet` /
+`AddAuthority` / `TransferOwnership` take any owner without that owner's consent. Anyone
+can list a user's passkey on a wallet they still control, or hand them one after quietly
+keeping a way into its vault.
+
+## What `connect` does
+
+1. **Proves the passkey.** It keeps only the wallets whose stored key the passkey is
+   proven to hold — the key the portal reports, or a signature over a fresh challenge (at
+   most one extra passkey prompt per connect).
+2. **Uses a wallet on its own** only when it is **the one wallet this passkey has signed
+   for, and nothing else can spend from it**: no other authority, live session, pending
+   deferred transaction or token approval, and a vault still owned by the System Program.
+3. **Otherwise asks the user** which wallet is theirs — see
+   [`onConfirmWallet`](#onconfirmwallet).
+4. **Creates a new (v2) wallet** only when the passkey holds none. A wallet it just
+   created is saved as it is, never looked up again.
+
+A stored wallet is used as stored; none of this runs for it, or for signing. If the chain
+cannot be read, `connect` fails — that is never taken as "no wallet", so it never creates
+a wallet by mistake. The lookup uses `getProgramAccounts`, so `rpcUrl` must allow it.
+
+### A never-used wallet is confirmed once
+
+A passkey signs only for a wallet its user chose, so a wallet it has **never signed for**
+is never used without asking — even when it is the only one, and even with
+`trustedAuthorities`. That includes the user's own wallet before its first transaction:
+
+- a user whose wallet was created but not used yet confirms it once if they connect
+  afresh before its first transaction — on another device, or after `disconnect` or
+  cleared storage (the `connect` that created it saves it directly, without asking);
+- a wallet made on the LazorKit migration page is confirmed once;
+- after the wallet's first transaction, it is used on its own.
+
+The user is also asked whenever the passkey has signed for **two** wallets: signatures
+made before the v2 program bound the wallet into the passkey challenge could be replayed
+onto a planted copy, so either count may be the copy.
+
+Why a never-used wallet cannot be trusted by looking at it: its earlier holder could have
+moved the vault's SPL Token account for some mint to themselves before handing the wallet
+over, and nothing on chain leads back to that account. The SDK checks it for wSOL, USDC,
+USDT and devnet USDC, plus every mint in [`watchMints`](#trustedauthorities-and-watchmints);
+for any other mint it cannot be seen.
+
+---
+
+## Configure
+
+```tsx
+<LazorkitProvider
+  onConfirmWallet="builtin"            // default: the SDK's chooser
+  trustedAuthorities={[BACKEND_ADMIN]}  // your own Ed25519 keys, base58
+  watchMints={[MY_TOKEN_MINT]}          // SPL mints your app receives
+>
+  {children}
+</LazorkitProvider>
+```
+
+| Prop                 | Type                                    | Default     |
+| -------------------- | --------------------------------------- | ----------- |
+| `onConfirmWallet`    | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'` |
+| `trustedAuthorities` | `string[]` (base58 Ed25519 keys)        | none        |
+| `watchMints`         | `string[]` (base58 SPL Token mints)     | none        |
+
+Each call can override the provider: `connect({ onConfirmWallet })`. A malformed
+`trustedAuthorities` or `watchMints` entry fails every fresh `connect`, not only a
+returning user's.
+
+---
+
+## `onConfirmWallet`
+
+How `connect` asks the user when it will not pick a wallet on its own.
+
+<Tabs items={['Built-in chooser (default)', 'Your own UI', 'Throw']}>
+<Tab value="Built-in chooser (default)">
+
+`onConfirmWallet="builtin"` — a **"Which wallet is yours?"** dialog, drawn in the portal
+dialog's frame (keyboard accessible, light and dark). Each row shows:
+
+- the **vault address** — selectable in full, with a copy button — and its SOL balance;
+- **"Legacy (v1)"** for a wallet not yet migrated to v2;
+- **"Not used with this passkey yet…"** for a wallet the passkey has never signed for;
+- **"Also controlled by: …"** for everything untrusted that can spend from it — other
+  passkeys, backend keys with their role, session keys and until when, pending
+  transactions, token approvals, token accounts handed to someone else — with the full
+  addresses under "Addresses".
+
+A vault handed to another program gets a warning of its own and no "Use this wallet"
+button. Rows come in no meaningful order, nothing is pre-selected, and no row is called
+safe: the SDK cannot see everything a former holder of a wallet may have left on its
+vault. **"None of these"**, the X, Escape or a click outside declines — `connect` rejects
+with `WalletConfirmationDeclinedError`, and no wallet is created.
+
+</Tab>
+<Tab value="Your own UI">
+
+Pass a function ([`ConfirmWalletHandler`](/react-sdk/types#confirmwallethandler)). It gets
+`{ credentialId, candidates }` (a
+[`ConfirmWalletRequest`](/react-sdk/types#confirmwalletrequest)) and returns
+`{ wallet }` — the chosen `vault` (or `wallet` PDA) — or `null` when the user recognises
+none:
+
+```tsx
+<LazorkitProvider
+  onConfirmWallet={async ({ candidates }) => {
+    const chosen = await myWalletPicker(candidates); // show c.vault; never pick for the user
+    return chosen ? { wallet: chosen.vault } : null;
+  }}
+>
+```
+
+Each candidate is a [`WalletChoice`](/react-sdk/types#walletchoice): vault, balance,
+`signatureCount`, `vaultIsSystemAccount`, every pending transaction, and every other
+authority, session and token grant, each marked `trusted` or not. The order is not a
+recommendation — pre-select nothing. Returning `null` rejects `connect` with
+`WalletConfirmationDeclinedError`; a throw is passed on as `connect`'s error.
+
+</Tab>
+<Tab value="Throw">
+
+`onConfirmWallet="throw"` — `connect` throws `WalletNeedsConfirmationError`, whose
+`candidates` are the same
+`WalletChoice[]`. Once the user picks one, call `connect({ confirmWallet: choice.vault })`.
+Within **2 minutes** that adopts it without a second passkey prompt; after that, or after
+`disconnect`, the portal opens again.
+
+```ts
+import { WalletNeedsConfirmationError } from '@lazorkit/wallet';
+
+try {
+  await connect();
+} catch (e) {
+  if (e instanceof WalletNeedsConfirmationError) {
+    const choice = await askUser(e.candidates);
+    if (choice) await connect({ confirmWallet: choice.vault });
+  } else throw e;
+}
+```
+
+</Tab>
+</Tabs>
+
+### `confirmWallet`
+
+`connect({ confirmWallet })` takes the **vault or the wallet PDA** of a wallet the passkey
+is proven to hold — including one the built-in chooser would not offer a button for. One
+that names none of them throws an error naming it; it is never ignored. After a
+`'throw'`, one that names none of the offered wallets throws at once, without opening the
+portal, and the offer stays open.
+
+While a wallet is connected, a `confirmWallet` naming another one throws too:
+`disconnect` first.
+
+### `trustedAuthorities` and `watchMints`
+
+- **`trustedAuthorities`** — your own Ed25519 keys: a backend admin, session keys you
+  issue. An authority, session or token approval held by one of them does not stop a
+  wallet from being used on its own, and is not listed in the chooser. Passkeys cannot be
+  trusted this way, nor can a pending deferred transaction or a vault handed to another
+  program.
+- **`watchMints`** — your app's SPL Token mints, added to the ones whose vault token
+  account is checked for having been handed to someone else (wSOL, USDC, USDT and devnet
+  USDC always are). An account moved away for any other mint cannot be found.
+
+---
+
+## Errors
+
+| Error                             | When                                                                                                      |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `WalletNeedsConfirmationError`    | `onConfirmWallet: 'throw'` and the wallet needs the user. Carries `credentialId` and `candidates: WalletChoice[]`. |
+| `WalletConfirmationDeclinedError` | The user chose none ("None of these", or your handler returned `null`). Nothing was saved.                |
+| `PortalCancelledError`            | The user closed the portal dialog (X, Escape, a click outside) or its popup window before it answered — on `connect` and on every signing action. Raised at once, not after the 60 s timeout. Also what a `connect` still running rejects with when `disconnect` is called: its portal or chooser closes and it connects nothing. |
+
+All three are exported from `@lazorkit/wallet`. Portal errors carry the portal's own
+message.
+
+---
+
+## Wallet adapter and Wallet Standard
+
+`LazorkitWalletAdapter` takes the same options in its config, and per call:
+
+```ts
+const adapter = new LazorkitWalletAdapter({ onConfirmWallet, trustedAuthorities, watchMints /* , ... */ });
+await adapter.connect({ confirmWallet, onConfirmWallet });
+```
+
+With `'throw'`, catch the error (wallet-adapter's `onError`), then set
+`adapter.confirmWallet = choice.vault` and connect again. The adapter clears
+`confirmWallet` once a wallet is connected, and on disconnect. A second `connect` while
+one is running waits for it rather than opening another portal.
+
+[`registerLazorkitWallet`](/wallet-standard) takes the same options **except
+`onConfirmWallet: 'throw'`**, which it rejects: `standard:connect` cannot pass
+`confirmWallet`, so the user could never finish. Use `'builtin'` or your own handler there.
+
+---
+
+## Finding wallets yourself
+
+Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
+`findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
+`LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()`; see
+[SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
+`createOwnershipChallenge`, `verifyOwnershipProof`, `pickOwnWallet` and
+`selectWalletByAddress` are re-exported from `@lazorkit/wallet`.

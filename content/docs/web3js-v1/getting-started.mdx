@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Create a wallet, execute a transaction, look up a wallet by credential.
+description: Create a wallet, execute a transaction, find a returning passkey user's wallet.
 ---
 
 Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
@@ -145,22 +145,163 @@ const { instructions } = client.finalizeExecute(prepared, webauthnResponse);
 
 ## 4. Look up a returning user
 
-No need to store `walletPda` / `authorityPda` client-side — look them up by the credential
-hash the user authenticates with:
+<Callout type="warn" title="Version note">
+  This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (protocol v2). The
+  versions published before it — `0.3.x` (`latest`) and `1.1.x` (`next`) — have no
+  `findOwnPasskeyWallet`. The warning below applies to every version.
+</Callout>
+
+A returning user signs in with their passkey, and you need their wallet. Do **not** take
+the first wallet that lists the passkey's credential-id hash:
 
 ```typescript
+// Unsafe: the first match can be a wallet someone planted for this passkey.
 const [wallet] = await client.findWalletsByAuthority(credentialIdHash);
-// {
-//   walletPda,
-//   authorityPda,
-//   vaultPda,
-//   role,              // 0=Owner, 1=Admin, 2=Spender
-//   authorityType,     // 0=Ed25519, 1=Secp256r1
-// }
 ```
 
-Returns an array — a single credential can authorise multiple wallets. Most flows care
-about the first entry.
+The hash is public — it sits in every authority account the passkey has — and
+`CreateWallet` / `AddAuthority` take any key without its consent. Anyone can create a
+wallet listing a user's credential next to their own public key, or add the user's real
+passkey to a wallet they control, and a lookup by hash returns both.
+
+`findOwnPasskeyWallet` takes one assertion over a challenge you generated, and adopts a
+wallet only when
+
+- the passkey is an **Owner** on it, created under your `rpId`, and the public key stored
+  there is the one that just signed; and
+- **nothing untrusted can spend from it**: no other authority, no live session, no pending
+  deferred execution, no delegate or foreign close authority on the vault's token accounts
+  (nor its wSOL / USDC / USDT account handed to someone else), and a vault that is still a
+  plain system account — apart from Ed25519 keys you list in `trustedKeys` (a backend
+  admin, session keys you issued, your own delegate); and
+- it is the **one** wallet the passkey has **signed for** (`signatureCount > 0`, the replay
+  counter on its authority, which only a signature by the key it stores advances).
+
+```typescript
+import { createOwnershipChallenge, selectWalletByAddress } from '@lazorkit/sdk-legacy';
+
+const rpId = 'your-app.com';
+const challenge = createOwnershipChallenge(); // fresh for every sign-in, never reused
+
+const credential = (await navigator.credentials.get({
+  publicKey: { challenge, rpId, userVerification: 'preferred' },
+})) as PublicKeyCredential;
+const response = credential.response as AuthenticatorAssertionResponse;
+const credentialIdHash = new Uint8Array(await crypto.subtle.digest('SHA-256', credential.rawId));
+
+const { adopt, needsConfirmation, unproven } = await client.findOwnPasskeyWallet({
+  credentialIdHash,
+  rpId,
+  proof: {
+    challenge,
+    signature: new Uint8Array(response.signature), // DER, as the browser returns it
+    authenticatorData: new Uint8Array(response.authenticatorData),
+    clientDataJson: new Uint8Array(response.clientDataJSON),
+  },
+  trustedKeys: [backendAdmin.publicKey], // optional: your own Ed25519 keys on users' wallets
+  watchMints: [yourAppsMint],            // optional: SPL Token mints your app receives
+});
+
+let wallet;
+if (adopt) {
+  // The passkey has used it, and only it (and your trusted keys) can spend from it.
+  wallet = adopt;
+} else if (needsConfirmation.length > 0) {
+  // The passkey owns these, but has never signed for them, or has signed for more than
+  // one, or something else can spend from them too. Show each vault address, its balance
+  // (`lamports`) and who else controls it (`otherAuthorities`, `liveSessions`,
+  // `pendingDeferred`, `tokenGrants`, `vaultIsSystemAccount`), and let the user choose.
+  // Pre-select nothing. "None of these" means stop — not create.
+  const chosen = await askUserToChoose(needsConfirmation); // a vault address, or null
+  if (!chosen) throw new Error('No wallet confirmed');
+  wallet = selectWalletByAddress(needsConfirmation, chosen); // vault or wallet address
+} else {
+  // This passkey provably owns no wallet: create one (step 2). The public key comes from
+  // the passkey's registration (navigator.credentials.create) — an assertion carries none.
+}
+// wallet: { walletPda, vaultPda, authorityPda, publicKey, version, lamports, ... }
+```
+
+`askUserToChoose` is your UI. A wallet in `needsConfirmation` is a
+[`WalletFacts`](/web3js-v1/types#returning-user-lookup): everything the user needs to
+recognise it, and everything besides this passkey that can spend from it.
+
+### A never-used wallet is confirmed once
+
+A passkey signs only for a wallet its user chose, so a wallet it has never signed for
+(`signatureCount: 0`) is **never adopted** — not even the only one, and not with
+`trustedKeys`. That includes the user's own wallet before its first transaction: they
+confirm it once, and once it has been used it is adopted on its own. Say it gently — for
+example "This wallet has not been used with your passkey yet. Continue only if you created
+it." A wallet your app has just created or migrated into, you already know: keep its
+address rather than looking it up.
+
+The reason is what cannot be read back. `TransferOwnership` hands a wallet to a passkey
+without asking it (its public key is on chain), and before that its Owner could move the
+vault's SPL Token account for any mint to themselves with `SetAuthority`. That account
+stops listing as the vault's, nothing on chain leads back to it, and every later payment of
+that mint to the vault's address lands in it. The SDK checks the canonical account for
+wSOL, USDC, USDT and devnet USDC, plus every mint in `watchMints` — pass the mints your app
+receives. For any other mint such a wallet looks spotless.
+
+Why "the one": the v2 program names the wallet in the passkey challenge, so a signature
+made now verifies only on the wallet it was made for. v1 never did, nor did v2 before that
+change: whoever planted a wallet for a passkey could take the signature from the user's
+first `CreateSession`, `AddAuthority`, `TransferOwnership` or `Authorize` and submit it
+again on theirs, within about 150 slots, through the same fee payer (a relayer signs for
+anyone) — raising its counter too. Those counts are still on chain, so when two wallets
+have been signed for, neither is adopted and the user chooses.
+
+### Reading the result
+
+- `unproven` counts wallets that list this credential with some other public key. Someone
+  planted them; they are ignored.
+- `version: 1` is a pre-v2 wallet on the v1 deployment paired with your program id
+  (`includeV1: false` skips it); its funds have not been migrated yet — move them with
+  `migrateV1Wallet`. It gets no precedence of its own: when exactly one wallet has been
+  signed for and nothing untrusted can spend from it, that one is adopted, v1 or v2.
+- `needsConfirmation` is ordered signed-for first, then — among wallets equally signed
+  for, or not — v1 before v2, then the fuller vault, then the wallet address. Anyone can
+  change the balance order by funding a vault: it is not a recommendation.
+- A wallet whose account no longer exists (a migrated v1 wallet leaves other passkeys'
+  authorities behind) is left out.
+- `tokenGrants` covers SPL Token and Token-2022 accounts the vault owns (any mint), plus
+  the vault's SPL Token account for each watched mint. For other mints only accounts the
+  vault still owns are seen, so on a wallet never signed for, a clean `tokenGrants` proves
+  nothing about them.
+
+<Callout type="info" title="RPC requirements">
+  Every wallet described costs three `getProgramAccounts` calls (authorities, sessions,
+  deferred executions), two `getTokenAccountsByOwner`, and one read of six accounts (one
+  more per `watchMints` entry) — use an RPC endpoint that allows them. Each step asks for
+  state at least as new as the one before (`minContextSlot`), so a transaction landing
+  mid-read cannot be half-seen; a node that has not caught up is asked again, up to five
+  times. A failed read throws rather than guess.
+</Callout>
+
+### Split across client and server
+
+The steps are public on their own, for a flow that collects the assertion in one place
+and decides in another — say, a browser collects it and your server decides.
+`findOwnPasskeyWallet` runs these four in order:
+
+```typescript
+import { verifyOwnershipProof, pickOwnWallet } from '@lazorkit/sdk-legacy';
+
+const candidates = await client.findPasskeyWalletCandidates({ credentialIdHash, rpId });
+const proven = verifyOwnershipProof(candidates, proof, rpId); // pure; [] if the proof fails
+const facts = await client.describeWalletCandidates(proven, { trustedKeys, watchMints });
+const { adopt, needsConfirmation } = pickOwnWallet(facts);    // pure: the rule above
+```
+
+Freshness is yours: generate the challenge with `createOwnershipChallenge()` for each proof
+and never reuse one.
+
+### Ed25519 owners
+
+`findWalletsByAuthority(publicKey.toBytes(), 'ed25519')` lists every wallet the key is on,
+including any a stranger added it to. Check `role` and the wallet's other authorities
+(`findAuthoritiesByWallet`) before using one.
 
 ---
 

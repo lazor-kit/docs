@@ -5,6 +5,7 @@
         "getting-started",
         "provider",
         "use-wallet",
+        "wallet-confirmation",
         "types"
     ]
 }

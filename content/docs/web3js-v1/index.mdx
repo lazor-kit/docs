@@ -28,8 +28,16 @@ paymaster round-trips automatically.
 | Execution           | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute`                                 |
 | Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`             |
 | Deferred execution  | `prepareAuthorize`, `finalizeAuthorize`, `executeDeferred`, `reclaimDeferred`                 |
-| Lookups             | `findWalletsByAuthority`                                                                      |
+| Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findWalletsByAuthority` (raw) |
 | Protocol (admin)    | `initializeProtocol`, `registerPayer`, `withdrawTreasury`, `initializeTreasuryShard`          |
+
+<Callout type="warn" title="Finding a returning passkey user's wallet">
+  Use `findOwnPasskeyWallet`, in `@lazorkit/sdk-legacy` **1.2.0** and later (the published
+  `0.3.x` and `1.1.x` do not have it). Never adopt the first result of
+  `findWalletsByAuthority(credentialIdHash)`: the credential-id hash is public, and anyone can
+  create a wallet that lists it. See
+  [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
+</Callout>
 
 ## Install
 

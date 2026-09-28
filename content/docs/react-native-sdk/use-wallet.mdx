@@ -91,6 +91,35 @@ const wallet = await connect({ redirectUrl: 'myapp://home' });
 
 **Returns** `Promise<WalletInfo>`.
 
+#### Confirming a returning user's wallet
+
+<Callout type="warn" title="Version note">
+  `confirmWallet` and `onConfirmWallet` are in the protocol-v2 major release of
+  `@lazorkit/wallet-mobile-adapter` (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier
+  versions — `1.x`, and the `2.0.0` betas up to `2.0.0-beta.4` — do not have them.
+</Callout>
+
+With no stored wallet, `connect` proves the passkey and uses a wallet on its own only when
+it is the one wallet this passkey has signed for and nothing else can spend from it.
+Otherwise it asks the user — by default with a built-in "Which wallet is yours?" chooser.
+A user's own wallet that has never been used is confirmed once. While a wallet is
+connected, `connect` returns it without opening the portal.
+
+```ts
+// After catching WalletNeedsConfirmationError (onConfirmWallet: 'throw'):
+await connect({ redirectUrl: 'myapp://home', confirmWallet: choice.vault });
+```
+
+| Option            | Type                                           | Notes                                                        |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| `redirectUrl`     | `string`                                       | Your app's deep link.                                        |
+| `confirmWallet`   | `string`                                       | Vault (or wallet PDA) the user chose — a wallet the passkey is proven to hold; any other address throws. Within two minutes of the error, no second portal round-trip. |
+| `onConfirmWallet` | `'builtin' \| 'throw' \| ConfirmWalletHandler` | Overrides the provider's for this call.                      |
+
+`connect` can reject with `WalletNeedsConfirmationError`, `WalletConfirmationDeclinedError`,
+`PortalCancelledError` or `WalletChooserNotShownError`. Full flow:
+[Wallet Confirmation](/react-native-sdk/wallet-confirmation).
+
 ### `disconnect`
 
 ```ts
@@ -98,6 +127,9 @@ await disconnect({ onSuccess, onFail });
 ```
 
 Clears the persisted state. The on-chain wallet is untouched — reconnect any time.
+
+From the protocol-v2 major release on, a `connect` still running when you call it is
+abandoned: it rejects with `PortalCancelledError` and connects nothing.
 
 ---
 
