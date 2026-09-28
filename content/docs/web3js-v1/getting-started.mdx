@@ -178,26 +178,33 @@ wallet only when
   counter on its authority, which only a signature by the key it stores advances).
 
 ```typescript
-import { createOwnershipChallenge, selectWalletByAddress } from '@lazorkit/sdk-legacy';
+import {
+  createOwnershipChallenge,
+  selectWalletByAddress,
+  verifyOwnershipProof,
+} from '@lazorkit/sdk-legacy';
 
 const rpId = 'your-app.com';
 const challenge = createOwnershipChallenge(); // fresh for every sign-in, never reused
 
 const credential = (await navigator.credentials.get({
-  publicKey: { challenge, rpId, userVerification: 'preferred' },
+  // A copy: WebAuthn's BufferSource type wants a Uint8Array backed by an ArrayBuffer.
+  publicKey: { challenge: new Uint8Array(challenge), rpId, userVerification: 'preferred' },
 })) as PublicKeyCredential;
 const response = credential.response as AuthenticatorAssertionResponse;
 const credentialIdHash = new Uint8Array(await crypto.subtle.digest('SHA-256', credential.rawId));
 
+const proof = {
+  challenge,
+  signature: new Uint8Array(response.signature), // DER, as the browser returns it
+  authenticatorData: new Uint8Array(response.authenticatorData),
+  clientDataJson: new Uint8Array(response.clientDataJSON),
+};
+
 const { adopt, needsConfirmation, unproven } = await client.findOwnPasskeyWallet({
   credentialIdHash,
   rpId,
-  proof: {
-    challenge,
-    signature: new Uint8Array(response.signature), // DER, as the browser returns it
-    authenticatorData: new Uint8Array(response.authenticatorData),
-    clientDataJson: new Uint8Array(response.clientDataJSON),
-  },
+  proof,
   trustedKeys: [backendAdmin.publicKey], // optional: your own Ed25519 keys on users' wallets
   watchMints: [yourAppsMint],            // optional: SPL Token mints your app receives
 });
@@ -216,8 +223,15 @@ if (adopt) {
   if (!chosen) throw new Error('No wallet confirmed');
   wallet = selectWalletByAddress(needsConfirmation, chosen); // vault or wallet address
 } else {
-  // This passkey provably owns no wallet: create one (step 2). The public key comes from
-  // the passkey's registration (navigator.credentials.create) — an assertion carries none.
+  // No wallet is proven to be this passkey's. That shows it owns none only if the proof is
+  // good: a proof that fails (a reused challenge, another rpId) proves nothing, and the
+  // passkey's own wallets then count in `unproven`. So check the proof against the public
+  // key you are about to create the wallet for. It comes from the passkey's registration
+  // (navigator.credentials.create) — an assertion carries none.
+  if (verifyOwnershipProof([{ publicKey: compressedPubkey }], proof, rpId).length === 0) {
+    throw new Error('The proof does not verify against this key: no wallet created');
+  }
+  // Now this passkey provably owns no live wallet: create one (step 2).
 }
 // wallet: { walletPda, vaultPda, authorityPda, publicKey, version, lamports, ... }
 ```
@@ -254,8 +268,12 @@ have been signed for, neither is adopted and the user chooses.
 
 ### Reading the result
 
-- `unproven` counts wallets that list this credential with some other public key. Someone
-  planted them; they are ignored.
+- `unproven` counts the wallets found by this credential under your `rpId` whose stored
+  public key the proof did not verify against. With a good proof those are wallets someone
+  planted with another key; with a proof that fails, it is all of them, the passkey's own
+  included. Either way they are ignored — so both lists empty means no wallet is
+  **proven**, and you create one only once the proof verifies against the new wallet's key,
+  as above.
 - `version: 1` is a pre-v2 wallet on the v1 deployment paired with your program id
   (`includeV1: false` skips it); its funds have not been migrated yet — move them with
   `migrateV1Wallet`. It gets no precedence of its own: when exactly one wallet has been
@@ -295,7 +313,9 @@ const { adopt, needsConfirmation } = pickOwnWallet(facts);    // pure: the rule 
 ```
 
 Freshness is yours: generate the challenge with `createOwnershipChallenge()` for each proof
-and never reuse one.
+and never reuse one. An empty `proven` is also what a proof that fails gives — a challenge
+the browser did not sign, say — so before creating a wallet, check the proof against its
+key with `verifyOwnershipProof([{ publicKey }], proof, rpId)`, as the example above does.
 
 ### Ed25519 owners
 

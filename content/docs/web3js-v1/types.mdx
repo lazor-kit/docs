@@ -160,7 +160,7 @@ client.findOwnPasskeyWallet(params: {
 }): Promise<{
   adopt: WalletFacts | null;                 // use it
   needsConfirmation: WalletFacts[];          // let the user choose, by vault address
-  unproven: number;                          // listed the credential with another key: ignored
+  unproven: number;                          // found, but the proof did not verify: ignored
 }>;
 
 // The steps on their own.
@@ -176,8 +176,12 @@ client.describeWalletCandidates(
 ): Promise<WalletFacts[]>;                   // a wallet whose account is gone is left out
 ```
 
-Both empty (`adopt: null`, `needsConfirmation: []`): the passkey provably owns no wallet,
-so create one.
+`unproven` counts the candidates whose stored key the proof did not verify against: with a
+good proof, wallets planted with another key; with a proof that fails, all of them, the
+passkey's own included. So both empty (`adopt: null`, `needsConfirmation: []`) means no
+wallet is proven to be the passkey's. It owns none only if the proof is good: before you
+create a wallet, check that `verifyOwnershipProof([{ publicKey }], proof, rpId)` returns
+the key you create it for.
 
 ### Helpers
 
