@@ -207,6 +207,7 @@ Returned/consumed by `authorizeDeferred` and `executeDeferred`.
 interface AuthorizeDeferredPayload {
   instructions: TransactionInstruction[];
   transactionOptions?: TransactionOptions;
+  expiryOffset?: number;   // slots after TX1 that TX2 is accepted, 10–9000; default 1500
   onSuccess?: (result: { signature: string; deferredPayload: string }) => void;
   onFail?: (error: Error) => void;
 }
@@ -413,9 +414,9 @@ interface WalletHookInterface {
   removeAuthority: (targetAuthorityPda: string) => Promise<void>;
   signAndSendWithAuthority: (payload: SendTxPayload) => Promise<string>;
 
-  // Deferred execution
-  authorizeAndExecute: (payload: SendTxPayload) => Promise<string>;
-  authorizeDeferred: (payload: SendTxPayload) => Promise<{
+  // Deferred execution (DeferredTxPayload = SendTxPayload & { expiryOffset?: number })
+  authorizeAndExecute: (payload: DeferredTxPayload) => Promise<string>;
+  authorizeDeferred: (payload: DeferredTxPayload) => Promise<{
     signature: string;
     deferredPayload: string;
   }>;

@@ -73,6 +73,11 @@ interface TxCallbacks {
 }
 ```
 
+Each call's promise settles, and its `onSuccess` or `onFail` runs, once `isSigning` is
+`false` again. So `await signAndSendTransaction(a); await signAndSendTransaction(b)`
+runs both, and so does a second call made from `onSuccess`. A call made while another is
+still running rejects with `SigningError`.
+
 ---
 
 ## Connection
@@ -172,7 +177,7 @@ and the SDK submits them back-to-back. Use this when everything runs in the same
 const sig = await authorizeAndExecute(
   {
     instructions: jupiterSwapIxs,
-    expiryOffset: 300,                       // slots the authorization stays valid (~2m)
+    // expiryOffset: slots after TX1 that TX2 is still accepted. Default 1500.
     transactionOptions: { clusterSimulation: 'devnet' },
   },
   { redirectUrl: 'myapp://callback' },
@@ -183,6 +188,16 @@ const sig = await authorizeAndExecute(
   TX1 `Authorize` records a SHA-256 hash of your instruction set. TX2 `ExecuteDeferred`
   replays those exact instructions — the program rejects any mismatch. `authorizeAndExecute`
   submits both transactions automatically and returns TX2's signature.
+</Callout>
+
+<Callout type="warn" title="The window is counted in slots">
+  The program accepts TX2 for `expiryOffset` slots after the slot TX1 landed in (10 to
+  9000; the adapter's default is 1500). A slot's length depends on the cluster and its
+  load, so do not convert it to minutes with a fixed figure. The adapter may wait up to
+  two minutes for TX1 to be confirmed before it sends TX2, so do not pass a small value.
+  If the window has passed, TX2 is not sent and the call rejects with
+  `DeferredExpiredError`: nothing in the payload ran, the passkey approval is spent, and
+  `deferredExecPda` still holds the paymaster's rent until `reclaimDeferred` closes it.
 </Callout>
 
 ---
@@ -196,12 +211,15 @@ run it elsewhere — a server relayer, another device, a scheduled job.
 const { signature, deferredPayload, deferredExecPda, counter } = await authorizeDeferred(
   {
     instructions: jupiterSwapIxs,
-    expiryOffset: 600,                       // 10 min
+    expiryOffset: 4_500,                     // slots after TX1 (default 1500, max 9000)
     transactionOptions: { clusterSimulation: 'devnet' },
   },
   { redirectUrl: 'myapp://callback' },
 );
 ```
+
+TX2 must land within `expiryOffset` slots of TX1's slot, not of when this call resolves.
+The program's maximum, 9000 slots, is tens of minutes, not hours.
 
 Returns `Promise<AuthorizeResult>`.
 
@@ -215,20 +233,23 @@ format — see `serializeDeferredPayload`).
 // Same machine — use the object directly:
 const txSig = await executeDeferred({
   deferredPayload,                           // from authorizeDeferred result
-  refundDestination: smartWalletPubkey,      // optional — rent goes to vault
   transactionOptions: { clusterSimulation: 'devnet' },
 });
 ```
 
+The rent goes back to the Authorize payer (the paymaster's fee payer): the program
+refuses any other `refundDestination`. An authorization that has expired is not sent;
+the call rejects with `DeferredExpiredError`.
+
 ### `reclaimDeferred`
 
 **No passkey prompt.** Close an expired `DeferredExec` PDA and recover its rent. Gated
-on the original payer.
+on the original payer: the paymaster's fee payer signs, and the rent goes back to it.
+The program allows it only once the authorization has expired.
 
 ```ts
 await reclaimDeferred({
-  deferredExecPda,                           // from authorizeDeferred result
-  refundDestination: smartWalletPubkey,
+  deferredExecPda,                           // from authorizeDeferred, or DeferredExpiredError
 });
 ```
 

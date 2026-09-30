@@ -297,7 +297,7 @@ the table below.
 | `0xbc3`   | 3011  | `InvalidAuthenticationKind`        | Authentication type (Ed25519 / Secp256r1) doesn't match the authority. |
 | `0xbc4`   | 3012  | `InvalidMessage`                   | Signed payload couldn't be parsed.                                    |
 | `0xbc5`   | 3013  | `SelfReentrancyNotAllowed`         | Transaction attempted a CPI back into the LazorKit program.            |
-| `0xbc6`   | 3014  | `DeferredAuthorizationExpired`     | TX2 `ExecuteDeferred` after the authorization window expired.         |
+| `0xbc6`   | 3014  | `DeferredAuthorizationExpired`     | TX2 `ExecuteDeferred` after the authorization window expired. The wallet and the mobile adapter report it as `DeferredExpiredError`. |
 | `0xbc7`   | 3015  | `DeferredHashMismatch`             | TX2 instruction/accounts don't match the hash from TX1.               |
 | `0xbc8`   | 3016  | `InvalidExpiryWindow`              | `expiryOffset` out of bounds.                                         |
 | `0xbc9`   | 3017  | `UnauthorizedReclaim`              | Non-payer tried to reclaim a deferred exec account.                   |

@@ -215,13 +215,13 @@ interface SignAndSendTransactionPayload {
 }
 
 interface AuthorizeExecutePayload extends SignAndSendTransactionPayload {
-  expiryOffset?: number;                  // slots; default 300 ≈ 2 min
+  expiryOffset?: number;                  // slots after TX1, 10–9000; default 1500
 }
 
 // For `authorizeDeferred` — TX1 only, returns payload for later TX2.
 interface AuthorizePayload {
   instructions: TransactionInstruction[];
-  expiryOffset?: number;                  // slots; default 300 ≈ 2 min
+  expiryOffset?: number;                  // slots after TX1, 10–9000; default 1500
   transactionOptions?: TransactionOptions;
 }
 
@@ -410,6 +410,14 @@ class LazorKitError extends Error {
 }
 class WalletConnectionError extends LazorKitError { /* code: WALLET_CONNECTION_ERROR */ }
 class SigningError          extends LazorKitError { /* code: SIGNING_ERROR */ }
+
+// TX2 of a deferred execution came after its authorization expired (3014).
+class DeferredExpiredError extends Error {
+  code: 3014;
+  deferredExecPda: PublicKey;             // holds the rent: pass it to reclaimDeferred
+  authorizeSignature?: string;            // TX1, when the same call sent it
+  expiresAtSlot?: bigint;
+}
 ```
 
 On-chain program errors appear inside `SendTransactionError` messages as hex codes —
