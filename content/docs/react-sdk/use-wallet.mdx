@@ -168,6 +168,7 @@ required for the second step.
 // Step 1 — on the device with the passkey (requires user gesture):
 const { signature: authSig, deferredPayload } = await authorizeDeferred({
   instructions: jupiterSwapIxs,
+  expiryOffset: 4_500,   // slots after TX1 that TX2 is accepted; default 1500, max 9000
 });
 
 // Persist / transport — deferredPayload is a plain JSON string.
@@ -181,13 +182,24 @@ const execSig = await executeDeferred({
 ```
 
 <Callout type="info" title="When to prefer this">
-  Use `authorizeDeferred` + `executeDeferred` when TX2 is driven by an external condition
-  (cron job, order fill, deposit detected) rather than submitted immediately. For the happy
-  path where both tx fire back-to-back, `authorizeAndExecute` is simpler.
+  Use `authorizeDeferred` + `executeDeferred` when TX2 is sent by another party or
+  process (a relayer, another device) shortly after TX1. For the happy path where both
+  tx fire back-to-back, `authorizeAndExecute` is simpler.
 </Callout>
 
-**Authorization has an on-chain expiry** — if TX2 doesn't land in time, anyone can call
-`reclaimDeferred` (via `LazorKitClient`) to reclaim rent. See
+**Authorization has an on-chain expiry**, counted in slots from the slot TX1 landed in:
+`expiryOffset` (10 to 9000; the wallet's default is 1500). A slot's length depends on
+the cluster and its load, and the maximum is tens of minutes, so this does not suit a
+job that runs hours later. `authorizeAndExecute` takes `expiryOffset` too; the wallet
+may wait up to two minutes for TX1 to be confirmed before it sends TX2, so do not pass
+a small value.
+
+If the window has passed, TX2 is not sent (and a paymaster's 3014 is not retried): the
+call rejects with `DeferredExpiredError`, carrying `deferredExecPda`, `expiresAtSlot` and,
+for `authorizeAndExecute`, TX1's `authorizeSignature`. Nothing in the payload ran, and the
+passkey approval is spent. The account keeps the paymaster's rent until the Authorize
+payer (the paymaster's fee payer) closes it with `ReclaimDeferred`
+(`LazorKitClient.reclaimDeferred`); only that payer can, and only after the window. See
 [`DeferredPayload`](/react-sdk/types#deferredpayload).
 
 ---

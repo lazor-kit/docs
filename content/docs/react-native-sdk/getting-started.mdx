@@ -256,7 +256,7 @@ import {
 
 // Device A — passkey-signed TX1 only, returns payload
 const { signature: tx1Sig, deferredPayload } = await authorizeDeferred(
-  { instructions: jupiterSwapIxs, expiryOffset: 600 },
+  { instructions: jupiterSwapIxs, expiryOffset: 4_500 },   // slots after TX1; default 1500, max 9000
   { redirectUrl: 'myapp://cb' },
 );
 
@@ -271,12 +271,13 @@ const payload = deserializeDeferredPayload(await req.text());
 const tx2Sig = await executeDeferred({ deferredPayload: payload });
 ```
 
-If the authorization expires before TX2 is submitted, reclaim the rent:
+If the authorization expires before TX2 is submitted, `executeDeferred` rejects with
+`DeferredExpiredError`, and the rent can be reclaimed (it goes back to the paymaster's
+fee payer, the only destination the program accepts):
 
 ```tsx
 await reclaimDeferred({
-  deferredExecPda,                         // from authorizeDeferred result
-  refundDestination: smartWalletPubkey,    // refund to vault
+  deferredExecPda,                         // from authorizeDeferred, or DeferredExpiredError
 });
 ```
 
