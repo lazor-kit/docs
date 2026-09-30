@@ -113,7 +113,13 @@ Clears persisted session. The on-chain wallet is untouched.
 
 ### `signAndSendTransaction`
 
-Single-transaction execution for payloads up to ~574 bytes of inner instructions.
+Single-transaction execution, for inner instructions of up to about 345 bytes without a
+lookup table: about 305 with `computeUnitLimit`, 109 fewer when Chrome pads the passkey's
+`clientDataJSON`. Anything larger goes through [`authorizeAndExecute`](#authorizeandexecute),
+and in practice so does a Jupiter swap: a single-hop SOL→USDC route, with Jupiter's lookup
+tables and compute-budget instructions, came to 1245 bytes. Measured 2026-09-29 with
+`@lazorkit/sdk-legacy` 1.2.0 and the portal in an iframe; from a popup, `clientDataJSON` is
+about 40 bytes shorter.
 
 ```ts
 const sig = await signAndSendTransaction({
