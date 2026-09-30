@@ -131,8 +131,14 @@ const { instructions } = await client.execute({
 
 ## Deferred execution
 
-For payloads exceeding the ~574 bytes available in a single Secp256r1 `Execute`
-(e.g. Jupiter swaps with routes + ATAs), use the 2-transaction deferred flow.
+For payloads too large for a single Secp256r1 `Execute`, use the 2-transaction deferred
+flow; in practice that includes Jupiter swaps. A v0 transaction is capped at 1232 bytes, and
+an `Execute` with no inner instruction already takes about 887 of them (no lookup table, no
+ComputeBudget instruction, the LazorKit portal's `clientDataJSON` in an iframe). That leaves
+about 345 bytes for inner instructions: about 305 with a compute-unit limit, 109 fewer when
+Chrome pads `clientDataJSON`. Your own `clientDataJSON` moves the figure by its length.
+`ExecuteDeferred` (TX2) has no precompile or `clientDataJSON` and leaves about 825 bytes.
+Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0.
 
 <Callout type="info" title="Only Secp256r1 Owner/Admin can authorize">
   `Authorize` (TX1) is restricted to Secp256r1 Owner or Admin signers. Ed25519 admins

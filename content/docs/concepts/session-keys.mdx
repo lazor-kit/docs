@@ -269,9 +269,12 @@ const { instructions } = await client.transferSol({
 
 ## Deferred execution
 
-For payloads too big to fit in a single Secp256r1 Execute transaction (~574 bytes of inner
-instructions — Jupiter swaps with complex routing), LazorKit provides a 2-transaction
-deferred flow.
+For payloads too big to fit in a single Secp256r1 Execute transaction, LazorKit provides a
+2-transaction deferred flow. A passkey Execute leaves only about 345 bytes for inner
+instructions (see [Trade-offs](#trade-offs)), so in practice a Jupiter swap needs it: a
+single-hop SOL→USDC route, with Jupiter's lookup tables and compute-budget instructions, came
+to 1245 bytes through the portal in an iframe, and to 1207 through a browser tab, which
+Chrome's `clientDataJSON` padding pushes over the limit.
 
 <Mermaid chart={`
 sequenceDiagram
@@ -311,12 +314,23 @@ const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
 
 ### Trade-offs
 
-| Metric                        | Immediate Execute | Deferred (2 txs)   |
-| ----------------------------- | ----------------- | ------------------ |
-| Inner instruction capacity    | ~574 bytes        | ~1,100 bytes (1.9×)|
-| Total CU (post Phase 2.1)     | ~9,495            | ~15,667            |
-| Tx fee                        | 0.000005 SOL      | 0.00001 SOL        |
-| Temp rent (refunded to payer) | —                 | 0.002116 SOL       |
+| Metric                        | Immediate Execute | Deferred (2 txs)          |
+| ----------------------------- | ----------------- | ------------------------- |
+| Inner instruction capacity¹   | ~345 bytes        | ~825 bytes in TX2 (~2.4×) |
+| Total CU (post Phase 2.1)     | ~9,495            | ~15,667                   |
+| Tx fee                        | 0.000005 SOL      | 0.00001 SOL               |
+| Temp rent (refunded to payer) | —                 | 0.002116 SOL              |
+
+¹ Room left under Solana's 1232-byte transaction limit once the transaction's own overhead
+is in: v0, no address lookup table, no ComputeBudget instruction, the portal's
+`clientDataJSON` in an iframe (about 40 bytes shorter from a browser tab or popup, which
+leaves about 380). An empty passkey Execute is about 887 bytes; a compute-unit limit costs
+about 40 more and Chrome's padded `clientDataJSON` 109 more, so under 200 bytes are left with
+both. TX1 carries only hashes; an empty `ExecuteDeferred` (TX2) is about 406 bytes. TX2 is
+still one transaction, though: with Jupiter's compute-budget instructions, a three-hop route
+came to 1846 bytes there without Jupiter's lookup tables and 1111 with them, and a five-leg
+split route did not fit even with them (1328). Pass the lookup tables, and cap the route with
+Jupiter's `maxAccounts` when you quote. Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0.
 
 Expired `DeferredExec` accounts can be reclaimed via `ReclaimDeferred` — the original
 payer recovers the rent. Only Secp256r1 Owner or Admin can call `Authorize` (TX1);
