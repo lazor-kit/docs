@@ -22,10 +22,10 @@ today: [Networks & versions](/networks).
 | --- | --- | --- |
 | Addresses | seeds `wallet`, `vault`, … | seeds `lk2:wallet`, `lk2:vault`, …: **every address differs**, for the same `userSeed` |
 | Ranks | Owner / Admin / Spender, but `Execute` never checked rank: any authority could spend the whole vault | Owner / Admin / **Delegate**; a Delegate must carry a spending policy. See [Ranks & policies](/concepts/rbac). |
-| Owners | one | several (one per device) |
+| Owners | one Owner, replaced with `TransferOwnership` | several Owners (one per device); the last one cannot be removed |
 | Passkey challenge | does not name the wallet | names the wallet (an assertion verifies only on the wallet it was made for) |
-| Expired sessions | closed by the wallet's Owner/Admin only | anyone may close an expired one and keep its rent (`CloseExpiredSession`) |
-| Protocol fee | — | skipped when not configured; capped at 0.01 SOL; `FeeRecord` created automatically |
+| Expired sessions | closed by the wallet's Owner/Admin (`RevokeSession`); after the sunset, by anyone | anyone may close an expired one and keep its rent (`CloseExpiredSession`) |
+| Protocol fee | charged when enabled; tracked only for payers with a registered `FeeRecord` | skipped when not configured; capped at 0.01 SOL; `FeeRecord` created automatically |
 | Deferred payloads | unversioned | carry `version: 2`; refused across the boundary |
 
 Nothing converts automatically. A v1 wallet moves to v2 with one signed
