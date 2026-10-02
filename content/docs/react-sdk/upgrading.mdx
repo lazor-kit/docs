@@ -47,10 +47,12 @@ them.
    [Sending transactions](/react-sdk/sending-transactions).
 8. **Wallet adapter / Wallet Standard:** `publicKey` is now the **vault** (it used to be the
    wallet PDA).
-9. **Removed exports:** the low-level `create*Ix` builders, `appendProtocolFeeAccounts`
-   and `readAuthorityState` (use `readAuthorityCounter` + `readAuthorityPubkey`, or the
-   `LazorKitClient` methods); `findOwnedCandidates`, `provenCandidates`,
-   `chooseOwnWallet`, `OwnedCandidate`.
+9. **No 2.1.0 export was removed.** The package CHANGELOG lists the `create*Ix`
+   builders, `appendProtocolFeeAccounts`, `readAuthorityState`, `findOwnedCandidates`,
+   `provenCandidates`, `chooseOwnWallet` and `OwnedCandidate` as removed, but no
+   published 2.x exported them, so there is nothing to replace. Coming from 2.0.0 or
+   2.0.1: the contract helpers those exported (`LazorkitClient`, `deriveSmartWalletPda`,
+   the `assert*` / `validate*` utilities and others) were already dropped in 2.1.0.
 10. **`PROGRAM_ID` / `PROGRAM_ADDRESS` are the v2 mainnet id.** Use the `PROGRAM_ID_*`
     constants ([Networks & versions](/networks)) when you need a specific one.
 

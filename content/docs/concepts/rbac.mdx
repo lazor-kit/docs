@@ -40,10 +40,11 @@ The SDK constant for a Delegate is still called `ROLE_SPENDER`.
 | `ReclaimDeferred` | the payer that funded it | | |
 | `CloseExpiredSession` | anyone, once the session has expired | | |
 
-An authority that carries a policy may not `AddAuthority`, `CreateSession`,
-`TransferOwnership` or `Authorize`: none of them could enforce its policy. It may still
-remove authorities and revoke sessions it outranks — that only narrows what the wallet
-allows.
+A Delegate, the only rank that carries a policy, manages nothing: it cannot add or
+remove authorities, create or revoke sessions, transfer ownership or `Authorize` a
+deferred transaction. It spends through `Execute`, within its policy, and that is all.
+The program also refuses `AddAuthority`, `CreateSession`, `TransferOwnership` and
+`Authorize` to any authority with a policy, since none of them could enforce it.
 
 ---
 

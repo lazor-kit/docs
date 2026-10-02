@@ -59,7 +59,7 @@ Standard `signAndSendTransaction` (web). Exported by both UI packages. Since
 | ----- | ----------- | ------- | ---------- |
 | `TransactionFailedError` | The transaction landed and failed. Fees were paid; nothing else changed. | `signature`, `transactionError`, `slot`, `logs` (when read) | Read `logs` for the failing program and code. Fix the cause before retrying. |
 | `TransactionExpiredError` | It did not land before its blockhash expired, so it never will. Concluded only from a node past that point, in its transaction history. | `signature` | Safe to build and send again. |
-| `TransactionOutcomeUnknownError` | Whether it landed is not known: the paymaster's answer was lost (network error, timeout, gateway error), or no status could be read. | `signature` (`undefined` when the answer was lost) | **Do not resend blindly.** Check `signature`, or the state the transaction would change, first. |
+| `TransactionOutcomeUnknownError` | Whether it landed is not known: the paymaster's answer was lost (network error, timeout, gateway error; on web, after the SDK resent the same signed bytes, up to 3 attempts in all), or no status could be read. | `signature` (`undefined` when the answer was lost) | **Do not resend blindly.** Check `signature`, or the state the transaction would change, first. |
 | `ConfirmationTimeoutError` | A `TransactionOutcomeUnknownError`: no outcome within two minutes, and the blockhash has not expired. It may still land. | `signature`, `waitedMs` | As above. Catching `TransactionOutcomeUnknownError` covers it. |
 | `PreviousTransactionPendingError` | Nothing was signed or sent: this passkey's previous transaction still has no known outcome, and a new signature could reuse its counter. | `pendingSignature` | Try again once the previous one settles. |
 | `SignatureReusedError` | LazorKit rejected the passkey signature with `SignatureReused` (3006): its counter was already used. Usually the same passkey signing elsewhere at the same moment (another tab or device), or a paymaster reading older state. | `code: 3006` | The signature can never become valid and is not resent. Ask the user to approve again. |
@@ -101,6 +101,11 @@ plain `Error` that says so, and nothing is created.
 | ------- | ----- | ---- |
 | web | `Error('Already signing')` | A store action (every hook method) while another one is still signing or confirming. `isSigning` stays `true` until the transaction is confirmed. |
 | mobile | `SigningError` | Same rule: a sign action while another is running. Also "No wallet connected". |
+
+On mobile, every sign action reports these refusals to its `onFail` as well, except
+`transferSol` with no wallet connected: in 2.2.1 it rejects with `SigningError` without
+calling `onFail` or setting `error`. The next release (not published yet) is planned to
+call `onFail` there too.
 
 Calls through `LazorkitWalletAdapter` and the Wallet Standard wallet are not refused:
 they queue behind the passkey's running transaction.

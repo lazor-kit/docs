@@ -167,9 +167,12 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
   answers. Kora confirms before it answers by default, so this costs one status read; a
   relayer configured to answer early (`respond_after` "sent") makes the wallet poll.
 - **Failures** reject with `PaymasterError` (`code`, `data`, `httpStatus`, `signature`,
-  `maybeSent`). A lost answer after the relayer may have sent the transaction becomes
-  `TransactionOutcomeUnknownError` instead, never a blind resend. LazorKit's 3006 and 3014
-  are not retried. A send request may take 90 s, other calls 30 s.
+  `maybeSent`). The web SDK resends a failed send with the same signed bytes, up to 3
+  attempts in all, so the transaction can land at most once; it does not resend
+  LazorKit's 3006 or 3014. The React Native SDK never resends. When the relayer may have
+  sent the transaction but no answer came back (on web, from any attempt), the call
+  rejects with `TransactionOutcomeUnknownError`. A send request may take 90 s, other
+  calls 30 s.
 - **v1 wallets** need a relayer that sponsors the v1 program: `v1PaymasterConfig` (web) /
   `v1ConfigPaymaster` (mobile). LazorKit's v2 relayer does not, by design: sponsoring the
   full v1 program lets any v1 transaction pull the fee payer into its inner calls.

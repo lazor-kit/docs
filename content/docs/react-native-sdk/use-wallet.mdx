@@ -82,6 +82,14 @@ still running rejects with `SigningError`. A sign action's callback that throws 
 and changes nothing; on `connect` and `disconnect`, a throwing `onSuccess` makes the call
 reject and runs `onFail`.
 
+<Callout type="info" title="Next release (not published yet)">
+  The next release is planned to treat `connect` and `disconnect` like the sign actions:
+  a throwing `onSuccess` is logged and changes nothing, so a connect that succeeded
+  resolves and `onFail` is not called. `transferSol` with no wallet connected is planned
+  to call `onFail` and set `error`; in 2.2.1 it rejects without either. This page will
+  say so once it ships.
+</Callout>
+
 ---
 
 ## Connection

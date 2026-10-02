@@ -193,9 +193,17 @@ deserialized payload; see [Session keys › Deferred execution](/web3js-v1/sessi
 - The wallet waits for confirmation whatever the relayer answers. Kora confirms before it
   answers by default, so the wait costs one status read. A relayer that answers early
   (Kora with `respond_after` "sent") makes the wallet poll.
-- A send request may take 90 s; other paymaster calls 30 s. A lost answer becomes
-  `TransactionOutcomeUnknownError`, not a resend.
-- 3006 and 3014 from the paymaster are not retried.
+- A send request may take 90 s; other paymaster calls 30 s.
+- A send that fails is resent with the **same signed bytes**, up to 3 attempts in all
+  (1 s, then 2 s apart), so the transaction can land at most once. That includes a lost
+  answer (no answer within 90 s, a network error, HTTP 5xx or 408): if a later attempt
+  gets an answer, the call goes on as usual.
+- Not resent: LazorKit's 3006 and 3014 (unless an earlier attempt may have been sent), a
+  failure that names the transaction's signature (that signature is followed instead),
+  and bytes the paymaster reports as already processed.
+- If every attempt fails and one of them may have been sent, or the bytes were already
+  processed, the call rejects with `TransactionOutcomeUnknownError`. The React Native SDK
+  does not resend at all.
 - v1 wallets go to `v1PaymasterConfig`. See [Migrating from v1](/v1-to-v2).
 
 More on running a relayer: [Paymaster › Using a paymaster with the
