@@ -22,6 +22,8 @@ pnpm install
 pnpm dev
 ```
 
+Before opening a PR: `pnpm build`, `pnpm types:check` and `pnpm lint`.
+
 Open [http://localhost:3000](http://localhost:3000).
 
 ---
@@ -32,21 +34,28 @@ Open [http://localhost:3000](http://localhost:3000).
 content/docs/
   index.mdx               Landing page
   protocol.mdx            Protocol overview (for investors and builders)
+  networks.mdx            Program ids, package versions, what is deployed where
+  v1-to-v2.mdx            Protocol v1 and v2 side by side, the v1 sunset, MigrateWallet
 
   concepts/               Protocol deep-dives
     smart-wallet.mdx
     session-keys.mdx
-    rbac.mdx
+    rbac.mdx              Ranks & policies
     paymaster.mdx
 
-  react-sdk/              React SDK (@lazorkit/react)
-  react-native-sdk/       React Native SDK (@lazorkit/react-native)
+  react-sdk/              React SDK (@lazorkit/wallet)
+  react-native-sdk/       React Native SDK (@lazorkit/wallet-mobile-adapter)
   web3js-v1/              Contract SDK — web3.js v1 (@lazorkit/sdk-legacy)
-  web3js-v2/              Contract SDK — web3.js v2 (coming soon)
+  web3js-v2/              Contract SDK — Solana Kit (@lazorkit/sdk, release candidate)
 
+  errors.mdx              Every SDK error class and program error code
   wallet-standard/        Wallet Standard integration
   troubleshooting.mdx
+  changelog.mdx
 ```
+
+Code examples are written against the published packages. When you change one, check that
+it still compiles against the versions the page names.
 
 ---
 

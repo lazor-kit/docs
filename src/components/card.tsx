@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { cn } from 'fumadocs-ui/utils/cn';
-import type { ReactNode, HTMLAttributes } from 'react';
+import type { ElementType, ReactNode, HTMLAttributes } from 'react';
 
 export type CardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
   icon?: ReactNode;
@@ -11,7 +11,7 @@ export type CardProps = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
 };
 
 export function Card({ icon, title, description, href, external, className, children, ...props }: CardProps) {
-  const Comp = href ? Link : ('div' as any);
+  const Comp = (href ? Link : 'div') as ElementType<HTMLAttributes<HTMLElement> & { href?: string }>;
 
   return (
     <Comp

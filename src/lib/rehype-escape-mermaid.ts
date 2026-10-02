@@ -1,12 +1,18 @@
 import { visit } from 'unist-util-visit';
 
+interface HastElement {
+    tagName?: string;
+    properties?: { className?: unknown };
+}
+
 export function rehypeEscapeMermaid() {
-    return (tree: any) => {
-        visit(tree, 'element', (node: any) => {
-            if (node.tagName === 'code' || node.tagName === 'pre') {
-                const className = node.properties?.className || [];
+    return (tree: Parameters<typeof visit>[0]) => {
+        visit(tree, 'element', (node) => {
+            const element = node as unknown as HastElement;
+            if (element.tagName === 'code' || element.tagName === 'pre') {
+                const className = element.properties?.className || [];
                 if (Array.isArray(className) && className.includes('language-mermaid')) {
-                    node.properties.className = className.map((c) =>
+                    element.properties!.className = className.map((c) =>
                         c === 'language-mermaid' ? 'mermaid-raw' : c
                     );
                 }
