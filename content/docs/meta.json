@@ -2,6 +2,8 @@
     "pages": [
         "index",
         "protocol",
+        "networks",
+        "v1-to-v2",
         "concepts",
         "---UI SDKs---",
         "react-sdk",
@@ -10,6 +12,7 @@
         "web3js-v1",
         "web3js-v2",
         "---Reference---",
+        "errors",
         "wallet-standard",
         "troubleshooting",
         "changelog"

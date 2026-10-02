@@ -4,24 +4,26 @@ description: Common errors, program error codes, and fixes for LazorKit SDKs.
 ---
 
 A reference for the issues you'll hit most often. Every entry has symptoms, root cause,
-and a concrete fix.
+and a concrete fix. Every error class and program code is listed on [Errors](/errors).
 
 <Callout type="info" title="Enable debug logging first">
   Before anything else, set `isDebug={true}` on `<LazorKitProvider>` (React Native) to
-  stream SDK logs to the console. For the React SDK, open DevTools — the store logs all
-  state transitions.
+  stream SDK logs to the console. For the React SDK, read `useWallet().error` and the
+  browser console.
 </Callout>
 
 ## Section map
 
 | Topic                          | Symptoms include                                                      |
 | ------------------------------ | --------------------------------------------------------------------- |
-| [Setup](#setup)                | `Cannot resolve module`, `Buffer is not defined`, SSR crashes         |
-| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues |
-| [Network / relay](#network--relay)      | `Network request failed`, paymaster 500s, `fetch(undefined)`   |
+| [Setup](#setup)                | `Cannot resolve module`, `ERESOLVE`, `Buffer is not defined`, SSR crashes |
+| [Wallet address](#wallet-address) | Funds sent to the wrong address, balance stuck at 0                 |
+| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed |
+| [Sending transactions](#sending-transactions) | 3006, outcome unknown, "Already signing", deferred expiry |
+| [Network / relay](#network--relay)      | `Network request failed`, paymaster errors, RPC refusals       |
 | [Deep linking](#deep-linking-react-native-only) | Portal never returns, redirect drops signature          |
+| [v1 and v2](#v1-and-v2)        | 4018, 4008, 3005, migrated wallets, cluster detection                 |
 | [Program errors](#program-errors-0xbd0-0xbd1-)  | `0xbd0 ActionSolLimitExceeded`, auth payload, replay     |
-| [SDK migration (v2)](#sdk-migration-v2) | `smartWallet` points to wrong PDA, balance stuck at 0         |
 
 ---
 
@@ -37,9 +39,19 @@ npm install @solana/web3.js
 
 Then restart your bundler / Metro to clear module caches.
 
+### `npm ERESOLVE` installing `@lazorkit/wallet`
+
+`@lazorkit/wallet` 3.x needs `@solana/web3.js` **1.99 or later** (its peer
+`@solana/wallet-adapter-base` 0.9.28 does). An app pinned to 1.98.x cannot resolve it:
+
+```bash
+npm install @solana/web3.js@^1.99.0
+```
+
 ### `Buffer is not defined`
 
-Solana libraries assume Node's `Buffer` global. Polyfill per environment:
+`@lazorkit/wallet` 3.0.2 and later, and `@lazorkit/sdk-legacy` 0.3.2 / 1.x, need no global
+`Buffer`. If another library in your app does, polyfill it per environment:
 
 <Tabs items={['React Native / Expo', 'Next.js', 'Vite', 'Create React App']}>
 <Tab value="React Native / Expo">
@@ -68,6 +80,7 @@ if (typeof window !== 'undefined') (window as any).Buffer ??= Buffer;
 <Tab value="Vite">
 
 ```ts title="vite.config.ts"
+import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 export default defineConfig({ plugins: [nodePolyfills()] });
 ```
@@ -89,13 +102,14 @@ Import `./polyfills` before everything else in `src/index.tsx`.
 
 ### "Window is not defined" / SSR crashes
 
-The React SDK reads `localStorage` and calls `navigator.credentials` — both are
-client-only. In Next.js App Router, mount the provider inside a `"use client"` boundary:
+The React SDK reads `localStorage`, opens the portal, and calls `navigator.credentials` —
+all client-only. In Next.js App Router, mount the provider inside a `"use client"`
+boundary:
 
 ```tsx title="app/providers.tsx"
 'use client';
 import { LazorkitProvider } from '@lazorkit/wallet';
-export function Providers({ children }) {
+export function Providers({ children }: { children: React.ReactNode }) {
   return <LazorkitProvider>{children}</LazorkitProvider>;
 }
 ```
@@ -104,11 +118,59 @@ Never call `useWallet` from a server component.
 
 ### Random-values crash (Expo)
 
-If `crypto.getRandomValues` throws at startup, install `expo-crypto`:
+If `crypto.getRandomValues` throws at startup, `react-native-get-random-values` was not
+imported first. Make `import 'react-native-get-random-values';` the first line of your
+entry file. The adapter needs it for `Keypair.generate()` and ownership challenges.
 
-```bash
-npx expo install expo-crypto
+---
+
+## Wallet address
+
+### Which address do I show and fund?
+
+The **vault**. The SDKs name it differently:
+
+| SDK | Vault (show, fund, `fromPubkey`) | Wallet PDA (internal — never send funds) |
+| --- | -------------------------------- | ---------------------------------------- |
+| React (`@lazorkit/wallet`) | `vaultPubkey`, `wallet.vaultPda` | `smartWalletPubkey`, `wallet.smartWallet` |
+| React Native (`@lazorkit/wallet-mobile-adapter`) | `smartWalletPubkey` (= `vaultPubkey`), `wallet.smartWallet` | `walletPdaPubkey`, `wallet.walletPda` |
+| Wallet adapter / Wallet Standard | `publicKey` (3.0.0+) | — |
+| `@lazorkit/sdk-legacy`, `@lazorkit/sdk` | `vaultPda` | `walletPda` |
+
+`vaultPubkey` is the vault on both UI SDKs.
+
+<Callout type="error" title="Funds sent to the wallet PDA are lost">
+  On the web SDK, `smartWalletPubkey` / `wallet.smartWallet` is the **wallet PDA**. Nothing
+  can sign for it, so SOL or tokens sent there cannot be recovered. Show and fund
+  `vaultPubkey`.
+</Callout>
+
+### "Insufficient funds" on the vault
+
+A transaction that spends SOL from the vault needs the vault to hold enough. Fund it by
+sending SOL to the vault:
+
+```ts
+import { useWallet } from '@lazorkit/wallet'; // or '@lazorkit/wallet-mobile-adapter'
+
+const { vaultPubkey } = useWallet();
+console.log('receive SOL at:', vaultPubkey?.toBase58()); // the vault, on web and mobile
 ```
+
+### Balance shows 0
+
+You are reading the wallet PDA instead of the vault, or deriving the vault yourself.
+`findVaultPda` derives a **v2** address at the v2 **mainnet** id, wrong for a v1 wallet and
+for devnet. Read the vault the SDK stored:
+
+```ts
+// before: await connection.getBalance(findVaultPda(walletPda)[0])
+await connection.getBalance(vaultPubkey!);
+```
+
+A React Native app that upgraded from adapter 1.x had `smartWallet` holding the wallet PDA;
+the store migrates persisted records to the vault on load (its own storage format, v0 →
+v1).
 
 ---
 
@@ -135,15 +197,40 @@ environments without a platform authenticator.
 - [ ] Ensure iCloud Keychain (iOS) or Google Password Manager (Android) is signed in — passkeys require the platform's credential store.
 - [ ] Open `https://portal.lazor.sh` directly in the device's browser to confirm passkey works outside your app.
 
+### `PortalCancelledError`
+
+The user closed the portal — the dialog's X, Escape, a click outside, the popup (web), or
+dismissed the browser (mobile) — before it answered; or `disconnect` was called during
+`connect`. Nothing was signed. Treat it as a cancel. Since `@lazorkit/wallet` 3.0.0 /
+adapter 2.0.0 this is raised at once instead of after a 60-second timeout.
+
+### `connect` asks for one more signature
+
+An existing passkey that has no wallet yet (made on another device or browser) does not
+reveal its public key on sign-in. Since 3.1.0 / 2.1.0, `connect` recovers the key from two
+of its signatures, which costs one extra prompt. If the user closes it, `connect` rejects
+with `PortalCancelledError`; if the signatures do not settle on one key, it throws an
+error that says so. Nothing is created in either case. See
+[Wallet Confirmation](/react-sdk/wallet-confirmation#a-passkey-that-has-no-wallet-yet).
+
+### `WalletChooserNotShownError` (iOS)
+
+The built-in chooser is a React Native `Modal` and iOS shows one modal at a time. Mount
+`<WalletChooser />` inside your own modal, or close it before connecting. See
+[Wallet Confirmation › iOS](/react-native-sdk/wallet-confirmation#ios-shows-one-modal-at-a-time).
+
 ### `rpId` mismatch / "credentials don't match"
 
-<Callout type="warn" title="rpId is baked into every passkey">
-  A passkey is bound to a specific Relying Party ID. If you change `rpId` after a user
-  has registered, their existing passkeys won't match and every `connect` will fail.
+<Callout type="warn" title="rpId is baked into every passkey — and into the wallet">
+  A passkey is bound to a specific Relying Party ID, and each passkey authority stores
+  `sha256(rpId)` on chain. If you change `rpId` after a user has registered, their
+  existing passkeys won't match and every `connect` will fail.
 </Callout>
 
 Keep `rpId` stable across environments (or scope it per-env and migrate users
-explicitly). The default `portal.lazor.sh` works for most integrations.
+explicitly). The default `portal.lazor.sh` works for most integrations. Moving users to a
+new `rpId` means adding their new passkey as an authority with a transaction signed by
+the old one.
 
 ### Portal opens but closes immediately
 
@@ -156,20 +243,78 @@ a redirect payload. Check:
 
 ---
 
+## Sending transactions
+
+Since `@lazorkit/wallet` 3.1.0 / adapter 2.1.0, every send resolves only once its
+transaction is confirmed. See [React](/react-sdk/sending-transactions) /
+[React Native](/react-native-sdk/sending-transactions) › Sending transactions.
+
+### `SignatureReusedError` / `0xbbe` (3006)
+
+The passkey signed a counter that another transaction of the same passkey had already
+used. Causes, most likely first:
+
+- **The same passkey signing twice at once** — two tabs, two devices, or an app and a
+  wallet. The SDK serialises calls within a page, not across them.
+- **Back-to-back sends on an old SDK.** Before wallet 3.1.0 / adapter 2.1.0 /
+  sdk-legacy 1.3.0, the second challenge could read the counter before the first
+  transaction executed. Upgrade; with `@lazorkit/sdk-legacy`, pass `minContextSlot`
+  ([Passkey signing](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row)).
+- **Not LazorKit's at all:** an inner Anchor program's `AccountNotMutable` is also 3006.
+  The first `Program <id> failed` log line names the program; the UI SDKs check it and
+  report such a failure as it is.
+
+The signature can never become valid. The SDK does not resend it or open a new prompt
+on its own: ask the user to approve again.
+
+### `TransactionOutcomeUnknownError` / `ConfirmationTimeoutError`
+
+Whether the transaction landed is not known — the paymaster's answer was lost, or no
+outcome within two minutes. **Do not resend blindly**: check `error.signature` (when set),
+or the balance or state the transaction would change, first.
+
+### `PreviousTransactionPendingError`
+
+Nothing was signed or sent: the passkey's previous transaction still has no known outcome,
+and a new signature could reuse its counter. Wait, then try again.
+
+### "Already signing" (web) / `SigningError` (mobile)
+
+Another call is still running: `isSigning` stays `true` until the transaction is
+confirmed. Disable buttons while `isSigning`, and `await` one send before starting the
+next. On web 3.2.1, a send started inside a store action's `onSuccess` is refused this
+way too; on mobile 2.2.0+ it runs.
+
+### `DeferredExpiredError` / `0xbc6` (3014)
+
+TX2 of a deferred execution came after its window (`expiryOffset` slots after TX1; default
+1500 in the UI SDKs, 300 in `@lazorkit/sdk-legacy`). Nothing ran; ask the user to approve
+again. If you split TX1 and TX2, send TX2 sooner or pass a larger `expiryOffset` (at most
+9000). An inner program's 3014 (Anchor's `AccountNotAssociatedTokenAccount`) is a
+different failure — usually a missing token account — and since 3.2.1 / 2.2.1 the SDKs
+report it as it came.
+
+### `InvalidSignatureAge` / `0xbbf` (3007)
+
+The challenge's slot is more than 150 slots old by the time the transaction runs — the
+user took too long to approve, or (with `commitment: 'finalized'`) the slot was already old
+when the prompt opened. Prepare again.
+
+---
+
 ## Network / relay
 
 ### `TypeError: Network request failed`
 
-A `fetch` call inside the SDK failed — typically `getFeePayer()` or
-`signAndSendTransaction()` against the paymaster.
+A `fetch` call inside the SDK failed — typically `getPayerSigner` or
+`signAndSendTransaction` against the paymaster.
 
 **Most common cause** (React Native): the `paymasterUrl` resolved to `undefined` because
-your env var wasn't set. The provider passes `{ paymasterUrl: undefined }`, and the SDK's
-default only kicks in when the whole `configPaymaster` prop is missing.
-
-**Fix** (React Native) — guard the env var, or rely on the SDK default:
+your env var wasn't set. Guard the env var, or rely on the SDK default:
 
 ```tsx
+import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
+
 const PAYMASTER_URL = process.env.EXPO_PUBLIC_PAYMASTER_URL;
 
 <LazorKitProvider
@@ -179,30 +324,29 @@ const PAYMASTER_URL = process.env.EXPO_PUBLIC_PAYMASTER_URL;
 </LazorKitProvider>
 ```
 
-Recent SDK versions (≥ 2.0.0) also defend against this internally — upgrade if you're on
-an older release.
+### `PaymasterError`
 
-### Paymaster returns 4xx / 5xx
+The paymaster refused the request. `code` and `data` carry its JSON-RPC error; `httpStatus`
+a non-success HTTP status.
 
-```
-RPC error: Signer not authorized
-RPC error: Transaction simulation failed
-```
+- **Unauthorized / 401**: the relayer requires an API key (`apiKey`, sent as
+  `x-api-key`) or another check (reCAPTCHA) your app does not pass.
+- **Program not allowed**: the relayer's `allowed_programs` lacks the LazorKit program for
+  this wallet's protocol, or the Secp256r1 precompile. LazorKit's v2 relayer does not
+  sponsor v1 wallets: set `v1PaymasterConfig` / `v1ConfigPaymaster`.
+- **Simulation failed**: the instruction set reverts. `data` usually holds the program
+  logs; see [Errors › Program error codes](/errors#program-error-codes).
 
-- **Signer not authorized**: the paymaster's allow-list doesn't include your
-  `portalUrl` / API key. Confirm with the paymaster operator.
-- **Simulation failed**: the instruction set reverts on-chain. Log `instructions` and run
-  simulation locally (`connection.simulateTransaction(tx)`) to get the full program log.
+### `getProgramAccounts` refused, or `connect` fails reading the chain
 
-### "Insufficient funds" on the vault
+A fresh `connect` looks the passkey's wallets up with `getProgramAccounts`, which many
+public or rate-limited RPC endpoints refuse. Use an RPC that allows it. A failed read
+fails `connect`; it is never taken as "no wallet", so no wallet is created by mistake.
 
-A transaction that reads SOL from the vault needs the vault to hold enough. Fund it by
-sending SOL to `smartWalletPubkey` (the vault PDA).
+### `MinContextSlotNotReachedError`
 
-```ts
-// `smartWalletPubkey` IS the vault — funds sent here are spendable by the wallet.
-console.log('receive SOL at:', wallet.smartWallet);
-```
+A challenge read with `minContextSlot` found no RPC node at that slot within 10 s (30 s
+at `finalized`). The endpoint is behind: retry, or use an RPC that has caught up.
 
 ---
 
@@ -218,24 +362,70 @@ The portal sent the signature back, but the OS didn't route it to your app.
 - The `redirectUrl` passed into every mutation method **must** match a registered scheme exactly — case-sensitive, no trailing slash surprises.
 - In Expo dev with Expo Go, use `exp://<your-tunnel>` or `exp://localhost:8081`.
 - On Android, check `adb logcat | grep -i intent` while the redirect fires — if the intent never reaches your app, the scheme isn't registered correctly.
+- On Android, another installed app may also claim your custom scheme. Prefer a verified
+  App Link as `redirectUrl`.
 
 ### Redirect URL arrives without signature fields
 
-The URL came back like `myapp://cb?type=error&error=...`. Treat this as a portal-side
-failure. Common triggers:
+The URL came back like `myapp://cb?type=error&error=...`. The adapter rejects with a
+`LazorKitError` whose `code` is `'PORTAL_ERROR'` and whose message is the portal's text.
+Common triggers:
 
 - `NotAllowedError` from WebAuthn (see above) — user cancelled or environment denied.
 - Portal timeout — user took too long to authenticate.
 - Portal received an invalid challenge payload — inspect the SDK debug logs.
 
-Handle via the `onFail` callback on every mutation:
+Handle it like any rejection, or in the `onFail` callback:
 
 ```ts
-await signAndSendTransaction(payload, {
-  redirectUrl: 'myapp://cb',
-  onFail: (err) => console.warn('portal failed:', err.message),
-});
+await signAndSendTransaction(
+  { instructions: [ix] },
+  {
+    redirectUrl: 'myapp://cb',
+    onFail: (err) => console.warn('portal failed:', err.message),
+  },
+);
 ```
+
+---
+
+## v1 and v2
+
+### `V1WalletRetiredError` / `0xfb2` (4018)
+
+The wallet is on LazorKit v1, and v1 has been retired to its sunset binary. The funds are
+safe; the wallet must move to v2 with `migrateV1Wallet` or the LazorKit migration page.
+See [Migrating from v1](/v1-to-v2).
+
+### `V1WalletMigratedError`
+
+The stored v1 wallet was migrated (or closed). Call `connect` again; it finds the
+passkey's v2 wallet.
+
+### `FeeAccountsRequired` / `0xfa8` (4008)
+
+A v2 `CreateWallet`, `Execute` or `ExecuteDeferred` came without the four protocol-fee
+accounts. v2 requires them even when no fee is charged. You are using an SDK older than
+the v2 release, or building instructions by hand: use the `LazorKitClient` methods of
+`@lazorkit/sdk-legacy` 1.x.
+
+### `InvalidMessageHash` / `0xbbd` (3005) on every passkey transaction
+
+The v2 program names the wallet in the passkey challenge. A client that builds the
+challenge without it (an SDK from before that change, or a hand-built flow without the
+`wallet` argument) fails every passkey transaction with 3005. Upgrade to the current
+packages.
+
+### `LazorKitClient: cannot infer program ID from RPC endpoint`
+
+`@lazorkit/sdk-legacy` reads the cluster from the RPC URL and throws when the URL names
+none. Pass the program id: `new LazorKitClient(connection, PROGRAM_ID_DEVNET)`. The UI
+SDKs take the `cluster` prop instead (they treat an unknown URL as mainnet).
+
+### A new user cannot get a wallet on mainnet
+
+New wallets are created on protocol v2, whose mainnet program is not deployed yet. See
+[Networks & versions](/networks).
 
 ---
 
@@ -253,15 +443,14 @@ The most common one you'll see with passkey signing:
 The secp256r1 precompile verifies `sig` against `(publicKey, authenticatorData ‖ sha256(clientDataJSON))`.
 Any of these being wrong produces `0x2`:
 
-- **Stale cached pubkey.** The SDK signed with an old `publicKeyBytes` that doesn't
-  match the on-chain Authority. Common trigger: **cross-device passkey recovery** (user
-  signs in on a second device with an iCloud-synced passkey, the portal-reported pubkey
-  drifts from what was stored on-chain).
+- **Stale cached pubkey.** The client signed with a `publicKeyBytes` that doesn't match
+  the on-chain authority — for example after cross-device passkey use. The current SDKs
+  read the key from the on-chain authority before every passkey transaction; upgrade, and
+  `disconnect` + `connect` once to refresh the stored record.
 
-  _Fix (RN SDK ≥ 2.0.0-beta.2)_: `buildSecp256r1Params` no longer forwards the cached
-  `wallet.passkeyPubkey` — the client reads the authoritative pubkey off-chain via
-  `readAuthorityPubkey`, and `saveWallet` refreshes the cached pubkey on every
-  recovery. Upgrade and `disconnect` + `connect` once to re-hydrate.
+- **A signature not in the program's format.** The precompile takes a 64-byte `r‖s` with a
+  low S. The browser returns DER; convert it (see
+  [Passkey signing](/web3js-v1/passkey-signing#the-webauthnresponse-helper)).
 
 - **`authenticatorData` from the wrong authenticator.** Make sure the portal returns
   bytes from the same credential the user just touched, not a cached response.
@@ -270,49 +459,33 @@ Any of these being wrong produces `0x2`:
   rewrites headers or trims whitespace breaks the signature.
 
 Log the prepared challenge, the raw `clientDataJSON`, and the compressed pubkey —
-comparing them against the on-chain Authority usually pinpoints the desync in seconds.
+comparing them against the on-chain authority usually pinpoints the desync in seconds.
 
 ---
 
 ## Program errors (0xbd0, 0xbd1, …)
 
-Custom program errors come back from Solana as hex codes inside
-`SendTransactionError.message`. Decode by converting hex → decimal and matching against
-the table below.
+Custom program errors come back from Solana as hex codes inside error messages and logs
+(`custom program error: 0xbd0`), or as `{ "Custom": 3024 }`. The full table — 3001–3036
+and 4001–4018, with what each means — is on
+[Errors › Program error codes](/errors#program-error-codes). The ones you will meet most:
 
-### Error map
+| Hex | Dec | Name | Fix |
+| --- | --- | ---- | --- |
+| `0xbd0` | 3024 | `ActionSolLimitExceeded` | Lifetime SOL cap spent. Revoke and create a new session. |
+| `0xbd1` | 3025 | `ActionSolRecurringLimitExceeded` | Window cap hit. Wait for the reset. |
+| `0xbcd` | 3021 | `ActionProgramNotWhitelisted` | The call targets a program outside the whitelist. |
+| `0xbc1` | 3009 | `SessionExpired` | Create a new session. |
+| `0xbbe` | 3006 | `SignatureReused` | See [above](#signaturereusederror--0xbbe-3006). |
+| `0xbc6` | 3014 | `DeferredAuthorizationExpired` | See [above](#deferredexpirederror--0xbc6-3014). |
+| `0xbd9` | 3033 | `DelegateRequiresPolicy` | Pass a `policy` when adding `ROLE_SPENDER`. |
+| `0xfb2` | 4018 | `RetiredDeployment` | See [v1 and v2](#v1-and-v2). |
 
-| Hex       | Dec   | Name                               | Cause                                                                 |
-| --------- | ----- | ---------------------------------- | --------------------------------------------------------------------- |
-| `0xbb9`   | 3001  | `InvalidAuthorityPayload`          | Auth payload structure rejected — mismatched `authenticatorData` / `clientDataJSON`. |
-| `0xbba`   | 3002  | `PermissionDenied`                 | Caller's role doesn't allow this instruction.                          |
-| `0xbbb`   | 3003  | `InvalidInstruction`               | Instruction data couldn't be decoded.                                  |
-| `0xbbc`   | 3004  | `InvalidPubkey`                    | Pubkey didn't match expected PDA / authority.                         |
-| `0xbbd`   | 3005  | `InvalidMessageHash`               | Challenge hash mismatch — challenge the client signed differs from what the program recomputed. |
-| `0xbbe`   | 3006  | `SignatureReused`                  | Odometer counter replay — the passkey signed with a stale counter.     |
-| `0xbbf`   | 3007  | `InvalidSignatureAge`              | Auth payload slot is outside the 150-slot freshness window.           |
-| `0xbc0`   | 3008  | `InvalidSessionDuration`           | `expiresAtSlot` out of bounds.                                        |
-| `0xbc1`   | 3009  | `SessionExpired`                   | Session's expiry slot has passed.                                     |
-| `0xbc2`   | 3010  | `AuthorityDoesNotSupportSession`   | Non-Admin/Owner tried to create or revoke a session.                  |
-| `0xbc3`   | 3011  | `InvalidAuthenticationKind`        | Authentication type (Ed25519 / Secp256r1) doesn't match the authority. |
-| `0xbc4`   | 3012  | `InvalidMessage`                   | Signed payload couldn't be parsed.                                    |
-| `0xbc5`   | 3013  | `SelfReentrancyNotAllowed`         | Transaction attempted a CPI back into the LazorKit program.            |
-| `0xbc6`   | 3014  | `DeferredAuthorizationExpired`     | TX2 `ExecuteDeferred` after the authorization window expired. The wallet and the mobile adapter report it as `DeferredExpiredError`. |
-| `0xbc7`   | 3015  | `DeferredHashMismatch`             | TX2 instruction/accounts don't match the hash from TX1.               |
-| `0xbc8`   | 3016  | `InvalidExpiryWindow`              | `expiryOffset` out of bounds.                                         |
-| `0xbc9`   | 3017  | `UnauthorizedReclaim`              | Non-payer tried to reclaim a deferred exec account.                   |
-| `0xbca`   | 3018  | `DeferredAuthorizationNotExpired`  | Tried to reclaim before the auth window elapsed.                      |
-| `0xbcb`   | 3019  | `InvalidSessionAccount`            | Session PDA doesn't match the provided session key.                   |
-| `0xbcc`   | 3020  | `ActionBufferInvalid`              | Actions buffer malformed — check `Actions.*` call sites.              |
-| `0xbcd`   | 3021  | `ActionProgramNotWhitelisted`      | CPI target isn't in the session's program whitelist.                   |
-| `0xbce`   | 3022  | `ActionProgramBlacklisted`         | CPI target is blacklisted by the session.                             |
-| `0xbcf`   | 3023  | `ActionSolMaxPerTxExceeded`        | Single-tx SOL outflow exceeds `solMaxPerTx`.                          |
-| **`0xbd0`** | 3024  | **`ActionSolLimitExceeded`**       | Session's lifetime SOL cap exhausted. Revoke + create a new session.  |
-| `0xbd1`   | 3025  | `ActionSolRecurringLimitExceeded`  | SOL recurring window cap hit — wait for reset or increase limit.       |
-| `0xbd2`   | 3026  | `ActionTokenLimitExceeded`         | Token lifetime cap exhausted.                                         |
-| `0xbd3`   | 3027  | `ActionTokenRecurringLimitExceeded`| Token recurring window cap hit.                                       |
-| `0xbd4`   | 3028  | `ActionWhitelistBlacklistConflict` | Same program listed in both whitelist and blacklist actions.           |
-| `0xbd5`   | 3029  | `ActionTokenMaxPerTxExceeded`      | Single-tx token outflow exceeds `tokenMaxPerTx`.                      |
+<Callout type="warn" title="Check which program failed">
+  Programs your instructions call can use the same numbers (Anchor's account errors are
+  3000–3017). The first log line `Program <id> failed: custom program error: 0x…` names the
+  program; only when it is LazorKit's does this table apply.
+</Callout>
 
 ### Decoding helper
 
@@ -324,22 +497,24 @@ if (match) {
 }
 ```
 
-Both SDKs also ship this helper:
+Both UI SDKs and `@lazorkit/sdk-legacy` also ship this helper:
 
 ```ts
 import { extractErrorCode, errorFromCode } from '@lazorkit/wallet';
-// or '@lazorkit/wallet-mobile-adapter'
+// or '@lazorkit/wallet-mobile-adapter' / '@lazorkit/sdk-legacy'
 
-const code = extractErrorCode(err);            // 3024
-const name = errorFromCode(code!);             // 'ActionSolLimitExceeded'
+const code = extractErrorCode(err);            // 3024, or null
+const name = code === null ? undefined : errorFromCode(code); // 'ActionSolLimitExceeded'
 ```
 
 ### Session exhaustion pattern
 
 `0xbd0` / `0xbd1` / `0xbd3` all mean "session hit a spending limit". Because actions are
-immutable, the only way forward is to revoke and recreate:
+immutable, the only way forward is to revoke and recreate (React Native shown):
 
 ```ts
+import { Actions } from '@lazorkit/wallet-mobile-adapter';
+
 await revokeSession({ sessionPda }, { redirectUrl });
 const { sessionPda: newPda } = await createSession(
   {
@@ -353,55 +528,17 @@ const { sessionPda: newPda } = await createSession(
 
 ---
 
-## SDK migration (v2)
-
-### `smartWallet` changed meaning — what do I do?
-
-In SDK v2, `WalletInfo.smartWallet` now points to the **vault PDA** (where funds live),
-not the wallet metadata PDA.
-
-- **Display**: show `smartWallet` or `smartWalletPubkey` as the user's wallet address.
-- **Receive SOL/tokens**: send to `smartWallet`.
-- **Instructions**: use `smartWalletPubkey` as `fromPubkey` for transfers.
-- **Raw SDK**: use `walletPda` (new field) or `walletPdaPubkey` (from the hook) when calling
-  `LazorKitClient` directly.
-
-**Automatic migration**: the React Native store bumps `version: 0 → 1` and migrates
-persisted wallets transparently. No user action needed.
-
-If you have custom storage or cached references:
-
-```ts
-import { findVaultPda, PublicKey } from '@lazorkit/wallet-mobile-adapter';
-
-const legacyWalletPda = new PublicKey(oldCachedSmartWallet); // old = wallet PDA
-const [vaultPda] = findVaultPda(legacyWalletPda);
-// store vaultPda as the new smartWallet, keep legacyWalletPda as walletPda
-```
-
-### Balance shows 0 after upgrade
-
-You're still querying the wallet metadata PDA instead of the vault. Swap to
-`smartWalletPubkey`:
-
-```tsx
-// before: await connection.getBalance(walletPdaPubkey)
-await connection.getBalance(smartWalletPubkey);
-```
-
----
-
 ## Still stuck?
 
-- **GitHub issues (RN SDK)** — [github.com/lazor-kit/wallet-mobile-adapter/issues](https://github.com/lazor-kit/wallet-mobile-adapter/issues)
-- **GitHub issues (React SDK)** — [github.com/lazorkit/wallet/issues](https://github.com/lazorkit/wallet/issues)
+- **GitHub issues (React and React Native SDKs)** — [github.com/lazor-kit/lazor-kit/issues](https://github.com/lazor-kit/lazor-kit/issues)
+- **GitHub issues (protocol and contract SDKs)** — [github.com/lazor-kit/lazorkit-protocol/issues](https://github.com/lazor-kit/lazorkit-protocol/issues)
 - **Telegram** — [t.me/lazorkit](https://t.me/lazorkit)
 - **Twitter** — [twitter.com/lazorkit](https://twitter.com/lazorkit)
 
 When filing an issue, include:
 
-1. SDK version (`npm ls @lazorkit/wallet-mobile-adapter`)
+1. SDK version (`npm ls @lazorkit/wallet @lazorkit/wallet-mobile-adapter @lazorkit/sdk-legacy`)
 2. Platform + OS version (iOS 17.4, Android 14, Chrome 130, etc.)
 3. Debug logs (`isDebug={true}`)
-4. The exact `redirectUrl` / `portalUrl` / `paymasterUrl` used
-5. Program error code if applicable
+4. The exact `redirectUrl` / `portalUrl` / `paymasterUrl` used, and the cluster
+5. Program error code and transaction logs if applicable

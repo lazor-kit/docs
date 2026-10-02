@@ -27,12 +27,16 @@ interface WalletInfo {
 
   /** Authority PDA (base58) tied to this passkey credential. */
   walletDevice: string;
+
+  /** 1 = made before LazorKit v2, 2 = since. Absent on records saved before 2.0.0 (= v1). */
+  protocolVersion?: 1 | 2;
 }
 ```
 
 <Callout type="info">
-  After the v2 upgrade, `smartWallet` points to the **vault PDA** rather than the wallet
-  metadata account. Existing persisted wallets are migrated automatically.
+  On mobile, `smartWallet` is the **vault PDA** (since the April 2026 store format; older
+  persisted records are migrated on load). On the web SDK the same field is the wallet
+  PDA — see [Networks & versions](/networks#which-address-is-the-users-wallet).
 </Callout>
 
 ### `WalletConfig` / `LazorKitProviderProps`
@@ -40,8 +44,10 @@ interface WalletInfo {
 ```ts
 interface WalletConfig {
   portalUrl: string;
-  configPaymaster: { paymasterUrl: string; apiKey?: string };
+  configPaymaster: { paymasterUrl: string; apiKey?: string };   // v2 wallets
+  v1ConfigPaymaster?: { paymasterUrl: string; apiKey?: string }; // v1 wallets (2.0.0+)
   rpcUrl?: string;
+  cluster?: 'mainnet' | 'devnet';                                // when rpcUrl does not say (2.0.0+)
   rpId?: string;
 }
 
@@ -49,6 +55,8 @@ interface LazorKitProviderProps {
   rpcUrl?: string;
   portalUrl?: string;
   configPaymaster?: { paymasterUrl: string; apiKey?: string };
+  v1ConfigPaymaster?: { paymasterUrl: string; apiKey?: string };
+  cluster?: 'mainnet' | 'devnet';
   rpId?: string;
   isDebug?: boolean;
   children: ReactNode;
@@ -60,10 +68,9 @@ interface LazorKitProviderProps {
 ## Wallet confirmation
 
 <Callout type="warn" title="Version note">
-  Everything in this section is in the protocol-v2 major release of
-  `@lazorkit/wallet-mobile-adapter` (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier
-  versions — `1.x`, and the `2.0.0` betas up to `2.0.0-beta.4` — do not have it. How it is
-  used: [Wallet Confirmation](/react-native-sdk/wallet-confirmation).
+  Everything in this section is in `@lazorkit/wallet-mobile-adapter` **2.0.0 and later**.
+  Earlier versions — `1.x`, and the `2.0.0` betas up to `2.0.0-beta.4` — do not have it.
+  How it is used: [Wallet Confirmation](/react-native-sdk/wallet-confirmation).
 </Callout>
 
 ### Provider and `connect` options
@@ -101,7 +108,7 @@ interface WalletChoice {
   otherAuthorities: {                     // every authority except this passkey's
     address: string;                      // the authority account
     type: 'passkey' | 'key';              // passkey = secp256r1, key = Ed25519
-    role: 'owner' | 'admin' | 'spender' | 'unknown';
+    role: 'owner' | 'admin' | 'spender' | 'unknown'; // 'spender' = Delegate
     key?: string;                         // 'key' only: the Ed25519 key
     sameRelyingParty?: boolean;           // 'passkey' only: same relying party
     trusted: boolean;                     // in trustedAuthorities; a passkey never is
@@ -236,14 +243,14 @@ interface AuthorizeResult {
 // For `executeDeferred` — TX2 only.
 interface ExecuteDeferredPayload {
   deferredPayload: DeferredPayload;
-  refundDestination?: PublicKey;          // where TX2's DeferredExec rent lands
+  refundDestination?: PublicKey;          // leave unset: the program accepts only the Authorize payer
   transactionOptions?: TransactionOptions;
 }
 
-// For `reclaimDeferred` — cleanup path.
+// For `reclaimDeferred` — cleanup path, after the window.
 interface ReclaimDeferredPayload {
   deferredExecPda: PublicKey;
-  refundDestination?: PublicKey;
+  refundDestination?: PublicKey;          // leave unset: the program accepts only the Authorize payer
 }
 
 interface SessionSignPayload {
@@ -255,6 +262,7 @@ interface SessionSignPayload {
 
 // Internal shape produced by authorize*/used by executeDeferred. Re-exported from
 // the SDK so you can persist it across sessions / machines via the wire helpers.
+// Serialized, it carries `version: 2` and is refused across the v1/v2 boundary.
 interface DeferredPayload {
   walletPda: PublicKey;
   deferredExecPda: PublicKey;
@@ -268,6 +276,8 @@ interface DeferredPayload {
     isSigner: boolean;
     isWritable: boolean;
   }[];
+  executor?: PublicKey;                   // who the accounts hash expects to send TX2
+  refundDestination?: PublicKey;          // the Authorize payer
 }
 
 // Wire helpers (JSON-safe strings) for cross-machine deferred flows.
@@ -285,9 +295,10 @@ interface TransferSolPayload {
 
 ```ts
 interface CreateSessionPayload {
-  sessionKey: PublicKey;                  // fresh Ed25519 public key
-  expiresAtSlot: bigint;                  // absolute slot
-  actions?: SessionAction[];              // optional on-chain policy
+  sessionKey: PublicKey;                  // fresh Ed25519 public key; you keep the secret key
+  expiresAtSlot: bigint;                  // absolute slot, at most 6,480,000 slots ahead
+  actions?: SessionAction[];              // required unless unrestricted
+  unrestricted?: boolean;                 // a session with no limits, explicitly (2.0.0+)
 }
 
 interface RevokeSessionPayload {
@@ -301,7 +312,9 @@ interface RevokeSessionPayload {
 ```ts
 interface AddAuthorityPayload {
   newEd25519Pubkey: PublicKey;
-  role?: number;                          // ROLE_ADMIN (1) | ROLE_SPENDER (2 — default)
+  role?: number;                          // ROLE_ADMIN (1) | ROLE_SPENDER (2, a Delegate — default)
+  policy?: Uint8Array;                    // required for ROLE_SPENDER on v2: serializeActions([...])
+  unrestricted?: boolean;                 // required to add a key to a v1 wallet
 }
 
 interface RemoveAuthorityPayload {
@@ -312,7 +325,7 @@ interface RemoveAuthorityPayload {
 interface AuthorityEntry {
   authorityPda: PublicKey;
   authorityType: number;                  // 0 = ed25519, 1 = secp256r1
-  role: number;                           // 0 = owner, 1 = admin, 2 = spender
+  role: number;                           // 0 = Owner, 1 = Admin, 2 = Delegate
   credential: Uint8Array;                 // 32 bytes
   secp256r1Pubkey?: Uint8Array;           // 33 bytes, secp256r1 only
 }
@@ -324,8 +337,9 @@ type ListAuthoritiesResult = AuthorityEntry[];
 
 ## Session actions
 
-Actions are **immutable policies** attached to a session at creation. The on-chain program
-enforces them on every `Execute` signed by the session key.
+Actions are **immutable policies** attached to a session at creation — or, serialized with
+`serializeActions`, to a Delegate authority. The on-chain program enforces them on every
+`Execute` signed by that key.
 
 ### Builder — `Actions`
 
@@ -376,23 +390,24 @@ type SessionAction =
 
 ### Common limits (cheat sheet)
 
-| Slot window   | Minutes (≈) | Hours (≈) | Days (≈) |
-| ------------- | ----------- | --------- | -------- |
-| `9_000n`      | 60          | 1         | —        |
-| `54_000n`     | —           | 6         | —        |
-| `216_000n`    | —           | —         | 1        |
-| `1_512_000n`  | —           | —         | 7        |
+| Slot window   | at 400 ms a slot |
+| ------------- | ---------------- |
+| `9_000n`      | 1 hour           |
+| `54_000n`     | 6 hours          |
+| `216_000n`    | 1 day            |
+| `1_512_000n`  | 7 days           |
 
-Slot time ≈ 400 ms — these are approximations. Use on-chain slot math for precision.
+A slot's length varies by cluster and load (devnet ran near 230 ms in September 2026), so
+these are approximations.
 
 ---
 
 ## Roles & auth types
 
 ```ts
-export const ROLE_OWNER   = 0;   // can transfer ownership
-export const ROLE_ADMIN   = 1;   // manage authorities + sessions
-export const ROLE_SPENDER = 2;   // execute only
+export const ROLE_OWNER   = 0;   // manages every authority, including other Owners
+export const ROLE_ADMIN   = 1;   // manages Delegates and sessions
+export const ROLE_SPENDER = 2;   // a Delegate: manages nothing, spends within its policy
 
 export const AUTH_TYPE_ED25519   = 0;
 export const AUTH_TYPE_SECP256R1 = 1;
@@ -402,23 +417,54 @@ export const AUTH_TYPE_SECP256R1 = 1;
 
 ## Errors
 
-SDK-level errors live on a small hierarchy:
+All exported as classes. When each is thrown and what to do: [Errors](/errors).
 
 ```ts
-class LazorKitError extends Error {
-  code?: string;                  // e.g. 'WALLET_CONNECTION_ERROR' | 'SIGNING_ERROR'
-}
-class WalletConnectionError extends LazorKitError { /* code: WALLET_CONNECTION_ERROR */ }
-class SigningError          extends LazorKitError { /* code: SIGNING_ERROR */ }
+class LazorKitError extends Error { code?: string }
+class WalletConnectionError extends LazorKitError {}   // "Already connecting", bad redirect
+class SigningError          extends LazorKitError {}   // another sign action is running; no wallet
+class PortalCancelledError  extends LazorKitError {}   // the portal was closed
+class WalletChooserNotShownError extends LazorKitError {} // iOS: chooser under another modal
 
-// TX2 of a deferred execution came after its authorization expired (3014).
-class DeferredExpiredError extends Error {
-  code: 3014;
-  deferredExecPda: PublicKey;             // holds the rent: pass it to reclaimDeferred
-  authorizeSignature?: string;            // TX1, when the same call sent it
-  expiresAtSlot?: bigint;
+// Sending (2.1.0+)
+class TransactionFailedError extends Error {           // landed and failed
+  readonly signature: string;
+  readonly transactionError: TransactionError;
+  readonly slot: number;
+  readonly logs?: string[];
 }
+class TransactionExpiredError extends Error { readonly signature: string }
+class TransactionOutcomeUnknownError extends Error { readonly signature: string | undefined }
+class ConfirmationTimeoutError extends TransactionOutcomeUnknownError { readonly waitedMs: number }
+class PreviousTransactionPendingError extends Error { readonly pendingSignature: string | undefined }
+class SignatureReusedError extends Error { readonly code: 3006 }
+class PaymasterError extends Error {
+  readonly code?: number; readonly data?: unknown; readonly httpStatus?: number;
+  readonly signature?: string; maybeSent: boolean;
+}
+
+// Deferred execution (2.2.0+)
+class DeferredExpiredError extends Error {
+  readonly code: 3014;
+  readonly deferredExecPda: PublicKey;             // holds the rent: pass it to reclaimDeferred
+  readonly authorizeSignature: string | undefined; // TX1, when the same call sent it
+  readonly expiresAtSlot: bigint | undefined;
+}
+interface DeferredFailureContext { deferredExecPda?: PublicKey; authorizeSignature?: string; expiresAtSlot?: bigint } // 2.2.1+
+
+// v1 wallets (2.0.0+)
+class V1WalletRetiredError extends Error { readonly code: 4018 }
+class V1WalletMigratedError extends Error {}
+
+// Re-exported from @lazorkit/sdk-legacy
+class MinContextSlotNotReachedError extends Error {}
 ```
 
-On-chain program errors appear inside `SendTransactionError` messages as hex codes —
-`0xbd0`, `0xbd1`, etc. See [Troubleshooting](/troubleshooting) for the full map.
+Also exported: `isDeferredExpiredError`, `isSignatureReusedError`,
+`isRetiredDeploymentError` (in 2.2.1 the last two do not recognise the SDK's own classes:
+use `instanceof`), `SIGNATURE_REUSED_CODE`, `DEFERRED_EXPIRED_CODE`,
+`RETIRED_DEPLOYMENT_CODE`, `MIN_DEFERRED_EXPIRY_SLOTS` (10) and
+`MAX_DEFERRED_EXPIRY_SLOTS` (9000).
+
+On-chain program errors appear inside error messages and logs as hex codes —
+`0xbd0`, `0xbd1`, etc. See [Errors › Program error codes](/errors#program-error-codes).

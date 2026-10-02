@@ -5,7 +5,9 @@
         "getting-started",
         "provider",
         "use-wallet",
+        "sending-transactions",
         "wallet-confirmation",
-        "types"
+        "types",
+        "upgrading"
     ]
 }

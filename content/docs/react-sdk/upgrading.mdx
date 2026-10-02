@@ -1,0 +1,82 @@
+---
+title: Upgrading to 3.x
+description: What changes when you move @lazorkit/wallet from 2.x to 3.x, release by release, and what to change in your app.
+---
+
+`@lazorkit/wallet` 3.0.0 is the release that speaks protocol v2. 3.2.1 is the current
+release. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md)
+and the [Changelog](/changelog) here.
+
+```bash
+npm install @lazorkit/wallet@^3.2.1 @solana/web3.js@^1.99.0
+```
+
+`@solana/web3.js` must be **1.99 or later** (3.0.1): `@solana/wallet-adapter-base`
+0.9.28 requires it, and an app pinned to 1.98.x gets `npm ERESOLVE`. The package also
+declares `react`, `react-dom`, `zustand`, `@solana/wallet-adapter-base`,
+`@solana/wallet-standard-features` and `@wallet-standard/*` as peers. It declares
+`@solana/kit`, `@solana/kora` and `@solana-program/token` too, but the bundle never loads
+them.
+
+## Checklist
+
+1. **Show and fund `vaultPubkey`.** `smartWalletPubkey` / `wallet.smartWallet` is the
+   wallet PDA, which nothing can spend from. Use `useWallet().vaultPubkey` (or
+   `wallet.vaultPda`) as the user's address and as `fromPubkey`. Do not derive it with
+   `findVaultPda`: the exported PDA helpers derive v2 addresses at the mainnet id, which is
+   wrong for v1 wallets and for devnet. Wallets saved without `vaultPda` get it on the
+   next `connect`.
+2. **Sessions need limits.** `createSession()` without `spendingLimits` throws, unless you
+   pass `unrestricted: true`. A session without limits can spend the whole vault through
+   any program until it expires.
+3. **Delegates need a policy.** `addAuthority({ role: ROLE_SPENDER })` on a v2 wallet
+   throws without `policy: serializeActions([...])`. The default role is `ROLE_ADMIN`.
+   On a v1 wallet, `addAuthority` requires `unrestricted: true` and refuses a policy.
+4. **v1 users need their relayer.** If `paymasterConfig` points at a v2 relayer
+   (LazorKit's does not sponsor v1), set `v1PaymasterConfig` to the relayer you used
+   before. See [Migrating from v1](/v1-to-v2).
+5. **RPC URLs that do not name a cluster** need `cluster="devnet"` or
+   `cluster="mainnet"`; anything unrecognised is taken as mainnet.
+6. **`connect` may ask the user.** With no stored wallet, `connect` uses a wallet on its
+   own only when it is the one wallet the passkey has signed for and nothing else can
+   spend from it; otherwise it shows the built-in chooser. See
+   [Wallet Confirmation](/react-sdk/wallet-confirmation).
+7. **Sends resolve later, and can reject in new ways** (3.1.0). Every send resolves once
+   confirmed, and `isSigning` stays `true` until then. Handle the new errors; see
+   [Sending transactions](/react-sdk/sending-transactions).
+8. **Wallet adapter / Wallet Standard:** `publicKey` is now the **vault** (it used to be the
+   wallet PDA).
+9. **Removed exports:** the low-level `create*Ix` builders, `appendProtocolFeeAccounts`
+   and `readAuthorityState` (use `readAuthorityCounter` + `readAuthorityPubkey`, or the
+   `LazorKitClient` methods); `findOwnedCandidates`, `provenCandidates`,
+   `chooseOwnWallet`, `OwnedCandidate`.
+10. **`PROGRAM_ID` / `PROGRAM_ADDRESS` are the v2 mainnet id.** Use the `PROGRAM_ID_*`
+    constants ([Networks & versions](/networks)) when you need a specific one.
+
+## Release by release
+
+| Release | What changes for you |
+| ------- | -------------------- |
+| **3.0.0** (2026-09-29) | Protocol v2 support beside v1, routed per wallet: `protocolVersion`, `v1PaymasterConfig`, `cluster`, `V1WalletRetiredError`, `V1WalletMigratedError`. Wallet confirmation: `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints`, the built-in chooser, `PortalCancelledError` (closing the portal now rejects at once). The breaking items in the checklist above. |
+| **3.0.1** (2026-09-29) | Peer `@solana/web3.js` ^1.99.0. |
+| **3.0.2** (2026-09-29) | No global `Buffer` polyfill needed. The wallet adapter reads at `confirmed` (it read at `finalized`, up to 15 s behind, and could fail a second send with 3006). |
+| **3.1.0** (2026-09-30) | Sends resolve once confirmed; new errors `TransactionFailedError`, `TransactionExpiredError`, `TransactionOutcomeUnknownError`, `ConfirmationTimeoutError`, `PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError`. Passkey transactions are sequenced (no more 3006 back to back). A passkey with no wallet can connect: its key is recovered from two signatures, at the cost of one extra prompt. dApp v0 transactions with lookup tables work through the adapter. |
+| **3.2.0** (2026-09-30) | Deferred window: `expiryOffset` 10–9000 slots, default 1500 (was 300). `DeferredExpiredError`, `isDeferredExpiredError`, `MIN_/MAX_DEFERRED_EXPIRY_SLOTS`, `DEFERRED_EXPIRED_CODE`. |
+| **3.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext` on TX2 errors. |
+
+## Keys the SDK keeps in the browser
+
+`createSession` (without `sessionKey`) and `addAuthority` generate an Ed25519 key and keep
+its secret key in `localStorage` as plain text, under `lazorkit-session` and
+`lazorkit-authority`, so that `signAndSendWithSession` / `signAndSendWithAuthority` can
+use it. Anything that can run script on your origin can read them, and `disconnect` does
+not remove them. Bound sessions with limits and a short expiry, revoke them when the user
+signs out, and pass your own `sessionKey` when a backend should hold the key (it is never
+stored).
+
+<Callout type="info" title="Next release (not published yet)">
+  A change to keep these keys as non-extractable WebCrypto keys in IndexedDB, and to move
+  existing plaintext entries there, is in review. This section will be updated when it
+  ships.
+</Callout>

@@ -14,8 +14,8 @@ A permissioned execution layer that defines who can execute, how execution happe
 - **Passkey wallets** — users authenticate with biometrics (FaceID, TouchID, Windows Hello); no seed phrase, no private key management
 - **Session keys** — scoped, time-bound delegation keys that let apps or agents act on a user's behalf without repeated signing prompts
 - **Paymaster** — a gas abstraction service that sponsors or routes transaction fees, so users never need to hold SOL to interact
-- **Programmable execution** — RBAC roles define who can execute; session action constraints define what a delegated session key can do, to which programs, up to what value, and for how long
-- **Live on Solana** — deployed on mainnet, with Seedless (passkey onboarding) in production
+- **Programmable execution** — ranks define who can manage a wallet; spending policies and session actions define what a delegated key can do, to which programs, up to what value, and for how long
+- **Live on Solana** — protocol v1 runs on mainnet, with Seedless (passkey onboarding) in production; protocol v2 runs on devnet, and its mainnet deployment is pending (see [Networks & versions](/networks))
 
 ---
 
@@ -23,11 +23,11 @@ A permissioned execution layer that defines who can execute, how execution happe
 
 There are two execution paths in LazorKit:
 
-**Direct execution** — A wallet authority (Owner, Admin, or Spender) signs a transaction using their passkey or Ed25519 key. No session key involved. No action constraints — only role-based permission gates.
+**Direct execution** — A wallet authority (Owner, Admin, or Delegate) signs a transaction using their passkey or Ed25519 key. No session key involved. An Owner or Admin spends without limits; a Delegate only within its spending policy.
 
 **Delegated execution** — An Owner or Admin creates a session key and hands it to an app or agent. The session key signs on the wallet's behalf within a defined scope (program whitelist, spending limits, expiry). No passkey prompt per transaction.
 
-In both cases, the transaction goes to a **Paymaster**, which signs as the `fee_payer`, pays the SOL gas, collects compensation from the user in tokens (e.g. USDC), and submits the transaction. On-chain, the LazorKit program validates the signer and — if the Paymaster is a registered `fee_payer` — collects a protocol fee from the Paymaster's SOL.
+In both cases, the transaction goes to a **Paymaster**, which signs as the `fee_payer`, pays the SOL gas, and submits the transaction. Usually the paymaster is run by (or for) the integrating developer, who recoups the cost through the app. On-chain, the LazorKit program validates the signer and — when the protocol fee is configured — collects a protocol fee from the `fee_payer`'s SOL and records it in that payer's `FeeRecord`.
 
 <Mermaid chart={`
 flowchart LR
@@ -35,7 +35,7 @@ flowchart LR
     A([Agent / App]) -->|session signs| tx2[Transaction]
 
     tx1 & tx2 --> PM[Paymaster\nfee_payer]
-    U -. tokens .-> PM
+    U -. app-level payment .-> PM
 
     PM -->|submits| Sol([Solana])
     Sol --> LK{LazorKit program}
@@ -43,7 +43,7 @@ flowchart LR
     LK -->|collects protocol fee from fee_payer| FR[FeeRecord]
 `} />
 
-The user bears the economic cost in tokens. The Paymaster is break-even. LazorKit captures a share as protocol revenue, recorded on-chain against the `fee_payer` for future early-contributor rewards.
+The user bears the economic cost through the app (tokens, subscriptions, product fees). LazorKit captures a protocol fee, recorded on-chain against the `fee_payer` for future early-contributor rewards.
 
 ---
 
@@ -96,15 +96,15 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### Paymaster sponsors gas and submits
-    The partially-signed transaction goes to a Paymaster service. The Paymaster signs as `fee_payer`, covers the SOL gas, collects token compensation from the user (e.g. USDC), and submits the transaction to Solana.
+    The partially-signed transaction goes to a Paymaster service. The Paymaster signs as `fee_payer`, covers the SOL gas, and submits the transaction to Solana. How the user pays the developer back is up to the app.
   </Step>
   <Step>
     ### LazorKit program validates on-chain
-    The program checks that the signer matches an Authority PDA on the wallet, and that the role permits the operation. No spending constraints apply at this layer — only the role gate.
+    The program checks that the signer matches an Authority PDA on the wallet, and that its rank permits the operation. An Owner or Admin spends without limits; a Delegate's spending policy is enforced on every inner instruction, the same way session limits are.
   </Step>
   <Step>
     ### Protocol fee is collected
-    If the `fee_payer` (Paymaster) is registered, LazorKit deducts a protocol fee from its SOL and routes it to a random treasury shard. The Paymaster's `FeeRecord` is updated for early-contributor tracking.
+    When the protocol fee is configured, LazorKit deducts it from the `fee_payer`'s SOL and routes it to a random treasury shard. The payer's `FeeRecord` — created automatically on its first fee-paying transaction — is updated for early-contributor tracking. When the fee is not configured, collection is skipped and the transaction proceeds.
   </Step>
 </Steps>
 
@@ -115,7 +115,7 @@ LazorKit is the layer that makes this possible.
 <Steps>
   <Step>
     ### User creates a session key
-    An Owner or Admin creates a session key and assigns it to an agent or app. The session specifies: expiry slot, allowed programs, and optional spending limits (SOL cap, token cap, per-tx max).
+    An Owner or Admin creates a session key and assigns it to an agent or app. The session specifies an expiry slot and its actions: allowed programs and spending limits (SOL cap, token cap, per-tx max). The SDKs refuse a session with no actions unless the caller asks for an unrestricted one explicitly.
   </Step>
   <Step>
     ### Agent holds the session keypair
@@ -131,7 +131,7 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### Paymaster sponsors gas and submits
-    The partially-signed transaction goes to a Paymaster service. The Paymaster signs as `fee_payer`, pays the SOL gas, collects token compensation (from the user or the agent operator, per the integration), and submits the transaction.
+    The partially-signed transaction goes to a Paymaster service. The Paymaster signs as `fee_payer`, pays the SOL gas, and submits the transaction. The user or the agent operator pays the developer back, per the integration.
   </Step>
   <Step>
     ### LazorKit program validates on-chain
@@ -139,7 +139,7 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### Protocol fee is collected
-    If the `fee_payer` is registered, LazorKit deducts a protocol fee and routes it to a treasury shard. Session counters and spending limits are updated on-chain.
+    When the protocol fee is configured, LazorKit deducts it from the `fee_payer` and routes it to a treasury shard. Session counters and spending limits are updated on-chain.
   </Step>
 </Steps>
 
@@ -153,10 +153,10 @@ An on-chain account controlled by the LazorKit program. The owner is authenticat
 ### Session Keys (Scoped Delegation)
 Ephemeral keypairs granted limited execution rights. A session key can be constrained to specific programs, instruction types, value limits, and expiry windows. When the session ends, the key is invalid.
 
-### RBAC (Role-Based Access Control)
-The on-chain permission model that governs who can execute and what wallet operations they can perform. Three roles — Owner, Admin, Spender — each with different capabilities. All three can call `Execute`. Only Owner and Admin can create session keys. Role enforcement is at the program level; it cannot be bypassed by the application.
+### Ranks and policies
+The on-chain permission model. Each authority has a **rank** — Owner, Admin or Delegate — that says what it may *manage*, and optionally a **spending policy** that says what it may *spend*. All three ranks can call `Execute`; a Delegate must carry a policy, and spends only within it. Only Owners and Admins can create session keys. A wallet may have several Owners (one per device). Enforcement is at the program level; the application cannot bypass it. See [Ranks & policies](/concepts/rbac).
 
-Note: RBAC defines role-based gates. **Action constraints** (spending limits, program filters, expiry) are a separate layer that applies only to session keys — not to authorities executing directly.
+**Action constraints** (spending limits, program filters, expiry) are one engine shared by session keys and Delegate policies.
 
 ### Paymaster (Gas Abstraction)
 The transaction's `fee_payer` — typically the integrating developer themselves. The `fee_payer` pays SOL for gas, pays LazorKit's protocol fee, and submits the transaction. The end user never needs to hold SOL; they compensate the developer through app-level mechanisms (on-ramp markups, subscriptions, product fees, etc.), which is outside LazorKit's scope. The `fee_payer` pubkey accumulates in `FeeRecord` — the basis for early contributor token rewards. Future versions will support open Paymaster competition for developers that prefer to outsource this role.
@@ -185,7 +185,7 @@ An on-chain agent needs to execute recurring actions on behalf of a user (e.g. r
 1. User creates a session key with a defined scope: program address, max value per tx, expiry date
 2. Agent holds the session key and triggers execution on its own schedule
 3. Each execution passes RBAC validation before the Paymaster funds it
-4. Session expires automatically — no manual revocation needed
+4. Session expires at its slot and can no longer sign. After expiry anyone may close the account and keep its rent (`CloseExpiredSession`), so revoke it yourself if you want the rent back
 
 **Who pays:** The agent operator pre-funds the Paymaster, or the user configures a self-funded execution budget.
 
@@ -213,7 +213,9 @@ LazorKit does not take a cut from app-level revenue. The developer keeps everyth
 
 - Fees collected in native SOL, no token required
 - One Paymaster configuration, fixed fee schedule
-- Fees charged on every transaction when the protocol is enabled. **Reward tracking is opt-in** — registering a `FeeRecord` for your `fee_payer` is what turns the fees you pay into a claim at token launch
+- Fees charged on `CreateWallet`, `Execute` and `ExecuteDeferred` when the protocol fee is configured; when it is not, collection is skipped rather than failing the transaction
+- Each fee is capped at 0.01 SOL on chain
+- In protocol v2 every paying `fee_payer` gets a `FeeRecord` automatically: the SDK prepends a permissionless `RegisterPayer` to its first fee-paying transaction (protocol v1 tracked only payers registered beforehand)
 
 ### Future model
 
@@ -225,11 +227,11 @@ LazorKit does not take a cut from app-level revenue. The developer keeps everyth
 
 ## Current Status
 
-LazorKit is live on Solana mainnet. In production:
+LazorKit **protocol v1** is live on Solana mainnet. In production:
 
 - **[Seedless](https://www.seedlesslabs.xyz)** — a passkey wallet built on LazorKit, with gasless onboarding. Users create a smart wallet with biometrics in under 10 seconds.
 
-The core protocol (smart wallet program, session key validation, Paymaster service) is deployed and actively used.
+**Protocol v2** — ranks and policies, several Owners per wallet, a passkey challenge that names the wallet, `CloseExpiredSession`, and `MigrateWallet` for moving v1 wallets — runs on devnet at its own program id. It also carries the fixes from the 2026 audit of the program: fee collection that can no longer freeze funds, passkey authentication that refuses to run through another program, rank checked separately from spending, and a fee payer that inner calls cannot conscript. Its mainnet program is not deployed yet. After it is, the v1 program will be retired to a sunset binary that only lets wallets move out. See [Networks & versions](/networks) and [Migrating from v1](/v1-to-v2).
 
 ---
 

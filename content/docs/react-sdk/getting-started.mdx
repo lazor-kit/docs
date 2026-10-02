@@ -7,13 +7,21 @@ Three files total: a provider, a connect button, and a transaction handler. All 
 the same `useWallet` hook.
 
 <Callout type="info" title="Zero-config defaults">
-  All provider props are optional. With nothing set, the SDK targets Solana Devnet through
-  `portal.lazor.sh` and the public Kora paymaster — perfect for demos and local dev.
+  All provider props are optional. With nothing set, the SDK targets Solana **devnet**
+  through `portal.lazor.sh` and LazorKit's devnet Kora paymaster, which is set up for
+  protocol v2 — perfect for demos and local dev.
+</Callout>
+
+<Callout type="warn" title="Mainnet">
+  Mainnet still runs protocol v1, and the v2 mainnet program is not deployed yet. With
+  `@lazorkit/wallet` 3.x, existing v1 wallets work on mainnet (through a relayer that
+  sponsors v1: `v1PaymasterConfig`), but a new user cannot get a wallet there until v2 is
+  deployed. See [Networks & versions](/networks).
 </Callout>
 
 ## Prerequisites
 
-- React 18+
+- React 18.3+ or 19
 - Browser with WebAuthn support (all modern browsers)
 - Client-side context — passkey APIs aren't available during SSR
 
@@ -28,26 +36,30 @@ the same `useWallet` hook.
 ### Install the SDK and peer
 
 ```bash
-npm install @lazorkit/wallet @solana/web3.js
+npm install @lazorkit/wallet @solana/web3.js@^1.99.0
 ```
 
 <Callout type="warn">
-  `@solana/web3.js` is a peer dependency. Install it explicitly so your bundler resolves
-  a single version.
+  `@solana/web3.js` is a peer dependency and must be **1.99 or later**: an app pinned to
+  1.98.x gets `npm ERESOLVE`. Install it explicitly so your bundler resolves a single
+  version. npm installs the other peers (`zustand`, `@solana/wallet-adapter-base`, the
+  `@wallet-standard` packages) for you; with yarn or pnpm settings that do not, add them.
 </Callout>
 
 </Step>
 
 <Step>
 
-### Add a `Buffer` polyfill
+### Add a `Buffer` polyfill (only if other code needs it)
 
-Solana libraries assume Node's `Buffer` global. Bundler-specific setup:
+`@lazorkit/wallet` 3.0.2 and later need no global `Buffer`. Other Solana libraries in
+your app may: add a polyfill only if you see `Buffer is not defined`.
 
 <Tabs items={['Vite', 'Next.js', 'Create React App']}>
 <Tab value="Vite">
 
 ```ts title="vite.config.ts"
+import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
@@ -107,15 +119,19 @@ That's the minimum. Override defaults via props:
 ```tsx
 <LazorkitProvider
   rpcUrl={process.env.NEXT_PUBLIC_RPC_URL}
+  cluster="devnet"                       // needed when the RPC URL does not say which cluster
   portalUrl="https://portal.lazor.sh"
   paymasterConfig={{
     paymasterUrl: process.env.NEXT_PUBLIC_PAYMASTER_URL!,
-    apiKey: process.env.NEXT_PUBLIC_PAYMASTER_KEY,
+    apiKey: process.env.NEXT_PUBLIC_PAYMASTER_KEY, // ships in the bundle: not a secret
   }}
 >
   {children}
 </LazorkitProvider>
 ```
+
+If your app already has users on LazorKit v1, also set `v1PaymasterConfig`; see
+[Migrating from v1](/v1-to-v2).
 
 </Step>
 
@@ -136,10 +152,10 @@ That's the minimum. Override defaults via props:
 import { useWallet } from '@lazorkit/wallet';
 
 export function ConnectButton() {
-  const { connect, disconnect, isConnected, isConnecting, wallet } = useWallet();
+  const { connect, disconnect, isConnected, isConnecting, vaultPubkey } = useWallet();
 
-  if (isConnected && wallet) {
-    const vault = wallet.vaultPda ?? wallet.smartWallet;
+  if (isConnected && vaultPubkey) {
+    const vault = vaultPubkey.toBase58();
     return (
       <button onClick={() => disconnect()}>
         Disconnect ({vault.slice(0, 6)}…)
@@ -154,13 +170,19 @@ export function ConnectButton() {
 }
 ```
 
-<Callout type="warn" title="vaultPda is the user-facing address">
-  `wallet.vaultPda` is the SOL-holding account — show this to users and use it as
-  `fromPubkey` for transfers. `wallet.smartWallet` (and `smartWalletPubkey`) is the
-  **internal** Wallet PDA used by the program for authority resolution, not where funds
-  live. On older cached `WalletInfo` records without `vaultPda`, derive it with
-  `findVaultPda(new PublicKey(wallet.smartWallet))[0]`.
+<Callout type="warn" title="vaultPubkey is the user-facing address">
+  `vaultPubkey` (the same address as `wallet.vaultPda`) is the SOL-holding account — show
+  it to users, fund it, and use it as `fromPubkey`. `smartWalletPubkey` /
+  `wallet.smartWallet` is the **internal** wallet PDA: funds sent there cannot be spent.
+  Do not derive the vault with `findVaultPda`: it derives a v2 mainnet address, wrong for
+  v1 wallets and for devnet. Records saved by older releases get `vaultPda` on the next
+  `connect`.
 </Callout>
+
+The first `connect` opens the portal. For a returning user it may ask them to confirm
+which wallet is theirs, and for an existing passkey that has no wallet yet it asks for one
+more signature to recover the passkey's key. See
+[Wallet Confirmation](/react-sdk/wallet-confirmation).
 
 </Step>
 
@@ -170,31 +192,31 @@ export function ConnectButton() {
 
 ```tsx title="components/TransferButton.tsx"
 'use client';
-import { useWallet, findVaultPda } from '@lazorkit/wallet';
+import { useWallet } from '@lazorkit/wallet';
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
 
 export function TransferButton() {
-  const { wallet, signAndSendTransaction } = useWallet();
+  const { vaultPubkey, isSigning, signAndSendTransaction } = useWallet();
 
   const send = async () => {
-    if (!wallet) return;
-    // vaultPda is the SOL-holding address — use it as the transfer source.
-    const vault = wallet.vaultPda
-      ? new PublicKey(wallet.vaultPda)
-      : findVaultPda(new PublicKey(wallet.smartWallet))[0];
-
+    if (!vaultPubkey) return;
     const ix = SystemProgram.transfer({
-      fromPubkey: vault,
+      fromPubkey: vaultPubkey,                 // the vault: funds live and are signed for here
       toPubkey: new PublicKey('RECIPIENT_ADDRESS'),
       lamports: 0.01 * LAMPORTS_PER_SOL,
     });
+    // Resolves once the transaction is confirmed; rejects if it failed on chain.
     const sig = await signAndSendTransaction({ instructions: [ix] });
     console.log('tx', sig);
   };
 
-  return <button onClick={send}>Send 0.01 SOL</button>;
+  return <button onClick={send} disabled={isSigning}>Send 0.01 SOL</button>;
 }
 ```
+
+`signAndSendTransaction` resolves only once the transaction is confirmed, and `isSigning`
+stays `true` until then; a second call meanwhile is refused with "Already signing". What
+it can reject with, and how to handle it: [Sending transactions](/react-sdk/sending-transactions).
 
 </Step>
 
@@ -206,22 +228,20 @@ export function TransferButton() {
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
-import { useWallet, findVaultPda } from '@lazorkit/wallet';
+import { useWallet } from '@lazorkit/wallet';
 
 export function Balance() {
   const { wallet } = useWallet();
-  const vault = useMemo(() => {
-    if (!wallet) return null;
-    return wallet.vaultPda
-      ? new PublicKey(wallet.vaultPda)
-      : findVaultPda(new PublicKey(wallet.smartWallet))[0];
-  }, [wallet?.smartWallet, wallet?.vaultPda]);
+  const vault = useMemo(
+    () => (wallet?.vaultPda ? new PublicKey(wallet.vaultPda) : null),
+    [wallet?.vaultPda],
+  );
 
   const [sol, setSol] = useState(0);
 
   useEffect(() => {
     if (!vault) return;
-    const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL!);
+    const connection = new Connection(process.env.NEXT_PUBLIC_RPC_URL!, 'confirmed');
     connection.getBalance(vault).then((l) => setSol(l / LAMPORTS_PER_SOL));
   }, [vault?.toBase58()]);
 
@@ -242,8 +262,10 @@ export function Balance() {
     description="One prompt → many prompt-free sends. Built-in SpendingLimits wrapper." />
   <Card title="Deferred execution" href="/react-sdk/use-wallet#authorizeandexecute"
     description="Authorize once, execute payloads too big for a single tx." />
+  <Card title="Sending transactions" href="/react-sdk/sending-transactions"
+    description="Confirmation, isSigning, sequencing and the errors a send can reject with." />
   <Card title="Verify messages" href="/react-sdk/use-wallet#verifymessage"
     description="Verify passkey signatures in-browser with crypto.subtle." />
   <Card title="Troubleshooting" href="/troubleshooting"
-    description="SSR errors, Buffer missing, NotAllowedError, 0xbd0." />
+    description="SSR errors, NotAllowedError, 0xbd0, 3006." />
 </Cards>

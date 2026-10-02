@@ -1,0 +1,75 @@
+---
+title: Upgrading to 2.x
+description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
+---
+
+`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.2.1 is
+the current release. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md)
+and the [Changelog](/changelog) here.
+
+```bash
+npm install @lazorkit/wallet-mobile-adapter@^2.2.1
+```
+
+<Callout type="warn" title="Do not install @beta">
+  The npm `beta` tag still points at `2.0.0-beta.4`, a pre-v2 build from April 2026. Use
+  `latest` (2.2.1).
+</Callout>
+
+The adapter depends on `expo-web-browser` `^14.2.0 || ^15.0.0` (Expo SDK 53 / 54) and
+`expo-crypto` `^15.0.8` (Expo SDK 54); it is built and tested against Expo SDK 54. Older
+Expo SDKs have not been tested.
+
+## Checklist
+
+1. **`smartWalletPubkey` is the vault** (since the April 2026 betas; 1.x stored the wallet
+   PDA there). Persisted wallets are migrated on load. Use `smartWalletPubkey` (alias
+   `vaultPubkey`) as the user's address; `walletPdaPubkey` is the internal wallet PDA. Do
+   not derive addresses with `findVaultPda`: the PDA helpers derive v2 addresses at the
+   mainnet id.
+2. **Sessions need limits.** `createSession` without `actions` throws unless you pass
+   `unrestricted: true`.
+3. **Delegates need a policy.** `addAuthorityEd25519` defaults to `ROLE_SPENDER`
+   (Delegate), which on a v2 wallet throws without `policy: serializeActions([...])`. Pass
+   a policy, or `role: ROLE_ADMIN`. On a v1 wallet it requires `unrestricted: true` and
+   refuses a policy.
+4. **v1 users need their relayer:** set `v1ConfigPaymaster` when `configPaymaster` points
+   at a v2 relayer. See [Migrating from v1](/v1-to-v2).
+5. **RPC URLs that do not name a cluster** need the `cluster` prop.
+6. **`connect` may ask the user**, with a chooser drawn as a React Native `Modal`. On iOS
+   it cannot appear over another modal: see
+   [Wallet Confirmation › iOS](/react-native-sdk/wallet-confirmation#ios-shows-one-modal-at-a-time).
+   While a wallet is connected, `connect` returns it without opening the portal;
+   disconnect first to connect another passkey.
+7. **Sends resolve later and can reject in new ways** (2.1.0). See
+   [Sending transactions](/react-native-sdk/sending-transactions).
+8. **Callbacks run after `isSigning` clears** (2.2.0), and the store's
+   `signAndExecuteTransaction`, `signMessage` and `transferSol` resolve with their
+   results.
+9. **Removed or changed exports:** the low-level `create*Ix` builders are gone (use
+   `LazorKitClient` methods). `readAuthorityState` is still exported for compatibility;
+   new code should prepare passkey challenges with `@lazorkit/sdk-legacy`'s `prepare*`
+   methods and their `minContextSlot` / `commitment` options
+   ([Passkey signing](/web3js-v1/passkey-signing)).
+10. **Android redirects.** More than one app can claim a custom URL scheme on Android.
+    Prefer a redirect only your app can receive, such as a verified App Link; see
+    [Wallet Confirmation](/react-native-sdk/wallet-confirmation#a-passkey-that-has-no-wallet-yet).
+
+## Release by release
+
+| Release | What changes for you |
+| ------- | -------------------- |
+| **2.0.0** (2026-09-29) | Protocol v2 beside v1, routed per wallet: `protocolVersion`, `v1ConfigPaymaster`, `cluster`, `V1WalletRetiredError`, `V1WalletMigratedError`. Wallet confirmation: `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints`, `<WalletChooser />`, `WalletChooserNotShownError`, `PortalCancelledError`. A signing action always rejects on failure (it could resolve `undefined`). The breaking items above. |
+| **2.1.0** (2026-09-30) | Sends resolve once confirmed (polling, no websocket); new errors `TransactionFailedError`, `TransactionExpiredError`, `TransactionOutcomeUnknownError`, `ConfirmationTimeoutError`, `PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError`. Passkey transactions are sequenced. A passkey with no wallet can connect (key recovered from two signatures, one extra prompt). Large previews use the lookup tables instead of failing before the portal. `expo-web-browser` 15 accepted. |
+| **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
+| **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
+
+## Keys
+
+The adapter never stores session or authority keys: `createSession` and
+`addAuthorityEd25519` take a public key, and you keep the secret key. Store it in the
+platform's secure storage (for example `expo-secure-store`), not in `AsyncStorage`.
+What the adapter keeps in `AsyncStorage`: the wallet record and config
+(`lazor-wallet-store`), and per passkey the slot of its last transaction and any send
+whose outcome is unknown (`lazorkit:passkey-lane:…`, the slot for ten minutes).

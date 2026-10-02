@@ -1,30 +1,92 @@
 ---
 title: Overview
-description: LazorKit SDK for @solana/web3.js v2 — coming soon.
+description: "@lazorkit/sdk — the LazorKit client for @solana/kit (web3.js v2). Release candidate, protocol v2."
 ---
 
-import { ArrowRight } from 'lucide-react'
+`@lazorkit/sdk` is the LazorKit client for **Solana Kit** (`@solana/kit`, formerly
+`@solana/web3.js` v2). It has the same high-level client as
+[`@lazorkit/sdk-legacy`](/web3js-v1) — `LazorKit` (aliased `LazorKitClient`) — with kit
+types (`Address`, `Instruction`, `Rpc`) and tree-shakable module functions, and produces
+the same transactions.
 
-<Callout type="info" title="In development">
-  The web3.js v2 SDK is not yet published. Use [`@lazorkit/sdk-legacy`](/web3js-v1)
-  (web3.js v1) today — the protocol feature set is identical.
+<Callout type="warn" title="Release candidate, protocol v2 only">
+  - Current release **1.0.0-rc.5**, on both the `latest` and `next` npm tags. Its surface is
+    complete for protocol v2 and covered by unit tests and a local-validator suite; three
+    public paths are not covered by tests yet (`revokeSession`, the one-shot
+    `transferOwnership`, `signWithSecp256r1`).
+  - It speaks **protocol v2 only**, which runs on devnet today; the v2 mainnet program is
+    not deployed yet. For mainnet today, use `@lazorkit/sdk-legacy` 0.3.x (protocol v1).
+    See [Networks & versions](/networks).
+  - v1 wallets are not usable from it, except to move them: it has `findV1WalletsByOwner`
+    and `migrateV1Wallet` ([Migrating from v1](/v1-to-v2)).
 </Callout>
 
-## What's coming
+## Install
 
-The v2 SDK will expose the same LazorKit contract capabilities as
-[`@lazorkit/sdk-legacy`](/web3js-v1), rebuilt on `@solana/web3.js` v2. Expect:
+```bash
+npm install @lazorkit/sdk @solana/kit
+```
 
-- **Tree-shakeable builders** — only pay for the instructions you use.
-- **Functional signer API** — composable signer primitives instead of class instances.
-- **Stricter TypeScript types** — branded addresses, typed instruction fragments.
-- **First-class RPC types** — uses `@solana/rpc` interfaces directly.
-- **Same on-chain program** — fully compatible with wallets and sessions created through v1 or the React/React-Native SDKs.
+`@solana/kit` ^6.9 is a peer dependency. No Node polyfills are needed in a browser or React
+Native bundle.
 
-## Use v1 today
+## Quick start
 
-<Cards>
-  <Card title="web3.js v1 SDK"
-    description="Full-featured client for the current Solana web3.js v1 stack."
-    href="/web3js-v1" />
-</Cards>
+```ts
+import { createSolanaRpc, generateKeyPairSigner } from '@solana/kit';
+import { LazorKit, PROGRAM_ID_DEVNET, ed25519 } from '@lazorkit/sdk';
+
+const rpc = createSolanaRpc('https://api.devnet.solana.com');
+const lk = new LazorKit(rpc, PROGRAM_ID_DEVNET); // the program id is always explicit
+
+const payer = await generateKeyPairSigner();     // your fee payer
+const owner = await generateKeyPairSigner();     // an Ed25519 owner
+const userSeed = crypto.getRandomValues(new Uint8Array(32));
+
+const { instructions, walletPda, vaultPda } = await lk.createWallet({
+  payer: payer.address,
+  userSeed,
+  owner: { type: 'ed25519', publicKey: owner.address },
+});
+// send `instructions` with your kit transaction pipeline, signed by payer
+
+// Later: run instructions from the vault, signed by the owner key.
+const { instructions: exec } = await lk.execute({
+  payer: payer.address,
+  walletPda,
+  signer: ed25519(owner.address),
+  instructions: [/* kit Instructions that move funds from vaultPda */],
+});
+console.log(vaultPda, exec.length);
+```
+
+Unlike `@lazorkit/sdk-legacy`, the constructor does not infer the program id from the RPC
+URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there). The
+`rpc` must support `getAccountInfo`, `getMultipleAccounts`, `getProgramAccounts`,
+`getSlot` and `getTokenAccountsByOwner`; `createSolanaRpc(url)` does.
+
+## What is the same as `@lazorkit/sdk-legacy` 1.x
+
+- Every instruction, PDA seed (`lk2:`) and account layout; a parity suite checks both SDKs
+  against the same golden vectors the program asserts against.
+- Passkey signing with `prepare*` / `finalize*`, and the challenge-read options
+  `minContextSlot` (a `Slot`, i.e. `bigint`, here) and `commitment` — see
+  [Passkey signing](/web3js-v1/passkey-signing).
+- Finding a returning user's wallet: `findOwnPasskeyWallet`, `createOwnershipChallenge`,
+  `verifyOwnershipProof`, `pickOwnWallet`, `resolvePasskeyPublicKey`.
+- Sessions (no actions throws without `unrestricted: true`), Delegate policies, deferred
+  execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`.
+- `MinContextSlotNotReachedError` and the error codes on [Errors](/errors).
+
+## What is different
+
+- **Smaller surface:** no `parseActions`, `findAuthoritiesByWallet` or
+  `getRecoveryStatus` yet — use `@lazorkit/sdk-legacy` for those.
+- **More low-level builders are exported**, including `createCloseExpiredSessionIx` (close
+  an expired session and keep its rent) and `createMigrateWalletIx`.
+- **Account decoders:** `decodeWalletAccount`, `decodeAuthorityAccount`,
+  `decodeSessionAccount`.
+- Addresses are kit `Address` strings, and PDA helpers are `async`.
+
+Full reference: the package
+[README](https://github.com/lazor-kit/lazorkit-protocol/tree/develop/sdk/sdk-kit#readme).

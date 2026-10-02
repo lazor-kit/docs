@@ -3,6 +3,7 @@
     "pages": [
         "index",
         "getting-started",
+        "passkey-signing",
         "session-keys",
         "types"
     ]

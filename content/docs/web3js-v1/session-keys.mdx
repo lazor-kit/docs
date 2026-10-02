@@ -4,7 +4,8 @@ description: Create, use, and revoke session keys with the low-level web3.js v1 
 ---
 
 Session keys let an app or agent execute on a wallet's behalf without passkey
-re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` API — see
+re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` **1.x** API
+(`npm install @lazorkit/sdk-legacy@next`) — see
 [Session Keys concept](/concepts/session-keys) for the protocol-level explanation and
 [React SDK](/react-sdk/use-wallet#createsession) / [React Native SDK](/react-native-sdk/use-wallet#createsession)
 for higher-level wrappers.
@@ -39,7 +40,8 @@ const { instructions, sessionPda } = await client.createSession({
 });
 ```
 
-`expiresAt` is an **absolute slot**, not a Unix timestamp. Max duration ~30 days.
+`expiresAt` is an **absolute slot**, not a Unix timestamp: at most 6,480,000 slots ahead
+(about 30 days at 400 ms), or the program refuses it with `InvalidSessionDuration` (3008).
 
 </Tab>
 <Tab value="Passkey admin">
@@ -73,10 +75,14 @@ const webauthnResponse = await getWebAuthnResponse(
 const { instructions, sessionPda } = client.finalizeCreateSession(prepared, webauthnResponse);
 ```
 
+`getWebAuthnResponse` is the helper from
+[Passkey signing](/web3js-v1/passkey-signing#the-webauthnresponse-helper).
+
 </Tab>
 <Tab value="Unrestricted">
 
-Omit `actions` for a session with no on-chain limits — still bounded by expiry:
+A session with no actions has no on-chain limits: it can spend the whole vault through any
+program until it expires. Since 1.0.0 the SDK refuses one unless you say so:
 
 ```typescript
 import { ed25519 } from '@lazorkit/sdk-legacy';
@@ -86,7 +92,8 @@ const { instructions, sessionPda } = await client.createSession({
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 9_000n,             // ~1 hour
+  expiresAt: BigInt(slot) + 9_000n,             // ~1 hour at 400 ms a slot
+  unrestricted: true,                           // required when there are no actions
 });
 ```
 
@@ -140,42 +147,61 @@ Chrome pads `clientDataJSON`. Your own `clientDataJSON` moves the figure by its 
 `ExecuteDeferred` (TX2) has no precompile or `clientDataJSON` and leaves about 825 bytes.
 Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0.
 
-<Callout type="info" title="Only Secp256r1 Owner/Admin can authorize">
-  `Authorize` (TX1) is restricted to Secp256r1 Owner or Admin signers. Ed25519 admins
-  and Spenders can't call it.
+<Callout type="info" title="Only passkey Owners and Admins can authorize">
+  `Authorize` (TX1) is restricted to Secp256r1 Owner or Admin authorities without a policy.
+  Ed25519 keys and Delegates can't call it.
 </Callout>
 
 ### TX1 — Authorize (passkey signs)
 
 ```typescript
+import { Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+
 const prepared = await client.prepareAuthorize({
   payer: payer.publicKey,
   walletPda,
   secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
   instructions: innerInstructions,              // payload to pre-authorize
+  expiryOffset: 1_500,                          // slots TX2 stays valid; SDK default 300, 10–9000
+  // executor: relayer.publicKey,               // who sends TX2, when not the payer (see below)
 });
 
 const webauthnResponse = await getWebAuthnResponse(prepared.challenge, 'your-app.com', credentialId);
-const { instructions, deferredExecPda } = client.finalizeAuthorize(prepared, webauthnResponse);
+const { instructions, deferredPayload } = client.finalizeAuthorize(prepared, webauthnResponse);
 
-await sendAndConfirm(connection, instructions, [payer]);
+await sendAndConfirmTransaction(connection, new Transaction().add(...instructions), [payer]);
 ```
 
-### TX2 — ExecuteDeferred (any signer)
+### TX2 — ExecuteDeferred (no passkey)
 
 ```typescript
-const { instructions } = await client.executeDeferred({
+import { Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+
+const { instructions: tx2 } = await client.executeDeferredFromPayload({
   payer: payer.publicKey,
-  walletPda,
-  deferredExecPda,
-  instructions: innerInstructions,              // MUST match TX1's instructions
+  deferredPayload,                              // from finalizeAuthorize
 });
+await sendAndConfirmTransaction(connection, new Transaction().add(...tx2), [payer]);
 ```
 
 <Callout type="warn" title="Hashes must match">
   The program verifies TX2's instructions + accounts hash matches what TX1 recorded.
-  Any mismatch is rejected with `DeferredHashMismatch` (`0xbc7`).
+  Any mismatch is rejected with `DeferredHashMismatch` (`0xbc7`). That includes TX2 sent
+  by another key than the `executor` TX1 named, when an inner instruction pays TX2's
+  payer or the TX1 payer back: `executeDeferredFromPayload` refuses such a sender rather
+  than build a TX2 that would fail.
 </Callout>
+
+**The window.** TX2 is accepted for `expiryOffset` slots after TX1's slot (10–9000). The
+SDK's default is **300**; the React and React Native SDKs default to 1500. A slot's length
+varies by cluster and load. Past the window TX2 fails with
+`DeferredAuthorizationExpired` (3014), and until then the authorization stays executable
+by anyone holding the payload: nothing can cancel it.
+
+A 3014 can also come from an inner program (Anchor's `AccountNotAssociatedTokenAccount`).
+Before telling a user their approval expired, check that the first
+`Program <id> failed` log line names the LazorKit program — see
+[Errors](/errors#program-error-codes).
 
 ### Cross-machine deferred flows
 
@@ -202,21 +228,24 @@ const { instructions } = await client.executeDeferredFromPayload({
 ```
 
 All fields serialize as base58 (pubkeys) or base64 (raw bytes) — safe over HTTP, WebSocket,
-or any store-and-forward channel.
+or any store-and-forward channel. The serialized payload carries `version: 2` and records
+the `executor` and the refund destination; a payload from the other protocol version is
+refused.
 
 ### Reclaim an expired authorization
 
 If TX2 is never submitted, recover the DeferredExec account rent after expiry:
 
 ```typescript
-const { instructions } = await client.reclaimDeferred({
-  payer: payer.publicKey,
+const { instructions } = client.reclaimDeferred({
+  payer: payer.publicKey,           // the payer that funded TX1
   deferredExecPda,
   refundDestination: payer.publicKey,
 });
 ```
 
-Only the original payer can reclaim, and only after the deferred account expires.
+Only the original payer can reclaim, only to itself (`UnauthorizedReclaim`, 3017), and only
+after the window has passed (`DeferredAuthorizationNotExpired`, 3018).
 
 ---
 
@@ -236,6 +265,33 @@ const { instructions } = await client.revokeSession({
 
 Closes the session PDA and refunds rent. Works on active or already-expired sessions.
 Owner or Admin only.
+
+After a session expires, **anyone** may close it with `CloseExpiredSession` (instruction
+18) and keep the rent; before that the program refuses with `SessionNotExpired` (3036).
+1.3.1 has no public builder for it; `@lazorkit/sdk` exports `createCloseExpiredSessionIx`.
+
+---
+
+## Delegate authorities
+
+A key that should spend within limits for good, with no expiry, is a **Delegate** authority
+rather than a session. It carries a policy built from the same actions:
+
+```typescript
+import { Actions, ROLE_SPENDER, ed25519, serializeActions } from '@lazorkit/sdk-legacy';
+
+const { instructions, newAuthorityPda } = await client.addAuthority({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  newAuthority: { type: 'ed25519', publicKey: sessionKp.publicKey },
+  role: ROLE_SPENDER,
+  policy: serializeActions([Actions.solLimit(10_000_000_000n), Actions.solMaxPerTx(1_000_000_000n)]),
+});
+```
+
+A Delegate without a policy is refused (3033), and a policy on an Owner or Admin too
+(3035). See [Ranks & policies](/concepts/rbac).
 
 ---
 
@@ -268,6 +324,9 @@ edge cases (expired actions, gross outflow tracking, etc.).
 | `0xbd1`   | `ActionSolRecurringLimitExceeded`   | Window cap hit. Wait for reset or raise the limit.                 |
 | `0xbc1`   | `SessionExpired`                    | Past `expiresAtSlot`. Close and create a new session.              |
 | `0xbcd`   | `ActionProgramNotWhitelisted`       | CPI target isn't in the whitelist. Add it or drop the filter.      |
-| `0xbc7`   | `DeferredHashMismatch`              | TX2 instructions differ from TX1's authorization.                   |
+| `0xbc6`   | `DeferredAuthorizationExpired`      | TX2 after the window (or an inner program's 3014: check the logs).  |
+| `0xbc7`   | `DeferredHashMismatch`              | TX2 instructions, accounts or sender differ from TX1's authorization. |
+| `0xbd9`   | `DelegateRequiresPolicy`            | `ROLE_SPENDER` added without a `policy`.                            |
+| `0xbdc`   | `SessionNotExpired`                 | `CloseExpiredSession` on a live session.                            |
 
-Full map in [Troubleshooting › Program errors](/troubleshooting#program-errors-0xbd0-0xbd1-).
+Full map in [Errors › Program error codes](/errors#program-error-codes).

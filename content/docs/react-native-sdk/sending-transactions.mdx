@@ -1,0 +1,164 @@
+---
+title: Sending transactions
+description: When a send resolves, what isSigning means, callbacks, how passkey transactions are sequenced, the deferred window, and what the paymaster does.
+---
+
+Applies to `@lazorkit/wallet-mobile-adapter` **2.1.0 and later** (callback timing and the
+deferred window: 2.2.0; 3014 attribution: 2.2.1).
+
+## A send resolves once its transaction is confirmed
+
+`signAndSendTransaction`, `transferSol`, `authorizeAndExecute`, `authorizeDeferred`,
+`executeDeferred`, `reclaimDeferred` and the session and authority sends resolve with
+the signature once the transaction is **confirmed** (the adapter polls its status), and
+reject if it failed on chain. The paymaster's answer is not enough: a relayer that
+answers once the RPC accepted a transaction answers before it ran.
+
+```tsx
+import {
+  useWallet,
+  TransactionFailedError,
+  TransactionOutcomeUnknownError,
+} from '@lazorkit/wallet-mobile-adapter';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { Button } from 'react-native';
+
+export function PayButton({ to, lamports }: { to: string; lamports: number }) {
+  const { smartWalletPubkey, isSigning, signAndSendTransaction } = useWallet();
+
+  const pay = async () => {
+    if (!smartWalletPubkey) return;
+    try {
+      const signature = await signAndSendTransaction(
+        { instructions: [SystemProgram.transfer({ fromPubkey: smartWalletPubkey, toPubkey: new PublicKey(to), lamports })] },
+        { redirectUrl: 'myapp://pay' },
+      );
+      console.log('confirmed', signature);
+    } catch (e) {
+      if (e instanceof TransactionOutcomeUnknownError) {
+        console.warn('outcome unknown: check before retrying', e.signature);
+      } else if (e instanceof TransactionFailedError) {
+        console.error('failed on chain', e.logs);
+      } else {
+        throw e;
+      }
+    }
+  };
+
+  return <Button title="Pay" onPress={pay} disabled={isSigning} />;
+}
+```
+
+Every error a send can reject with: [Errors › Sending a transaction](/errors#sending-a-transaction).
+
+## `isSigning` and callbacks
+
+`isSigning` is `true` from the portal round-trip until the transaction is confirmed or
+fails, up to the two-minute confirmation limit (`ConfirmationTimeoutError`). A sign
+action called while it is `true` rejects with `SigningError` and calls its `onFail`.
+
+From 2.2.0, each action's promise settles, and its `onSuccess` or `onFail` runs, only
+**once `isSigning` is `false` again**:
+
+- `await signAndSendTransaction(a, opts); await signAndSendTransaction(b, opts)` runs both;
+- a send started from `onSuccess` runs;
+- a sign action's callback that throws is logged and does not change the outcome: a
+  landed transaction still resolves, and `onFail` is not called.
+
+`connect` and `disconnect` on the hook run their callbacks after the call settles too;
+there, a callback that throws makes the call reject and runs `onFail` (2.2.1).
+
+```ts
+import { Actions } from '@lazorkit/wallet-mobile-adapter';
+import type { PublicKey } from '@solana/web3.js';
+
+await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresAtSlot: currentSlot + 9_000n,
+    actions: [Actions.solMaxPerTx(100_000_000n)],
+  },
+  {
+    redirectUrl: 'myapp://session',
+    // Runs after isSigning is false: a send from here is not refused.
+    onSuccess: ({ sessionPda }: { sessionPda: PublicKey }) =>
+      void signAndSendWithSession({ sessionKeypair: sessionKp, sessionPda, instructions: [ix] }),
+  },
+);
+```
+
+## One passkey, one transaction at a time
+
+A passkey signature commits to the passkey's counter, read before the portal opens. If
+it is read before the previous transaction executed, the new signature reuses the counter
+and LazorKit rejects it with `SignatureReused` (3006), after the user approved. So:
+
+- signatures for one passkey are prepared one at a time;
+- each challenge is read at `confirmed` from an RPC node that has executed the passkey's
+  previous transaction (`minContextSlot`); a node that is behind is asked again;
+- that slot, and a send whose outcome is not known yet, are kept in `AsyncStorage` (the
+  slot for ten minutes), so a restarted app starts from them;
+- a call made while the previous transaction still has no known outcome rejects with
+  `PreviousTransactionPendingError` and signs nothing.
+
+The same passkey signing on two devices at the same moment is not serialised; one of
+them can fail with `SignatureReusedError`. It is never resent and no portal trip opens on
+its own: ask the user to approve again.
+
+## Transaction options
+
+| `transactionOptions` field | On mobile (2.2.1) |
+| -------------------------- | ----------------- |
+| `addressLookupTableAccounts` | Used for the transaction, and for the portal preview when the preview would be over 1232 bytes without them. |
+| `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). |
+| `clusterSimulation` | Passed to the portal's preview. |
+| `feeToken` | Forwarded to the paymaster as `fee_token`. Whether it is honoured is up to the relayer. |
+
+## How much fits in one transaction
+
+A passkey `Execute` leaves about **380 bytes** for inner instructions without a lookup
+table, with the portal's `clientDataJSON` from a browser tab: about 340 with
+`computeUnitLimit`, and 109 fewer when Chrome pads `clientDataJSON`. A single-hop
+SOL→USDC Jupiter route, with Jupiter's lookup tables and compute-budget instructions, came
+to 1207 bytes, which Chrome's padding pushes over the 1232-byte limit. Measured
+2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0. Larger payloads go through deferred
+execution, which leaves about 825 bytes in TX2.
+
+## Deferred execution
+
+`authorizeAndExecute` sends both transactions; `authorizeDeferred` returns the payload
+for TX2, which `executeDeferred` (or a server, with `@lazorkit/sdk-legacy`) sends later.
+
+**The window.** The program accepts TX2 for `expiryOffset` slots after the slot TX1 landed
+in: **10 to 9000, default 1500** (`DEFAULTS.DEFERRED_EXPIRY_SLOTS`). Outside that range
+the call throws a `RangeError` before the portal opens.
+
+- A slot's length depends on the cluster and its load; 9000 slots is tens of minutes, not
+  hours.
+- The window starts at TX1's slot. The adapter may wait up to two minutes for TX1 to
+  confirm before it sends TX2, so do not pass a small value.
+- An approval that is never executed **stays executable until it expires**, with the
+  paymaster's rent in it. Nothing can cancel it earlier.
+
+**When it expires**, TX2 is not sent and the call rejects with `DeferredExpiredError`
+(`deferredExecPda`, `authorizeSignature`, `expiresAtSlot`): nothing ran, the approval is
+spent. `reclaimDeferred({ deferredExecPda })` returns the rent to the paymaster's fee
+payer once the window has passed. A 3014 is reported as `DeferredExpiredError` only when
+it is the authorization's own; an inner program's 3014 is thrown as it came. Every TX2
+error carries the `DeferredFailureContext` fields.
+
+**TX2 on a server.** A server has no hook: deserialize the payload and send it with
+`LazorKitClient.executeDeferredFromPayload` from `@lazorkit/sdk-legacy`. If an inner
+instruction pays the TX1 payer back, TX2 must be sent by the executor named when TX1 was
+authorized. See [Session keys › Deferred execution](/web3js-v1/session-keys#deferred-execution).
+
+## The paymaster
+
+- Sends are Kora JSON-RPC `signAndSendTransaction` requests with `{ transaction,
+  signer_key }`. `apiKey` is sent as `x-api-key`; it ships in your app, so it is not a
+  secret.
+- The adapter confirms each transaction itself, whatever the relayer answers.
+- A send request may take 90 s; other paymaster calls 30 s. A lost answer becomes
+  `TransactionOutcomeUnknownError`.
+- 3006 and 3014 from the paymaster are not retried.
+- v1 wallets go to `v1ConfigPaymaster`. See [Migrating from v1](/v1-to-v2).

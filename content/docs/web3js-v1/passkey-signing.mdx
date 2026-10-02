@@ -1,0 +1,253 @@
+---
+title: Passkey signing
+description: The prepare / finalize flow, turning a WebAuthn assertion into a WebAuthnResponse, challenge-read options (minContextSlot, commitment), one flow per authority, and recovering a passkey's public key.
+---
+
+Everything here is `@lazorkit/sdk-legacy` **1.x** (protocol v2): install it with
+`npm install @lazorkit/sdk-legacy@next`. The challenge-read options and key recovery are
+in **1.3.0** and later. `@lazorkit/sdk` (kit) has the same API with kit types.
+
+## The three phases
+
+A passkey can sign only once the challenge is known, so every passkey operation is split:
+
+1. **`client.prepare*`** reads the authority's counter, its key and the slot, and returns
+   `prepared.challenge`.
+2. **The authenticator** signs the challenge: `navigator.credentials.get` in a browser.
+3. **`client.finalize*`** takes the assertion and returns the instructions to send.
+
+Every passkey operation has the pair: `prepareExecute`, `prepareAuthorize`,
+`prepareAddAuthority`, `prepareRemoveAuthority`, `prepareTransferOwnership`,
+`prepareCreateSession`, `prepareRevokeSession`, each with its `finalize*`.
+
+The challenge is
+`SHA256(discriminator ‖ auth_payload[..14] ‖ signed_payload ‖ payer ‖ wallet ‖ counter ‖ program_id)`.
+It names the **wallet**: an assertion made for one wallet does not verify on another. A
+client that builds the challenge without it (an SDK older than the wallet-binding change)
+fails with `InvalidMessageHash` (3005).
+
+## The WebAuthnResponse helper
+
+`finalize*` takes a `WebAuthnResponse`. The browser returns a DER signature; the program
+needs a 64-byte `r ‖ s` with a low S, and the hash of `clientDataJSON`:
+
+```ts
+import { p256 } from '@noble/curves/p256'; // npm install @noble/curves@^1.9
+import type { WebAuthnResponse } from '@lazorkit/sdk-legacy';
+
+export async function getWebAuthnResponse(
+  challenge: Uint8Array,
+  rpId: string,
+  credentialId: Uint8Array,
+): Promise<WebAuthnResponse> {
+  const credential = (await navigator.credentials.get({
+    publicKey: {
+      challenge: new Uint8Array(challenge),
+      rpId,
+      allowCredentials: [{ type: 'public-key', id: new Uint8Array(credentialId) }],
+      userVerification: 'preferred',
+    },
+  })) as PublicKeyCredential;
+  const response = credential.response as AuthenticatorAssertionResponse;
+  const clientDataJson = new Uint8Array(response.clientDataJSON);
+
+  return {
+    // DER → raw r||s with a low S, as the Secp256r1 precompile requires.
+    signature: p256.Signature.fromDER(new Uint8Array(response.signature)).normalizeS().toCompactRawBytes(),
+    authenticatorData: new Uint8Array(response.authenticatorData),
+    clientDataJsonHash: new Uint8Array(await crypto.subtle.digest('SHA-256', clientDataJson)),
+    clientDataJson,
+  };
+}
+```
+
+`credentialId` is the passkey's raw id; `credentialIdHash` (what LazorKit stores) is its
+SHA-256. Other pages call this helper `getWebAuthnResponse`.
+
+## Execute with a passkey
+
+```ts
+import { SystemProgram, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
+
+const prepared = await client.prepareExecute({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: { credentialIdHash, authorityPda }, // publicKeyBytes is read from chain when omitted
+  instructions: [SystemProgram.transfer({ fromPubkey: vaultPda, toPubkey: recipient, lamports: 1_000_000 })],
+});
+
+const response = await getWebAuthnResponse(prepared.challenge, rpId, credentialId);
+const { instructions } = client.finalizeExecute(prepared, response);
+
+const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+const tx = new VersionedTransaction(
+  new TransactionMessage({ payerKey: payer.publicKey, recentBlockhash: blockhash, instructions }).compileToV0Message(),
+);
+tx.sign([payer]);
+const signature = await connection.sendTransaction(tx);
+const { context, value } = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+if (value.err) throw new Error(`failed: ${JSON.stringify(value.err)}`);
+const lastSlot = context.slot; // pass this as minContextSlot for this authority's next challenge
+```
+
+The first fee-paying transaction of a payer also carries a `RegisterPayer` instruction,
+which the SDK prepends when the protocol fee is configured (about 0.00112 SOL of
+`FeeRecord` rent, once). Keep room for it.
+
+When another key pays the transaction fee, pass it as `feePayer` to `prepareExecute` /
+`prepareAuthorize`: the accounts hash records each account's signer and writable flags as
+the runtime sees them, and the fee payer is always a writable signer.
+
+## Two passkey transactions in a row
+
+The challenge signs the authority's counter + 1, read in `prepare*`. If the previous
+transaction from the same authority has been sent but not executed by the node you read
+from, the read returns the counter that transaction is about to use. The new signature
+then fails with `SignatureReused` (3006), after the user approved it, and nothing can
+repair it.
+
+So wait for the previous transaction to confirm, and pass its slot as `minContextSlot`:
+
+```ts
+const next = await client.prepareExecute({
+  payer: payer.publicKey,
+  walletPda,
+  secp256r1: {
+    credentialIdHash,
+    authorityPda,
+    minContextSlot: lastSlot,  // read from a node that has executed the previous transaction
+    // commitment: 'confirmed', // the default
+  },
+  instructions,
+});
+```
+
+**Challenge-read options** (1.3.0+), on all three reads a challenge is built from (the
+counter, the key and the slot):
+
+| Option | Where | Default |
+| ------ | ----- | ------- |
+| `minContextSlot: number` | `Secp256r1Params` (every `prepare*`), `secp256r1(signer, { … })` for the one-shot methods, `migrateV1Wallet`, `readCounter`, `readAuthorityCounter`, `readAuthorityPubkey` | none |
+| `commitment` | same places | `'confirmed'`, or `'processed'` on a Connection at `'processed'` |
+
+- A node behind `minContextSlot` answers -32016. The SDK retries with a short backoff for
+  up to **10 s** (30 s at `'finalized'`), then throws `MinContextSlotNotReachedError`
+  (`minContextSlot`, `waitedMs`, `commitment`). Retry on an RPC endpoint that has caught
+  up.
+- If one of the reads fails for another reason, the call rejects at once and the other
+  reads stop.
+- With `commitment: 'finalized'`, the floor must be *finalized*, which can take as long as
+  the cluster's finalization lag (31 slots on a local validator; none on devnet on
+  2026-09-30). The challenge's slot is then that many slots old when the prompt appears,
+  and the program accepts it only until it is 150 slots old. Unless you need finalized
+  reads, keep the default.
+- Without `minContextSlot`, a node behind a load balancer may still serve the spent
+  counter even after you confirmed on another node. Pass the floor anyway.
+- 1.3.0 changed the default: a Connection built without a commitment used to read at
+  `finalized`.
+
+## One passkey flow per authority at a time
+
+Two flows for the same authority that overlap (two `prepare*` before the first lands, two
+tabs or devices, an app and a wallet) read the same counter and both sign counter + 1.
+Whichever lands second fails with 3006, and no floor helps. The SDK keeps no
+per-authority state; queue the flows yourself:
+
+```ts
+import type { PublicKey } from '@solana/web3.js';
+
+const tails = new Map<string, Promise<void>>();
+
+export async function oneAtATime<T>(authority: PublicKey, flow: () => Promise<T>): Promise<T> {
+  const key = authority.toBase58();
+  const run = (tails.get(key) ?? Promise.resolve()).then(flow);
+  const tail = run.then(() => undefined, () => undefined);
+  tails.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (tails.get(key) === tail) tails.delete(key);
+  }
+}
+
+// flow = prepare (floored at the last slot) → passkey prompt → send → confirm
+await oneAtATime(authorityPda, () => payWithPasskey(invoice));
+```
+
+Across devices that share a passkey no local queue helps: a 3006 there means another flow
+used the counter first. Prepare again (a new prompt), floored at a slot that includes it.
+
+## Is a 3006 LazorKit's?
+
+A program that `Execute` calls can fail with the same code: Anchor's account errors use
+3000–3017, so an inner Anchor program's `AccountNotMutable` is also `Custom(3006)`.
+`extractErrorCode` / `errorFromCode` read only the number. The first log line
+`Program <id> failed: custom program error: 0x…` names the program; only when it is the
+LazorKit program is the code `SignatureReused`. A landed failure
+(`{ InstructionError: [i, { Custom: 3006 }] }`) names only the top-level LazorKit
+instruction: read `getTransaction(signature)` → `meta.logMessages` before asking the user
+to sign again.
+
+## A passkey with no wallet, whose key you do not hold
+
+Every passkey starts without a v2 wallet. Signing in gives you an assertion, which carries
+no public key, and `createWallet` needs one. A key taken from anywhere else (a portal's
+storage, a deep link) may be another passkey's, and a wallet created for it can never sign:
+whatever is sent to its vault is stuck.
+
+Recover the key from the passkey itself. An ECDSA signature narrows its signer down to a
+few candidate keys (almost always two); a second signature over another challenge leaves
+one. `resolvePasskeyPublicKey` (1.3.0) does that:
+
+```ts
+import { createOwnershipChallenge, resolvePasskeyPublicKey, type OwnershipProof } from '@lazorkit/sdk-legacy';
+
+async function assertion(challenge: Uint8Array, rpId: string, allow?: ArrayBuffer) {
+  const credential = (await navigator.credentials.get({
+    publicKey: {
+      challenge: new Uint8Array(challenge),
+      rpId,
+      allowCredentials: allow ? [{ type: 'public-key', id: allow }] : undefined,
+      userVerification: 'preferred',
+    },
+  })) as PublicKeyCredential;
+  const r = credential.response as AuthenticatorAssertionResponse;
+  const proof: OwnershipProof = {
+    challenge,
+    signature: new Uint8Array(r.signature),
+    authenticatorData: new Uint8Array(r.authenticatorData),
+    clientDataJson: new Uint8Array(r.clientDataJSON),
+  };
+  return { credential, proof };
+}
+
+const first = await assertion(createOwnershipChallenge(), rpId);
+const second = await assertion(createOwnershipChallenge(), rpId, first.credential.rawId); // same passkey
+const publicKey = resolvePasskeyPublicKey([first.proof, second.proof], rpId);
+if (!publicKey) throw new Error("Could not read this passkey's key: ask again, never guess");
+// publicKey: the 33-byte compressed key to pass to createWallet as compressedPubkey
+```
+
+- Take both assertions with `navigator.credentials.get` **in your own page**, the second
+  pinned to the first one's `rawId`, and check the two `rawId`s match. There the browser
+  sets the relying party and the passkey signs. Assertions relayed to you (by a portal,
+  over a deep link) prove only that whoever produced them holds the key.
+- `null` means no single key: fewer than two assertions, two over the same challenge, one
+  that fails a check, or two different passkeys. Ask again.
+- `recoverPasskeyPublicKeys(proof, rpId)` is the one-assertion step: every key that
+  assertion verifies against.
+- Only for a passkey with **no** wallet. When `findOwnPasskeyWallet` finds one, its
+  `publicKey` is the stored key the assertion was just verified against.
+
+The React and React Native SDKs do this inside `connect` (one extra prompt) since
+`@lazorkit/wallet` 3.1.0 / `@lazorkit/wallet-mobile-adapter` 2.1.0.
+
+## Deferred execution: `executor` and `feePayer`
+
+`prepareAuthorize` takes `expiryOffset` (10–9000 slots; **the SDK's default is 300**,
+while the React and React Native SDKs default to 1500), `executor` (who will send TX2,
+default the Authorize payer) and `feePayer`. TX2's payer and refund destination hash
+differently depending on who sends it, so name the `executor` whenever an inner
+instruction may pay either of them back. `executeDeferredFromPayload` refuses a different
+sender for such a payload rather than build a TX2 that fails with
+`DeferredHashMismatch` (3015). See [Session keys › Deferred execution](/web3js-v1/session-keys#deferred-execution).

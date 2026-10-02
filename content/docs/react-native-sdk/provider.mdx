@@ -19,8 +19,9 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 ```
 
 <Callout type="info" title="Devnet defaults">
-  With no props, the provider connects to Solana Devnet through `portal.lazor.sh` and the
-  public Kora paymaster at `kora.devnet.lazorkit.com`. Perfect for demos and local development.
+  With no props, the provider connects to Solana devnet through `portal.lazor.sh` and
+  LazorKit's devnet Kora paymaster at `kora.devnet.lazorkit.com`. Perfect for demos and
+  local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
 </Callout>
 
 ## Production setup
@@ -29,10 +30,12 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 <LazorKitProvider
   rpcUrl={process.env.EXPO_PUBLIC_RPC_URL}
   portalUrl="https://portal.lazor.sh"
+  cluster="mainnet"
   configPaymaster={{
     paymasterUrl: process.env.EXPO_PUBLIC_PAYMASTER_URL!,
     apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY,
   }}
+  v1ConfigPaymaster={{ paymasterUrl: process.env.EXPO_PUBLIC_V1_PAYMASTER_URL! }}
   rpId="portal.lazor.sh"
   isDebug={__DEV__}
 >
@@ -47,6 +50,8 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 | `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
 | `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
 | `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | Devnet Kora                            | no       |
+| `v1ConfigPaymaster` | `{ paymasterUrl: string; apiKey?: string }`  | `configPaymaster`                      | no       |
+| `cluster`         | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | no       |
 | `rpId`            | `string`                                       | `portal.lazor.sh`                      | no       |
 | `isDebug`         | `boolean`                                      | `false`                                | no       |
 | `children`        | `ReactNode`                                    | —                                      | yes      |
@@ -61,15 +66,16 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 
 - **`rpcUrl`** — Any Solana RPC. Falsy values fall back to the Devnet default.
 - **`portalUrl`** — The WebAuthn-enabled web page the SDK opens via `expo-web-browser`. Self-hosters can point this at their own portal.
-- **`configPaymaster`** — Kora JSON-RPC endpoint. `apiKey` is sent as `x-api-key` on every request.
+- **`configPaymaster`** — Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as `x-api-key` on every request; it ships in your app, so it is not a secret.
+- **`v1ConfigPaymaster`** (2.0.0+) — the relayer for users whose wallet is still on LazorKit v1: the one your app used before v2. LazorKit's v2 relayer does not sponsor v1. See [Migrating from v1](/v1-to-v2).
+- **`cluster`** (2.0.0+) — which cluster `rpcUrl` serves. Read from the URL (`mainnet`, `devnet`, `localhost`) otherwise, and anything unrecognised is taken as **mainnet**.
 - **`isDebug`** — Enables verbose logs via the built-in `logger`.
 
 ### Wallet confirmation props
 
 <Callout type="warn" title="Version note">
-  These props are in the protocol-v2 major release of `@lazorkit/wallet-mobile-adapter`
-  (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions — `1.x`, and the `2.0.0` betas
-  up to `2.0.0-beta.4` — do not have them.
+  These props are in `@lazorkit/wallet-mobile-adapter` **2.0.0 and later**. Earlier
+  versions — `1.x`, and the `2.0.0` betas up to `2.0.0-beta.4` — do not have them.
 </Callout>
 
 | Prop                 | Type                                           | Default     |
@@ -88,21 +94,26 @@ passkey has signed for and nothing else can spend from it; otherwise it asks the
 ### Switch networks at runtime
 
 ```tsx
-const [network, setNetwork] = useState<'devnet' | 'mainnet'>('devnet');
+import { useState } from 'react';
+import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 
-const rpcUrl = network === 'devnet'
-  ? 'https://api.devnet.solana.com'
-  : 'https://api.mainnet-beta.solana.com';
+export function Root() {
+  const [network] = useState<'devnet' | 'mainnet'>('devnet');
 
-return (
-  <LazorKitProvider rpcUrl={rpcUrl}>
-    <App />
-  </LazorKitProvider>
-);
+  const rpcUrl = network === 'devnet'
+    ? 'https://api.devnet.solana.com'
+    : 'https://api.mainnet-beta.solana.com';
+
+  return (
+    <LazorKitProvider rpcUrl={rpcUrl} cluster={network}>
+      <App />
+    </LazorKitProvider>
+  );
+}
 ```
 
-Changing `rpcUrl` recreates the `Connection`. The persisted wallet record is untouched — it
-continues to work on whichever cluster holds the on-chain wallet account.
+Changing `rpcUrl` recreates the `Connection`. The persisted wallet record is untouched: it
+belongs to the cluster it was created on, so disconnect before switching clusters.
 
 ### Hide behind an env-driven config
 
@@ -125,6 +136,12 @@ const isProd = !__DEV__;
 
 ## Runtime notes
 
-- Memoizes the `Connection` on `rpcUrl`, so rebuilds are cheap.
-- Persists `{ wallet, config }` to `AsyncStorage` under key `lazor-wallet-store`.
-- Runs a state migration on v0 → v1 to move `smartWallet` from the wallet PDA to the vault PDA. Users who connected before v2 keep their wallet transparently.
+- Memoizes the `Connection` on `rpcUrl` (at `confirmed`), so rebuilds are cheap.
+- Persists `{ wallet, config }` to `AsyncStorage` under key `lazor-wallet-store`. Per
+  passkey it also keeps the slot of its last transaction (ten minutes) and any send whose
+  outcome is unknown, under `lazorkit:passkey-lane:…` (2.1.0+).
+- Never stores session or authority secret keys: you hold those (use secure storage).
+- Migrates records from the store's own format v0 (before April 2026, when `smartWallet`
+  held the wallet PDA) to v1, where `smartWallet` is the vault. This is a storage format
+  version, unrelated to the protocol version. A stored wallet without `protocolVersion`
+  is treated as protocol v1.

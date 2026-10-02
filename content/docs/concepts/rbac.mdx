@@ -1,83 +1,162 @@
 ---
-title: RBAC
-description: Role-based access control in LazorKit — Owner, Admin, and Spender roles and what each can do.
+title: Ranks & policies
+description: LazorKit's on-chain permission model — Owner, Admin and Delegate ranks, what each may manage, and the spending policy a Delegate carries.
 ---
 
-# RBAC
+# Ranks & policies
 
-LazorKit enforces a three-tier role hierarchy on-chain. Every authority PDA stores a role, and every state-modifying instruction verifies the caller's role before executing.
+Every authority on a wallet answers two separate questions:
 
----
+- its **rank** — what it may *manage*: Owner, Admin or Delegate;
+- its **policy** — what it may *spend*: an optional list of the same actions sessions use.
 
-## Roles
-
-| Role | Value | Description |
-|---|---|---|
-| Owner | 0 | Full control over the wallet |
-| Admin | 1 | Operational control — no ownership changes |
-| Spender | 2 | Execute only |
+They used to be one field. In protocol v1, `Execute` never read the role, so a key named
+"Spender" could spend the whole vault. Protocol v2 keeps them apart, and a Delegate must
+carry a policy. This page describes v2 (devnet today; see [Networks & versions](/networks)).
 
 ---
 
-## Permission Matrix
+## Ranks
 
-| Instruction | Owner | Admin | Spender |
-|---|---|---|---|
-| Execute | Yes | Yes | Yes |
-| CreateSession | Yes | Yes | No |
-| RevokeSession | Yes | Yes | No |
-| AddAuthority (any role) | Yes | No | No |
-| AddAuthority (Spender only) | Yes | Yes | No |
-| RemoveAuthority | Yes | Yes | No |
-| TransferOwnership | Yes | No | No |
-| Authorize (Deferred TX1) | Yes (Secp256r1 only) | Yes (Secp256r1 only) | No |
+| Rank | Value | SDK constant | May add | May remove | Spends |
+| --- | --- | --- | --- | --- | --- |
+| Owner | 0 | `ROLE_OWNER` | Owner, Admin, Delegate | Owner (not the last, not itself), Admin, Delegate | without limits |
+| Admin | 1 | `ROLE_ADMIN` | Delegate | Delegate | without limits |
+| Delegate | 2 | `ROLE_SPENDER` | nothing | nothing | only within its policy |
 
----
+The SDK constant for a Delegate is still called `ROLE_SPENDER`.
 
-## Role Details
+## What each instruction allows
 
-### Owner
+| Instruction | Owner | Admin | Delegate |
+| --- | --- | --- | --- |
+| `Execute` | Yes | Yes | Yes, within its policy |
+| `CreateSession` / `RevokeSession` | Yes | Yes | No |
+| `AddAuthority` | any rank | Delegate only | No |
+| `RemoveAuthority` | any rank, not the last Owner, not itself | Delegate only | No |
+| `TransferOwnership` | Yes | No | No |
+| `Authorize` (deferred TX1) | Yes, passkey only | Yes, passkey only | No |
+| `ExecuteDeferred` (TX2) | anyone holding the payload | | |
+| `ReclaimDeferred` | the payer that funded it | | |
+| `CloseExpiredSession` | anyone, once the session has expired | | |
 
-Full control. The only role that can:
-- Add authorities of any role (Owner, Admin, Spender)
-- Transfer ownership atomically to a new key
-- Remove any non-owner authority
-
-A wallet starts with exactly one owner (the key used at `CreateWallet`). There is no on-chain enforcement preventing multiple owners, but `TransferOwnership` atomically closes the old owner PDA.
-
-### Admin
-
-Operational access without ownership control. Admins can:
-- Add **Spender** authorities only — cannot elevate to Admin or Owner
-- Create and revoke sessions
-- Execute instructions via CPI
-
-Admins cannot modify ownership or add higher-privilege keys.
-
-### Spender
-
-Execution-only access. Spenders can only call `Execute`. They cannot create sessions, manage authorities, or modify any wallet state.
+An authority that carries a policy may not `AddAuthority`, `CreateSession`,
+`TransferOwnership` or `Authorize`: none of them could enforce its policy. It may still
+remove authorities and revoke sessions it outranks — that only narrows what the wallet
+allows.
 
 ---
 
-## Role Storage
+## Several Owners
 
-Each authority has a separate PDA. The role is stored as a `u8` in `AuthorityAccountHeader.role`. There is no in-place role update instruction — to change a key's role, remove and re-add the authority.
+A wallet may have several Owners. Each device holds its own passkey and passkeys cannot be
+copied, so multi-device means several authorities, and only if they are all Owners can a
+surviving device remove a lost one. The wallet account counts its Owners
+(`owner_count`): the last Owner cannot be removed, and an authority cannot remove itself.
+
+`TransferOwnership` still swaps one Owner for another atomically. It is the way to hand
+ownership to a key that does not exist yet.
+
+## Policies
+
+A policy is a list of actions — `SolLimit`, `SolRecurringLimit`, `SolMaxPerTx`, the
+`Token*` equivalents, `ProgramWhitelist`, `ProgramBlacklist` — run by the same engine as a
+session's ([Session Keys › Actions](/concepts/session-keys#actions-reference)).
+
+- **Only a Delegate carries one.** Adding a Delegate without a policy fails with
+  `DelegateRequiresPolicy` (3033); a policy on an Owner or Admin fails with
+  `PolicyRankMismatch` (3035).
+- **A policy bounds only what it names.** A whitelist without a SOL cap leaves SOL
+  uncapped; a SOL cap leaves tokens uncapped. To bound a Delegate, write a value cap for
+  every asset it can reach.
+- Policies cannot be changed. Remove the authority and add it again with a new one.
+
+## Adding authorities with the SDKs
+
+```ts
+import { Keypair } from '@solana/web3.js';
+import {
+  Actions,
+  ROLE_ADMIN,
+  ROLE_OWNER,
+  ROLE_SPENDER,
+  ed25519,
+  serializeActions,
+} from '@lazorkit/sdk-legacy';
+
+const delegateKp = Keypair.generate();
+
+// A Delegate: needs a policy.
+await client.addAuthority({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  newAuthority: { type: 'ed25519', publicKey: delegateKp.publicKey },
+  role: ROLE_SPENDER,
+  policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
+});
+
+// An Admin: no policy.
+await client.addAuthority({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  newAuthority: { type: 'ed25519', publicKey: Keypair.generate().publicKey },
+  role: ROLE_ADMIN,
+});
+
+// Another Owner (a second device): explicit on purpose.
+await client.addAuthority({
+  payer: payer.publicKey,
+  walletPda,
+  adminSigner: ed25519(ownerKp.publicKey),
+  newAuthority: { type: 'secp256r1', credentialIdHash, compressedPubkey, rpId: 'your-app.com' },
+  role: ROLE_OWNER,
+  allowOwner: true,
+});
+```
+
+The React and React Native SDKs take the same `policy`:
+
+- React: `addAuthority({ role: ROLE_SPENDER, policy })`. The default role is `ROLE_ADMIN`.
+- React Native: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, { redirectUrl })`.
+  The default role is `ROLE_SPENDER`, so pass a `policy` or `role: ROLE_ADMIN`.
+
+## v1 wallets
+
+v1 has no policies and never checked rank at `Execute`: any authority on a v1 wallet can
+spend the whole vault. The SDKs therefore refuse a `policy` for a v1 wallet, and require
+`unrestricted: true` to add any key to one. Moving the wallet to v2 is the way to get
+bounded keys; see [Migrating from v1](/v1-to-v2).
+
+---
+
+## Storage
+
+Each authority has its own PDA. The rank is a `u8` in the authority header; there is no
+in-place rank update — remove and re-add the authority.
 
 ```
-AuthorityAccountHeader
-  discriminator: u8   // 2 = Authority
+AuthorityAccountHeader (48 bytes, v2)
+  discriminator: u8   // 0x22 = Authority (v2)
   authority_type: u8  // 0 = Ed25519, 1 = Secp256r1
-  role: u8            // 0 = Owner, 1 = Admin, 2 = Spender
+  role: u8            // rank: 0 = Owner, 1 = Admin, 2 = Delegate
   bump: u8
-  ...
+  version: u8
+  _padding: [u8; 3]
+  counter: u32        // Secp256r1 odometer
+  policy_len: u16     // bytes of policy after the key material; 0 = unbounded
+  _padding: [u8; 2]
+  wallet: Pubkey      // the wallet this authority belongs to
 ```
 
----
+## Enforcement notes
 
-## Enforcement Notes
+- **Admin cannot self-escalate** — adding an Owner or Admin requires an Owner signature.
+- **Deferred execution (`Authorize`)** is restricted to passkey Owners and Admins without
+  a policy.
+- **CPI reentrancy** is blocked: passkey authentication and `Execute` refuse to run below
+  the top level, and an inner instruction cannot call back into LazorKit.
 
-- **Owner cannot be removed** directly — `RemoveAuthority` rejects removal of the wallet's owner. Use `TransferOwnership` instead.
-- **Admin cannot self-escalate** — adding an Admin or Owner authority requires an Owner signature.
-- **Deferred execution (Authorize)** is restricted to Secp256r1 Owner or Admin — Ed25519 signers and Spenders cannot call it.
-- **CPI reentrancy** is blocked via stack height check — no instruction can re-enter the LazorKit program via CPI.
+Full rules and their reasons:
+[`docs/Architecture.md` › Rank and policy](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/Architecture.md#rank-and-policy).
