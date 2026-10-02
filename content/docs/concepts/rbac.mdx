@@ -117,17 +117,19 @@ await client.addAuthority({
 });
 ```
 
-The React and React Native SDKs take the same `policy`:
+The React and React Native SDKs take the same `policy`, and need the rank named: neither
+has a default role. A missing or unknown one throws before the passkey prompt, with a
+message that says what each rank may do, and so does `ROLE_OWNER` on a v2 wallet (neither
+passes `allowOwner`).
 
-- React: `addAuthority({ role: ROLE_SPENDER, policy })`. The default role is `ROLE_ADMIN`.
+- React: `addAuthority({ role: ROLE_SPENDER, policy })`.
 - React Native: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, { redirectUrl })`.
-  The default role is `ROLE_SPENDER`, so pass a `policy` or `role: ROLE_ADMIN`.
 
-<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
-  Not published yet, and breaking: neither method has a default role. `role` is
-  required, and a missing or unknown one throws before the passkey prompt, with a
-  message that says what each rank may do ([Ranks](#ranks)). For a key your app holds,
-  pass `ROLE_SPENDER` with a policy.
+For a key your app holds, pass `ROLE_SPENDER` with a policy.
+
+<Callout type="info" title="Changed in 3.3.0 / adapter 2.3.0">
+  Breaking: `role` is required. Before, `addAuthority` defaulted to `ROLE_ADMIN` and
+  `addAuthorityEd25519` to `ROLE_SPENDER`.
 </Callout>
 
 ## v1 wallets

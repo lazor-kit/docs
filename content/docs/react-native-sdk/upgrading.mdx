@@ -3,18 +3,18 @@ title: Upgrading to 2.x
 description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
 ---
 
-`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.2.1 is
+`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.3.0 is
 the current release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md)
 and the [Changelog](/changelog) here.
 
 ```bash
-npm install @lazorkit/wallet-mobile-adapter@^2.2.1
+npm install @lazorkit/wallet-mobile-adapter@^2.3.0
 ```
 
 <Callout type="warn" title="Do not install @beta">
   The npm `beta` tag still points at `2.0.0-beta.4`, a pre-v2 build from April 2026. Use
-  `latest` (2.2.1).
+  `latest` (2.3.0).
 </Callout>
 
 The adapter depends on `expo-web-browser` `^14.2.0 || ^15.0.0` (Expo SDK 53 / 54) and
@@ -30,10 +30,10 @@ Expo SDKs have not been tested.
    mainnet id.
 2. **Sessions need limits.** `createSession` without `actions` throws unless you pass
    `unrestricted: true`.
-3. **Delegates need a policy.** `addAuthorityEd25519` defaults to `ROLE_SPENDER`
-   (Delegate), which on a v2 wallet throws without `policy: serializeActions([...])`. Pass
-   a policy, or `role: ROLE_ADMIN`. On a v1 wallet it requires `unrestricted: true` and
-   refuses a policy. (2.3.0 removes the default: see [below](#upgrading-to-230-next-release).)
+3. **Authorities need a role, and Delegates a policy.** `addAuthorityEd25519` has no
+   default role (since 2.3.0: see [below](#upgrading-to-230)). `role: ROLE_SPENDER`
+   (Delegate) on a v2 wallet throws without `policy: serializeActions([...])`. On a v1
+   wallet it requires `unrestricted: true` and refuses a policy.
 4. **v1 users need their relayer:** set `v1ConfigPaymaster` when `configPaymaster` points
    at a v2 relayer. See [Migrating from v1](/v1-to-v2).
 5. **RPC URLs that do not name a cluster** need the `cluster` prop.
@@ -44,9 +44,9 @@ Expo SDKs have not been tested.
    disconnect first to connect another passkey.
 7. **Sends resolve later and can reject in new ways** (2.1.0). See
    [Sending transactions](/react-native-sdk/sending-transactions).
-8. **Callbacks run after `isSigning` clears** (2.2.0), and the store's
-   `signAndExecuteTransaction`, `signMessage` and `transferSol` resolve with their
-   results.
+8. **Callbacks run after `isSigning` clears** (2.2.0; `connect` and `disconnect` too
+   since 2.3.0), and the store's `signAndExecuteTransaction`, `signMessage` and
+   `transferSol` resolve with their results.
 9. **Removed or changed exports:** the low-level `create*Ix` builders are gone (use
    `LazorKitClient` methods). `readAuthorityState` is still exported for compatibility;
    new code should prepare passkey challenges with `@lazorkit/sdk-legacy`'s `prepare*`
@@ -64,6 +64,7 @@ Expo SDKs have not been tested.
 | **2.1.0** (2026-09-30) | Sends resolve once confirmed (polling, no websocket); new errors `TransactionFailedError`, `TransactionExpiredError`, `TransactionOutcomeUnknownError`, `ConfirmationTimeoutError`, `PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError`. Passkey transactions are sequenced. A passkey with no wallet can connect (key recovered from two signatures, one extra prompt). Large previews use the lookup tables instead of failing before the portal. `expo-web-browser` 15 accepted. |
 | **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
 | **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
+| **2.3.0** (2026-10-02) | **Breaking:** `addAuthorityEd25519` needs a `role`. `connect` and `disconnect` follow the callback contract, on the hook and the store; `transferSol` with no wallet calls `onFail`. The `is*Error` predicates recognise the adapter's own errors through wrappers. See [below](#upgrading-to-230). |
 
 ## Keys
 
@@ -76,14 +77,14 @@ whose outcome is unknown (`lazorkit:passkey-lane:…`, the slot for ten minutes)
 
 Keep the wallet a session key belongs to with the key, use the key only while that
 wallet is connected, and delete it at disconnect and once its session is revoked or
-expired.
+expired. The package README's
+[Session keys](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/README.md#session-keys)
+section (2.3.0) shows this with `expo-secure-store`.
 
-## Upgrading to 2.3.0 (next release)
+## Upgrading to 2.3.0
 
-<Callout type="info" title="Next release (2.3.0)">
-  Not published yet: lazor-kit PRs #109 and #110 are in review. The rest of this page
-  describes 2.2.1. This checklist is what 2.3.0 is planned to change.
-</Callout>
+From 2.2.x. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md#230).
 
 1. **`addAuthorityEd25519` needs a `role` (breaking).** There is no default any more. A
    call without `role` does not compile, and at runtime a missing role, or one that is
@@ -92,10 +93,13 @@ expired.
    Migration: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, options)`
    keeps 2.2.1's behaviour. Ranks:
    [useWallet › addAuthorityEd25519](/react-native-sdk/use-wallet#addauthorityed25519).
-2. **`connect` and `disconnect` callbacks** follow the sign actions' contract: a throwing
-   `onSuccess` is logged and changes nothing. The store's `connect` calls
-   `onSuccess` / `onFail` (2.2.1 ignored them), and its `disconnect` takes them.
-3. **`transferSol` with no wallet connected** calls `onFail` and sets `error`.
+2. **`connect` and `disconnect` callbacks** follow the sign actions' contract: they run
+   once the call is over, and a throwing `onSuccess` is logged and changes nothing (in
+   2.2.1 it made the call reject). The store's `connect` calls
+   `onSuccess` / `onFail` (2.2.1 ignored them), and its `disconnect` takes them. A second
+   `connect` while one runs calls `onFail` at once.
+3. **`transferSol` with no wallet connected** calls `onFail` and sets `error`, as every
+   other action does (2.2.1 rejected without either).
 4. **Predicates.** `isSignatureReusedError`, `isRetiredDeploymentError` and
    `isDeferredExpiredError` recognise the adapter's own errors, through `cause` and a
    wallet-adapter `WalletError`, so they work where `instanceof` does not.

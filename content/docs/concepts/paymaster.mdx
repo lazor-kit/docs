@@ -169,8 +169,7 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
 - **Failures** reject with `PaymasterError` (`code`, `data`, `httpStatus`, `signature`,
   `maybeSent`). The web SDK resends a failed send with the same signed bytes, up to 3
   attempts in all, so the transaction can land at most once; it does not resend
-  LazorKit's 3006 or 3014 (nor a 4018 from the next release, 3.3.0, not published yet).
-  The React Native SDK never resends. When the relayer may have
+  LazorKit's 3006 or 3014, nor a 4018 (since 3.3.0). The React Native SDK never resends. When the relayer may have
   sent the transaction but no answer came back (on web, from any attempt), the call
   rejects with `TransactionOutcomeUnknownError`. A send request may take 90 s, other
   calls 30 s.
@@ -179,7 +178,7 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
   full v1 program lets any v1 transaction pull the fee payer into its inner calls.
 
 `feeToken` is forwarded to the relayer as `fee_token` by the React Native SDK only; the
-web SDK (3.2.1) ignores it. LazorKit's relayer sponsors for free.
+web SDK (3.3.0) ignores it. LazorKit's relayer sponsors for free.
 
 ### Running your own Kora
 

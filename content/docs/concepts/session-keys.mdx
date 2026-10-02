@@ -33,24 +33,25 @@ prompt per transaction**.
 
 **Who keeps the key:**
 
-- **React SDK** (`@lazorkit/wallet`): `createSession` generates the keypair and keeps the
-  secret key in `localStorage['lazorkit-session']`, as plain text, for
-  `signAndSendWithSession`. Pass `sessionKey` (a public key) to register a key your
-  backend holds instead; it is never stored.
+- **React SDK** (`@lazorkit/wallet`): `createSession` generates the key and keeps it for
+  `signAndSendWithSession`, as a non-extractable WebCrypto key in IndexedDB (a sealed seed
+  where the browser has no WebCrypto Ed25519, the page's memory without IndexedDB or with
+  `keyStorage="memory"`). The key is bound to the wallet that created the session: it
+  signs only while that wallet is connected, and `KeyWalletMismatchError` is thrown
+  otherwise. `disconnect()` deletes it (also one whose session lands after it) unless you
+  pass `disconnect({ keepSessionKeys: true })`, a key whose session has expired is deleted
+  when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps. Pass
+  `sessionKey` (a public key) to register a key your backend holds instead; it is never
+  stored. See [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 - **React Native SDK and the contract SDKs:** you generate the keypair and keep the secret
   key yourself, in secure storage (`expo-secure-store`, a KMS, a backend vault). Keep the
   wallet it belongs to with it, use it only while that wallet is connected, and delete it
   at disconnect and once its session is revoked or expired.
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. `@lazorkit/wallet` 3.3.0 keeps the session key as a
-  non-extractable WebCrypto key in IndexedDB (a sealed seed where the browser has no
-  WebCrypto Ed25519, the page's memory without IndexedDB), not as plaintext in
-  localStorage. It binds the key to the wallet that created the session: the key signs
-  only while that wallet is connected, and `KeyWalletMismatchError` is thrown otherwise.
-  `disconnect()` deletes the key (also one whose session lands after it) unless you pass
-  `disconnect({ keepSessionKeys: true })`, a key whose session has expired is deleted
-  when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps.
+<Callout type="info" title="Changed in 3.3.0">
+  `@lazorkit/wallet` 3.2.1 and earlier kept the session key in `localStorage` as plain
+  text, signed with it whichever wallet was connected, and did not delete it at
+  `disconnect`.
 </Callout>
 
 Sessions are the **cheapest** execution path: no Secp256r1 precompile runs. Measured in
@@ -306,11 +307,12 @@ No passkey prompt. The Ed25519 keypair signs at transaction level.
 const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
-The SDK signs with the session key it stored during `createSession`. There is one slot:
-a new `createSession` replaces the stored key, `revokeSession()` removes it, and in 3.2.1
-`disconnect` does **not** — the key stays usable within its limits until it expires or is
-revoked, connected wallet or not. On a shared device, revoke sessions when the user signs
-out. The next release (3.3.0) changes this: see [Mental model](#mental-model).
+The SDK signs with the session key it kept during `createSession`, only while the wallet
+that created the session is connected. There is one slot: a new `createSession` replaces
+the kept key, and `revokeSession()` and `disconnect()` delete it (unless
+`disconnect({ keepSessionKeys: true })`). The session itself stays on chain, within its
+limits, until it expires or is revoked: on a shared device, revoke sessions when the user
+signs out.
 
 ### Low-level
 

@@ -75,19 +75,17 @@ interface TxCallbacks {
 }
 ```
 
-Each call's promise settles, and its `onSuccess` or `onFail` runs, once `isSigning` is
-`false` again (2.2.0+). So `await signAndSendTransaction(a); await signAndSendTransaction(b)`
-runs both, and so does a second call made from `onSuccess`. A call made while another is
-still running rejects with `SigningError`. A sign action's callback that throws is logged
-and changes nothing; on `connect` and `disconnect`, a throwing `onSuccess` makes the call
-reject and runs `onFail`.
+Each call's promise settles, and its `onSuccess` or `onFail` runs, once `isSigning` (or
+`isConnecting` for `connect`) is `false` again. So
+`await signAndSendTransaction(a); await signAndSendTransaction(b)` runs both, and so does a
+second call made from `onSuccess`. A call made while another is still running rejects
+with `SigningError` and calls its `onFail` at once. A callback that throws is logged and
+changes nothing, on every action, `connect` and `disconnect` included.
 
-<Callout type="info" title="Next release (2.3.0)">
-  Not published yet. 2.3.0 is planned to treat `connect` and `disconnect` like the sign
-  actions: a throwing `onSuccess` is logged and changes nothing, so a connect that
-  succeeded resolves and `onFail` is not called. `transferSol` with no wallet connected
-  is planned to call `onFail` and set `error`; in 2.2.1 it rejects without either. This
-  page will say so once it ships.
+<Callout type="info" title="Changed in 2.3.0">
+  In 2.2.1 a throwing `onSuccess` on `connect` or `disconnect` made the call reject, the
+  store's `connect` ignored its callbacks, and `transferSol` with no wallet connected
+  rejected without calling `onFail` or setting `error`.
 </Callout>
 
 ---
@@ -153,6 +151,9 @@ await disconnect({
 ```
 
 Clears the persisted state. The on-chain wallet is untouched — reconnect any time.
+`onSuccess` / `onFail` run once the disconnect is over, on the hook and on the store
+(2.3.0+); a throwing `onSuccess` changes nothing. The adapter keeps no session key, so
+delete the one your app keeps here (see [`createSession`](#createsession)).
 
 From 2.0.0 on, a `connect` still running when you call it is abandoned: it rejects with
 `PortalCancelledError` and connects nothing.
@@ -360,8 +361,12 @@ const { signature, sessionPda } = await createSession(
 );
 ```
 
-Persist `sessionKp.secretKey` securely (e.g. `expo-secure-store`) along with `sessionPda`.
-The adapter never stores it.
+Persist `sessionKp.secretKey` securely (e.g. `expo-secure-store`) along with `sessionPda`
+and the wallet it belongs to; use it only while that wallet is connected, and delete it at
+disconnect and once the session is revoked or expired. The adapter never stores it. The
+package README's
+[Session keys](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/README.md#session-keys)
+section has a worked example.
 
 `actions` is required: without it `createSession` throws, unless you pass
 `unrestricted: true` for a session that can spend the whole vault through any program until
@@ -418,6 +423,7 @@ desktop or a hardware companion. See [Ranks & policies](/concepts/rbac).
 import { Actions, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '@lazorkit/wallet-mobile-adapter';
 
 // A Delegate: spends within its policy, manages nothing. The policy is required on v2.
+// `role` is required: there is no default.
 const { signature, newAuthorityPda } = await addAuthorityEd25519(
   {
     newEd25519Pubkey: deviceKp.publicKey,
@@ -434,24 +440,24 @@ await addAuthorityEd25519(
 );
 ```
 
-The role defaults to `ROLE_SPENDER` (a Delegate), which on a v2 wallet **throws without a
-`policy`** (on chain: 3033). A policy on any other rank is refused (3035). On a **v1**
-wallet, pass `unrestricted: true` and no policy: v1 never checked rank at `Execute`, so
-any key you add can spend the whole vault.
+`role` is required: there is no default. A call without it, or with a value that is not a
+rank, throws before anything is read or the portal opens, with a message that says what
+each rank may do:
 
-<Callout type="warn" title="Next release (2.3.0): role is required">
-  Not published yet, and breaking. `addAuthorityEd25519` has no default role: `role` is
-  required in the types, and a call without it, or with a value that is not a rank,
-  throws before anything is read or the portal opens. Name the rank:
+| Rank | Constant | May add and remove | Spends |
+| ---- | -------- | ------------------ | ------ |
+| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or the portal opens. On a v1 wallet it adds one. |
+| Admin | `ROLE_ADMIN` (1) | Delegates only | without limit |
+| Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
 
-  | Rank | Constant | May add and remove | Spends |
-  | ---- | -------- | ------------------ | ------ |
-  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or the portal opens. On a v1 wallet it adds one. |
-  | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit |
-  | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
+For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a v2 wallet a
+Delegate **throws without a `policy`** (on chain: 3033), and a policy on any other rank is
+refused (3035). On a **v1** wallet, pass `unrestricted: true` and no policy: v1 never
+checked rank at `Execute`, so any key you add can spend the whole vault.
 
-  For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`.
-  `role: ROLE_SPENDER` with a `policy` keeps 2.2.1's behaviour.
+<Callout type="warn" title="Changed in 2.3.0: role is required">
+  Breaking. In 2.2.1 `role` was optional and defaulted to `ROLE_SPENDER`.
+  `role: ROLE_SPENDER` with a `policy` keeps that behaviour.
 </Callout>
 
 ### `removeAuthority`

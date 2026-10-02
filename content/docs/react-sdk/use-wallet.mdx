@@ -17,15 +17,15 @@ see [Sending transactions](/react-sdk/sending-transactions).
 | Method                     | Passkey prompt   | Use for                                                      |
 | -------------------------- | ---------------- | ------------------------------------------------------------ |
 | `connect`                  | first time       | Authenticate; returns the stored wallet without a prompt     |
-| `disconnect`               | no               | Clear the stored wallet                                      |
+| `disconnect`               | no               | Clear the stored wallet and the kept session key             |
 | `signAndSendTransaction`   | yes              | Single-tx Execute via paymaster                              |
 | `signMessage`              | yes              | Off-chain signature                                          |
 | `verifyMessage`            | no               | Browser-side signature verification via `crypto.subtle`      |
 | `createSession`            | yes              | Mint a scoped Ed25519 session (`SpendingLimits`)             |
-| `signAndSendWithSession`   | **no**           | Send using the stored session keypair                        |
+| `signAndSendWithSession`   | **no**           | Send using the kept session key                              |
 | `revokeSession`            | yes              | Close a session, refund rent                                 |
-| `addAuthority`             | yes              | Add an Ed25519 Admin or Delegate (keypair generated + stored)|
-| `signAndSendWithAuthority` | **no**           | Send signed by the stored Ed25519 authority                  |
+| `addAuthority`             | yes              | Add an Ed25519 key with the rank you name (key generated + kept) |
+| `signAndSendWithAuthority` | **no**           | Send signed by the kept Ed25519 authority                    |
 | `removeAuthority`          | yes              | Remove an authority by PDA                                   |
 | `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads                    |
 | `authorizeDeferred`        | yes              | **TX1 only** — returns a serialized payload for a later TX2  |
@@ -34,7 +34,12 @@ see [Sending transactions](/react-sdk/sending-transactions).
 All send-tx methods take `{ instructions, transactionOptions? }`. `transactionOptions`
 accepts `addressLookupTableAccounts`, `txVersion: 'legacy' | 'v0'` (default `'v0'`) and
 `clusterSimulation`; `feeToken` and `computeUnitLimit` are in the types but **ignored** by
-the web SDK (3.2.1).
+the web SDK (3.3.0).
+
+Every method except `verifyMessage` also takes `onSuccess` / `onFail` (in the payload;
+`connect`, `disconnect`, `signMessage` and `removeAuthority` in their options). One of them
+runs per call, once the action is over, right before the promise settles; see
+[Sending transactions › Callbacks](/react-sdk/sending-transactions#callbacks).
 
 ---
 
@@ -100,21 +105,30 @@ await connect({ confirmWallet: 'CHOSEN_VAULT_ADDRESS' });
 
 ```ts
 await disconnect();
+await disconnect({ keepSessionKeys: true }); // keep the session key for the next sign-in
 ```
 
 Clears the stored wallet. The on-chain wallet is untouched. A `connect` still running
-rejects with `PortalCancelledError` and saves nothing. `disconnect` does **not** remove the
-session and authority keys `createSession` / `addAuthority` stored; see
-[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+rejects with `PortalCancelledError` and saves nothing. An action still running is not
+abandoned: it keeps `isSigning` until it ends, but a session or authority send no longer
+signs.
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. `disconnect(options?)` deletes the session key the SDK keeps (from
-  IndexedDB, the page's memory and any plaintext 3.2 left), whichever wallet it belongs
-  to, and a `createSession` still waiting for its transaction keeps no key once it
-  lands. `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept,
-  and signs only once the same wallet is connected again; `removeAuthority` and
-  `forgetStoredKeys()` delete it. `disconnect` acts in its own tab: another tab of the
-  app stays connected. It also takes `onSuccess` / `onFail`.
+It also deletes the session key the SDK keeps (from IndexedDB, the page's memory and any
+plaintext an earlier release left), whichever wallet it belongs to, and a `createSession`
+still waiting for its transaction keeps no key once it lands. The authority key is kept,
+and signs only once the same wallet is connected again; `removeAuthority` and
+`forgetStoredKeys()` delete it. `disconnect` acts in its own tab: another tab of the app
+stays connected. See [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
+
+| Option            | Type                     | Notes |
+| ----------------- | ------------------------ | ----- |
+| `keepSessionKeys` | `boolean`                | Keep the session key (default `false`: it is deleted). |
+| `onSuccess`       | `() => void`             | Runs once the disconnect is over. |
+| `onFail`          | `(error: Error) => void` | Runs with the error the promise rejects with. |
+
+<Callout type="info" title="Changed in 3.3.0">
+  In 3.2.1 `disconnect` took no options, cleared `isSigning` while an action ran, and left
+  the session and authority keys in `localStorage`.
 </Callout>
 
 ---
@@ -280,10 +294,10 @@ const { sessionPda, sessionPublicKey } = await createSession({
 | `unrestricted`     | `boolean`               | Mint a session with **no limits**: it can spend the whole vault through any program until it expires. Without limits and without this, `createSession` throws. |
 | `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). The SDK generates nothing and stores nothing. If a session for this key already exists, it is returned without a prompt. |
 
-Without `sessionKey`, the SDK generates the keypair and keeps its secret key in
-`localStorage['lazorkit-session']`, **as plain text**, for `signAndSendWithSession`. There
-is one slot: a new session replaces it. See
-[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+Without `sessionKey`, the SDK generates the key and keeps it for `signAndSendWithSession`,
+as a non-extractable WebCrypto key in IndexedDB (see `keyStorage`), bound to the connected
+wallet. There is one slot: a new session replaces it. See
+[What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 
 <Callout type="warn" title="Limits are immutable">
   Session actions can't be changed once created. To adjust, revoke and recreate. Token
@@ -302,16 +316,28 @@ const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are hit —
-see [Errors](/errors#spending-limits-and-policies-30203036). It does not require a
-connected wallet: the stored key is enough.
+see [Errors](/errors#spending-limits-and-policies-30203036).
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. The key is kept as a non-extractable WebCrypto key in IndexedDB,
-  not in localStorage, and signs only for the wallet that created the session: with no
-  wallet connected, or another one, `signAndSendWithSession` rejects with
-  `KeyWalletMismatchError` before anything is signed or sent. A key whose session has
-  expired is deleted when it is next read. See
-  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+The key signs only for the wallet that created the session: with no wallet connected, or
+another one, `signAndSendWithSession` rejects with `KeyWalletMismatchError` before
+anything is signed or sent. A key whose session has expired is deleted when it is next
+read, and the call rejects. See
+[Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+
+```ts
+import { isKeyWalletMismatchError } from '@lazorkit/wallet';
+
+try {
+  await signAndSendWithSession({ instructions: [ix] });
+} catch (e) {
+  if (!isKeyWalletMismatchError(e)) throw e;
+  // Not the connected wallet's session: create one for it.
+  await createSession({ spendingLimits: { solPerTxMax: 100_000_000n } });
+}
+```
+
+<Callout type="info" title="Changed in 3.3.0">
+  In 3.2.1 the stored key signed whichever wallet was connected, or none.
 </Callout>
 
 ### `revokeSession`
@@ -321,8 +347,9 @@ await revokeSession();                                   // the session createSe
 await revokeSession({ sessionPda: 'SESSION_PDA_BASE58' }); // a specific one, e.g. an external key's
 ```
 
-Closes the session PDA and refunds the rent. Revoking the stored session also removes its
-key from `localStorage`. After expiry, anyone may close a session with
+Closes the session PDA and refunds the rent. Without `sessionPda`, it revokes the session
+whose key the SDK keeps, which must be the connected wallet's (`KeyWalletMismatchError`
+otherwise, before the prompt), and deletes that key once the revoke lands. After expiry, anyone may close a session with
 `CloseExpiredSession` and keep the rent: revoke yours if you want it back.
 
 ---
@@ -331,47 +358,48 @@ key from `localStorage`. After expiry, anyone may close a session with
 
 ### `addAuthority`
 
-Adds a fresh Ed25519 authority on the wallet. The SDK generates the keypair and keeps its
-secret key in `localStorage['lazorkit-authority']` (plain text) for
-`signAndSendWithAuthority`.
+Adds a fresh Ed25519 authority on the wallet. The SDK generates the key and keeps it for
+`signAndSendWithAuthority`, like a session key (see
+[What the SDK stores](/react-sdk/provider#keys-the-sdk-generates)): it signs only while the
+wallet it was added to is connected.
 
 ```ts
 import { Actions, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '@lazorkit/wallet';
 
-// An Admin (the default role):
-await addAuthority({ role: ROLE_ADMIN });
-
-// A Delegate: needs a spending policy on a v2 wallet.
+// A Delegate: spends only within its policy, which a v2 wallet requires.
 const { authorityPda, authorityPublicKey } = await addAuthority({
   role: ROLE_SPENDER,
   policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
 });
+
+// An Admin: manages Delegates and spends without limit.
+await addAuthority({ role: ROLE_ADMIN });
 ```
+
+`role` is required: there is no default. A call without it, or with a value that is not a
+rank, throws before anything is read or the passkey is prompted, with a message that says
+what each rank may do:
+
+| Rank | Constant | May add and remove | Spends |
+| ---- | -------- | ------------------ | ------ |
+| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
+| Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
+| Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
+
+For a key your app holds, use `ROLE_SPENDER` with a `policy`.
 
 | Field          | Type         | Notes |
 | -------------- | ------------ | ----- |
-| `role`         | `number`     | `ROLE_ADMIN` (default) or `ROLE_SPENDER` (Delegate). |
+| `role`         | `number`     | Required. `ROLE_SPENDER` (Delegate), `ROLE_ADMIN`, or `ROLE_OWNER` on a v1 wallet only. |
 | `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. |
 | `unrestricted` | `boolean`    | Required to add a key to a **v1** wallet, where any added key can spend the whole vault. Ignored on v2. |
 
 **Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
 [Ranks & policies](/concepts/rbac).
 
-<Callout type="warn" title="Next release (3.3.0): role is required">
-  Not published yet, and breaking. `addAuthority` has no default role: `role` is
-  required in the types, and a call without it, or with a value that is not a rank,
-  throws before anything is read or the passkey is prompted. In 3.2.1 the default made
-  the new key an Admin, with no policy and no expiry. Name the rank:
-
-  | Rank | Constant | May add and remove | Spends |
-  | ---- | -------- | ------------------ | ------ |
-  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
-  | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
-  | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
-
-  For a key your app holds, use `ROLE_SPENDER` with a `policy`. `role: ROLE_ADMIN` keeps
-  3.2.1's behaviour. The key the SDK keeps for `signAndSendWithAuthority` is bound to the
-  wallet like a session key: it signs only while that wallet is connected.
+<Callout type="warn" title="Changed in 3.3.0: role is required">
+  Breaking. In 3.2.1 `role` was optional and defaulted to `ROLE_ADMIN`, which made the new
+  key an Admin with no policy and no expiry. `role: ROLE_ADMIN` keeps that behaviour.
 </Callout>
 
 ### `signAndSendWithAuthority`
@@ -382,11 +410,17 @@ Send a transaction signed by the stored Ed25519 authority. No passkey prompt.
 const sig = await signAndSendWithAuthority({ instructions: [ix] });
 ```
 
+Only while the wallet the authority was added to is connected: otherwise it rejects with
+`KeyWalletMismatchError`, and nothing is signed or sent.
+
 ### `removeAuthority`
 
 ```ts
 await removeAuthority('TARGET_AUTHORITY_PDA');   // base58 string
+await removeAuthority('TARGET_AUTHORITY_PDA', { onSuccess, onFail });
 ```
+
+Removing the authority whose key the SDK keeps also deletes that key.
 
 <Callout type="warn">
   You can't remove the last Owner, nor the passkey you sign with. An Admin can remove only

@@ -3,7 +3,7 @@ title: Types
 description: TypeScript interfaces, constants, error classes, and the SpendingLimits wrapper of @lazorkit/wallet.
 ---
 
-The public types of `@lazorkit/wallet` 3.2.1, grouped by what you're doing. Each block says
+The public types of `@lazorkit/wallet` 3.3.0, grouped by what you're doing. Each block says
 whether the type is **exported** (`import type { … } from '@lazorkit/wallet'`) or a
 **shape only**: the SDK uses it internally without exporting it, so derive it from an
 exported type when you need it in your code:
@@ -59,6 +59,7 @@ interface LazorkitProviderProps {
   onConfirmWallet?: OnConfirmWallet;      // default 'builtin'
   trustedAuthorities?: string[];          // your own Ed25519 keys, base58
   watchMints?: string[];                  // SPL Token mints your app receives, base58
+  keyStorage?: 'auto' | 'memory';         // where generated keys are kept; default 'auto' (3.3.0+)
 }
 
 interface PaymasterConfig {
@@ -85,6 +86,8 @@ interface ConnectHookOptions {
   feeMode?: 'paymaster' | 'user';      // accepted and ignored by the web SDK
   confirmWallet?: string;              // vault (or wallet PDA) the user chose
   onConfirmWallet?: OnConfirmWallet;   // overrides the provider's for this call
+  onSuccess?: (wallet: WalletInfo) => void; // once isConnecting is false
+  onFail?: (error: Error) => void;
 }
 ```
 
@@ -211,20 +214,24 @@ interface DeferredFailureContext {  // on every TX2 error (3.2.1+)
 // v1 wallets (3.0.0+)
 class V1WalletRetiredError extends Error { readonly code: 4018 }
 class V1WalletMigratedError extends Error {}
+
+// Kept session and authority keys (3.3.0+)
+class KeyWalletMismatchError extends Error {
+  readonly code: 'KEY_WALLET_MISMATCH';
+  readonly slot: 'session' | 'authority';
+  readonly reason: KeyWalletMismatchReason;
+  readonly keyWallet: string | undefined;       // the wallet PDA the key signs for; undefined when unbound
+  readonly connectedWallet: string | undefined; // the connected wallet's PDA; undefined when none
+}
+type KeyWalletMismatchReason = 'no-wallet' | 'other-wallet' | 'unbound'; // exported type
 ```
 
-Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`.
-In 3.2.1 the last two do not recognise the SDK's own `SignatureReusedError` /
-`V1WalletRetiredError`; use `instanceof` ([Errors › Telling errors apart](/errors#telling-errors-apart)).
-
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. The predicates recognise the SDK's own errors, through `cause` and
-  a wallet-adapter `WalletError`. New: `KeyWalletMismatchError` (`code:
-  'KEY_WALLET_MISMATCH'`, `slot`, `reason`, `keyWallet`, `connectedWallet`), its
-  predicate `isKeyWalletMismatchError` and the type `KeyWalletMismatchReason`
-  (`'no-wallet' | 'other-wallet' | 'unbound'`). See
-  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
-</Callout>
+Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`
+and `isKeyWalletMismatchError`. Each is true for its class from any copy of the package,
+also wrapped in `cause` or in a wallet-adapter `WalletError`
+([Errors › Telling errors apart](/errors#telling-errors-apart)). Since 3.3.0: in 3.2.1
+`isSignatureReusedError` and `isRetiredDeploymentError` read only the error's text and
+missed the SDK's own errors.
 
 ---
 
@@ -262,13 +269,31 @@ interface DeferredTxPayload extends SendTxPayload {
 
 `executeDeferred` takes `{ deferredPayload: string; transactionOptions? }`.
 
-### Store-level callbacks
+### Callbacks
 
-Shape only: not exported.
-
-The store's actions (`useWalletStore`) also accept `onSuccess` / `onFail` on each payload.
-In 3.2.1 they run before `isSigning` clears; see
+Exported from `@lazorkit/wallet` (3.3.0+). Every action of `useWallet()` and the store
+takes them; how they run:
 [Sending transactions › Callbacks](/react-sdk/sending-transactions#callbacks).
+
+```ts
+interface ActionCallbacks<T> {
+  readonly onSuccess?: (result: T) => void;
+  readonly onFail?: (error: Error) => void;
+}
+
+interface DisconnectOptions {
+  readonly keepSessionKeys?: boolean;   // keep the session key; default false (deleted)
+  readonly onSuccess?: () => void;
+  readonly onFail?: (error: Error) => void;
+}
+
+interface RemoveAuthorityOptions {
+  readonly onSuccess?: () => void;
+  readonly onFail?: (error: Error) => void;
+}
+
+type SignMessageOptions = ActionCallbacks<{ signature: string; signedPayload: string }>;
+```
 
 ---
 
@@ -319,7 +344,7 @@ interface CreateSessionPayload {
 }
 
 interface RevokeSessionPayload {
-  sessionPda?: PublicKey | string;  // default: the session createSession stored
+  sessionPda?: PublicKey | string;  // default: the session whose key the SDK keeps (the connected wallet's)
 }
 ```
 
@@ -373,19 +398,18 @@ Shape only: not exported.
 
 ```ts
 interface AddAuthorityPayload {
-  role?: number;           // ROLE_ADMIN (1, default) | ROLE_SPENDER (2, a Delegate)
+  role: number;            // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
   policy?: Uint8Array;     // required for ROLE_SPENDER on v2: serializeActions([...])
   unrestricted?: boolean;  // required to add a key to a v1 wallet
 }
 ```
 
-`removeAuthority` takes a single positional `targetAuthorityPda: string`.
+`removeAuthority` takes a positional `targetAuthorityPda: string` and optional
+`RemoveAuthorityOptions`.
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet, and breaking: `role` is required (`role: number`), with no default.
-  See [useWallet › addAuthority](/react-sdk/use-wallet#addauthority). Also new:
-  `removeAuthority(targetAuthorityPda, options?)` and `disconnect(options?)` take
-  `onSuccess` / `onFail`, and `disconnect`'s options take `keepSessionKeys`.
+<Callout type="info" title="Changed in 3.3.0">
+  Breaking: `role` is required. In 3.2.1 it was optional and defaulted to `ROLE_ADMIN`.
+  See [useWallet › addAuthority](/react-sdk/use-wallet#addauthority).
 </Callout>
 
 ---
@@ -461,7 +485,8 @@ for the object forms).
 | `PROGRAM_ID` / `PROGRAM_ADDRESS` | the v2 **mainnet** id |
 | `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET`, `PROGRAM_ID_MAINNET_V1`, `PROGRAM_ID_DEVNET_V1` | see [Networks & versions](/networks) |
 
-Other exported helpers: `registerCluster(rpcUrl, cluster)` (what the `cluster` prop does),
+Other exported helpers: `forgetStoredKeys()` (deletes the session and authority keys the SDK
+keeps; 3.3.0+), `registerCluster(rpcUrl, cluster)` (what the `cluster` prop does),
 `getCredentialHash(credentialIdBase64)`, `createOwnershipChallenge`,
 `verifyOwnershipProof`, `pickOwnWallet`, `selectWalletByAddress`, `readAuthorityCounter`,
 `readAuthorityPubkey`, `extractErrorCode`, `errorFromCode`, `ERROR_NAMES`, and the account
@@ -486,11 +511,11 @@ interface WalletHookInterface {
   isSigning: boolean;
   error: Error | null;
 
-  // Core
+  // Core. Every action takes onSuccess / onFail (ActionCallbacks), in its payload or options.
   connect: (options?: ConnectHookOptions) => Promise<WalletInfo>;
-  disconnect: () => Promise<void>;
-  signAndSendTransaction: (payload: SendTxPayload) => Promise<string>;
-  signMessage: (message: string) => Promise<{ signature: string; signedPayload: string }>;
+  disconnect: (options?: DisconnectOptions) => Promise<void>;
+  signAndSendTransaction: (payload: SendTxPayload & ActionCallbacks<string>) => Promise<string>;
+  signMessage: (message: string, options?: SignMessageOptions) => Promise<{ signature: string; signedPayload: string }>;
   verifyMessage: (args: {
     signedPayload: Uint8Array;
     signature: Uint8Array;
@@ -503,27 +528,35 @@ interface WalletHookInterface {
     spendingLimits?: SpendingLimits;
     sessionKey?: PublicKey | string;
     unrestricted?: boolean;
+    onSuccess?: (sessionPda: string, sessionPublicKey: string) => void;
+    onFail?: (error: Error) => void;
   }) => Promise<{ sessionPda: string; sessionPublicKey: string }>;
-  revokeSession: (payload?: { sessionPda?: PublicKey | string }) => Promise<void>;
-  signAndSendWithSession: (payload: SendTxPayload) => Promise<string>;
+  revokeSession: (payload?: {
+    sessionPda?: PublicKey | string;
+    onSuccess?: () => void;
+    onFail?: (error: Error) => void;
+  }) => Promise<void>;
+  signAndSendWithSession: (payload: SendTxPayload & ActionCallbacks<string>) => Promise<string>;
 
   // Authority
-  addAuthority: (payload?: { role?: number; policy?: Uint8Array; unrestricted?: boolean }) => Promise<{
-    authorityPda: string;
-    authorityPublicKey: string;
-  }>;
-  removeAuthority: (targetAuthorityPda: string) => Promise<void>;
-  signAndSendWithAuthority: (payload: SendTxPayload) => Promise<string>;
+  addAuthority: (payload: {
+    role: number;
+    policy?: Uint8Array;
+    unrestricted?: boolean;
+    onSuccess?: (authorityPda: string, authorityPublicKey: string) => void;
+    onFail?: (error: Error) => void;
+  }) => Promise<{ authorityPda: string; authorityPublicKey: string }>;
+  removeAuthority: (targetAuthorityPda: string, options?: RemoveAuthorityOptions) => Promise<void>;
+  signAndSendWithAuthority: (payload: SendTxPayload & ActionCallbacks<string>) => Promise<string>;
 
   // Deferred execution
-  authorizeAndExecute: (payload: DeferredTxPayload) => Promise<string>;
-  authorizeDeferred: (payload: DeferredTxPayload) => Promise<{
-    signature: string;
-    deferredPayload: string;
-  }>;
+  authorizeAndExecute: (payload: DeferredTxPayload & ActionCallbacks<string>) => Promise<string>;
+  authorizeDeferred: (
+    payload: DeferredTxPayload & ActionCallbacks<{ signature: string; deferredPayload: string }>,
+  ) => Promise<{ signature: string; deferredPayload: string }>;
   executeDeferred: (payload: {
     deferredPayload: string;
     transactionOptions?: TransactionOptions;
-  }) => Promise<string>;
+  } & ActionCallbacks<string>) => Promise<string>;
 }
 ```
