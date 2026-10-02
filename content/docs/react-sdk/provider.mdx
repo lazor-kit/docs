@@ -11,8 +11,8 @@ import { LazorkitProvider } from '@lazorkit/wallet';
 ```
 
 <Callout type="warn" title="Client only">
-  This provider uses the portal (a dialog iframe or popup), `navigator.credentials` and
-  `localStorage`. Mount it inside a client-side boundary — in Next.js App Router, wrap it
+  This provider uses the portal (a dialog iframe or popup), `navigator.credentials`,
+  `localStorage` and IndexedDB. Mount it inside a client-side boundary — in Next.js App Router, wrap it
   in a `"use client"` file.
 </Callout>
 
@@ -58,6 +58,7 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
 | `onConfirmWallet`   | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'`                            | 3.0.0 |
 | `trustedAuthorities`| `string[]` — your own Ed25519 keys, base58     | none                                   | 3.0.0 |
 | `watchMints`        | `string[]` — SPL Token mints you receive       | none                                   | 3.0.0 |
+| `keyStorage`        | `'auto' \| 'memory'`                           | `'auto'`                               | 3.3.0 |
 | `children`          | `ReactNode`                                    | —                                      | |
 
 - **`paymasterConfig`** — the Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as
@@ -73,53 +74,96 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
   returning user's wallet. `connect` uses a wallet on its own only when it is the one
   wallet the passkey has signed for and nothing else can spend from it; otherwise it asks
   the user. See [Wallet Confirmation](/react-sdk/wallet-confirmation).
+- **`keyStorage`** — where the session and authority keys the SDK generates are kept:
+  `'auto'` uses IndexedDB when it can, `'memory'` keeps nothing at rest (the key is gone
+  on reload). See [below](#keys-the-sdk-generates).
 
 The props are typed as `LazorkitProviderProps` internally; the type is not exported, use
 `React.ComponentProps<typeof LazorkitProvider>`.
 
 ## What the SDK stores in the browser
 
-All in `localStorage` of your origin:
+In `localStorage` of your origin:
 
 | Key | What |
 | --- | ---- |
 | `lazorkit-wallet-store`, `lazorkit-wallet`, `CREDENTIAL_ID`, `SMART_WALLET_ADDRESS`, `PUBLIC_KEY` | The connected wallet (credential id, passkey public key, wallet PDA, vault, protocol version) and the provider config. `disconnect` clears the wallet. |
 | `lazorkit-config` | The provider config. |
 | `lazorkit:passkey-lane:…` | Per passkey: the slot of its last transaction (kept ten minutes) and any send whose outcome is not known yet. See [Sending transactions](/react-sdk/sending-transactions#one-passkey-one-transaction-at-a-time). |
-| `lazorkit-session` | The secret key of the session `createSession` generated, **in plain text**. |
-| `lazorkit-authority` | The secret key of the Ed25519 authority `addAuthority` generated, **in plain text**. |
 
-`disconnect` does not remove `lazorkit-session` or `lazorkit-authority`, and
-`signAndSendWithSession` does not need a connected wallet: on a shared browser, a stored
-session key can still spend within its limits after the user disconnects. Keep sessions
-bounded and short, call `revokeSession()` when the user signs out, and pass your own
-`sessionKey` when a backend should hold the key.
+None of it is secret. No key is written to `localStorage`.
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. 3.3.0 writes no key to localStorage. With the new prop
-  `keyStorage="auto"` (the default), it keeps each key in the IndexedDB database
-  `lazorkit-keys`:
+### Keys the SDK generates
 
-  - as a non-extractable WebCrypto Ed25519 key, which a script on the page can make sign
-    while the page is open but cannot copy;
-  - where the browser has no WebCrypto Ed25519 (iOS 16, Chrome 136 and older), as its
-    seed sealed with AES-GCM under a non-extractable key in the same database. Any
-    script on the page can decrypt that seed, so this only keeps the key out of
-    localStorage.
+`createSession` (without `sessionKey`) and `addAuthority` generate an Ed25519 key, and the
+SDK keeps it so that `signAndSendWithSession` / `signAndSendWithAuthority` sign without a
+prompt. It keeps one of each kind: a new session or authority replaces the last one. A
+`sessionKey` you pass is never stored. With `keyStorage="auto"` (the default) the key is
+kept in the best of these the browser has:
 
-  Without IndexedDB, or outside a secure context, the key lives in the page's memory and
-  is gone on reload. `keyStorage="memory"` always does that and keeps nothing at rest.
-  In the first two cases the key is still at rest in the browser profile: malware that
-  reads the profile can copy it.
+1. **A non-extractable WebCrypto Ed25519 key in IndexedDB** (database `lazorkit-keys`),
+   which signs with `crypto.subtle`. A script on the page can make it sign while the page
+   is open, but cannot copy it out.
+2. **Its seed, sealed with AES-GCM** under a non-extractable key in the same database,
+   where the browser has no WebCrypto Ed25519 (iOS 16, Chrome 136 and older) or IndexedDB
+   cannot hold an Ed25519 key. Any script on the page can have that seed decrypted, so
+   this only keeps the key out of `localStorage`. Once the browser has Ed25519, the seed
+   is moved to (1).
+3. **The page's memory**, without IndexedDB, outside a secure context, or where IndexedDB
+   cannot hold a WebCrypto key at all. The key is gone on reload; its session stays on
+   chain until it expires.
 
-  Plaintext keys an earlier release left are moved to IndexedDB when the provider
-  mounts, or on first use. Each key is kept with the wallet it was registered for and
-  signs only while that wallet is connected. `disconnect()` deletes the session key,
-  also one whose session lands after it (`disconnect({ keepSessionKeys: true })` keeps
-  it); the authority key stays until `removeAuthority` or `forgetStoredKeys()`. The keys
-  in IndexedDB are shared by every tab, while `disconnect` acts in its own tab only. An app that removed `lazorkit-session` /
-  `lazorkit-authority` at sign-out must call `forgetStoredKeys()` instead. See
-  [Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release).
+`keyStorage="memory"` uses (3) everywhere and keeps nothing at rest. In (1) and (2) the key
+is still at rest in the browser profile: malware that can read the profile can copy it.
+
+**Each key signs only for its own wallet.** It is stored with the wallet it was registered
+for, and `signAndSendWithSession`, `signAndSendWithAuthority` and `revokeSession()`
+(without `sessionPda`) use it only while that wallet is connected. Otherwise they reject
+with `KeyWalletMismatchError`; see
+[Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+
+**When a kept key is deleted:**
+
+- `disconnect()` deletes the session key, whichever wallet it belongs to, and a
+  `createSession` still waiting for its transaction keeps no key once it lands.
+  `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept, and signs
+  once its wallet is connected again.
+- `revokeSession()` deletes the session key once the revoke lands. `removeAuthority`
+  deletes the authority key when it removes that authority.
+- A session key whose session has expired is deleted when it is next read.
+- `forgetStoredKeys()`, a package export, deletes both wherever they are kept (IndexedDB,
+  the page's memory, plaintext an earlier release left). It rejects if IndexedDB holds
+  keys and could not be cleared.
+
+`disconnect` acts in its own tab: another tab of the app stays connected, and its
+authority key keeps signing there. The keys in IndexedDB are shared by every tab, so call
+`forgetStoredKeys()` at sign-out to leave none behind:
+
+```tsx
+import { forgetStoredKeys, useWallet } from '@lazorkit/wallet';
+
+function SignOutButton() {
+  const { disconnect } = useWallet();
+  return (
+    <button
+      onClick={async () => {
+        await disconnect();
+        await forgetStoredKeys();
+      }}
+    >
+      Sign out
+    </button>
+  );
+}
+```
+
+<Callout type="info" title="Changed in 3.3.0">
+  3.2.1 and earlier wrote these secret keys to `localStorage` as plain text
+  (`lazorkit-session`, `lazorkit-authority`), and `disconnect` did not remove them. 3.3.0
+  moves such a key to IndexedDB when the provider mounts, or on first use, and deletes the
+  plaintext once the move has been written; the move is one-way. Removing those entries,
+  or `localStorage.clear()`, no longer removes the keys: call `forgetStoredKeys()`. See
+  [Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330).
 </Callout>
 
 ## Recipes

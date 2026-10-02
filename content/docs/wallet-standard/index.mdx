@@ -22,7 +22,7 @@ npm install @lazorkit/wallet @solana/web3.js@^1.99.0 \
   @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
 ```
 
-This page describes `@lazorkit/wallet` 3.x (current: 3.2.1). The adapter speaks protocol
+This page describes `@lazorkit/wallet` 3.x (current: 3.3.0). The adapter speaks protocol
 v2, and v1 for wallets made before it; mainnet runs v1 today — see
 [Networks & versions](/networks).
 
@@ -132,7 +132,10 @@ a LazorKit `Execute` signed by the user's passkey, and sends it through its own 
 - **v0 transactions with lookup tables work** (3.1.0+): the adapter resolves the accounts a
   dApp's lookup tables load (a Jupiter swap, for example).
 - A failed send reaches your app as wallet-adapter's `WalletSendTransactionError`, with the
-  LazorKit error in its `error` field — see [Errors](/errors).
+  LazorKit error in its `error` field — see [Errors](/errors). The `is*Error` predicates
+  read through it (3.3.0+).
+- A `connect`, `disconnect` or `change` listener that throws is logged; it does not stop
+  the listeners after it or fail a `connect` that has happened (3.3.0+).
 
 </Step>
 

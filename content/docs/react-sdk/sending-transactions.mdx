@@ -4,7 +4,8 @@ description: When a send resolves, what isSigning means, how passkey transaction
 ---
 
 Applies to `@lazorkit/wallet` **3.1.0 and later** (deferred window: 3.2.0; 3014
-attribution: 3.2.1). Earlier releases resolved as soon as the paymaster answered.
+attribution: 3.2.1; callbacks and 4018: 3.3.0). Earlier releases resolved as soon as the
+paymaster answered.
 
 ## A send resolves once its transaction is confirmed
 
@@ -84,28 +85,56 @@ such a signature and never opens a new prompt on its own: ask the user to approv
 
 ## Callbacks
 
-The `useWallet()` methods take no callbacks: `await` them. The store's actions
-(`useWalletStore`) also take `onSuccess` / `onFail`. In `@lazorkit/wallet` 3.2.1 they
-run **before** `isSigning` is cleared:
+Every action of `useWallet()` and of the store (`useWalletStore`) takes `onSuccess` and
+`onFail`: in its payload, or for `connect`, `disconnect`, `signMessage` and
+`removeAuthority` in its options. Exactly one of them runs per call, and it agrees with the
+promise: `onSuccess` with what the promise resolves with, `onFail` with the error it
+rejects with.
 
-- a send started inside `onSuccess` is refused with "Already signing";
-- if `onSuccess` throws, the call rejects and `onFail` runs, although the transaction
-  landed.
+- It runs once the action is over, with `isSigning` (or `isConnecting` for `connect`)
+  already `false`, right before the promise settles. So a send started from `onSuccess`
+  runs, as one made on the line after `await` does.
+- A refusal calls `onFail` too ("Already signing", "No wallet connected", "Already
+  connecting"). One because another call is running is reported at once, while that call
+  still holds the flag, and leaves `error` (that call's) alone; "No wallet connected" sets
+  `error`.
+- What a callback throws is logged and changes nothing: a transaction that landed is never
+  reported as failed, `onFail` is not called for it, and a throwing `onFail` does not
+  replace the error.
+- `disconnect` leaves `isSigning` to an action still running, which goes on to its end and
+  its callbacks; until then a new action is refused with "Already signing".
 
-So prefer the promise. If you use the callbacks, do not start another send from them, and
-do not let them throw.
+```tsx
+import { useWallet } from '@lazorkit/wallet';
+import type { TransactionInstruction } from '@solana/web3.js';
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. 3.3.0 is planned to adopt the contract the React Native SDK already
-  has (2.2.0+): callbacks run once `isSigning` is `false`, exactly one per call, a send
-  started from a callback runs, and a callback that throws is logged and changes
-  nothing. A refusal ("Already signing", "No wallet connected") calls `onFail` too. This
-  page will say so once it ships.
+export function useTwoStepSend() {
+  const { signAndSendTransaction } = useWallet();
+  return (first: TransactionInstruction[], second: TransactionInstruction[]) =>
+    signAndSendTransaction({
+      instructions: first,
+      // Runs after isSigning is false: this second send is not refused.
+      onSuccess: () => void signAndSendTransaction({ instructions: second }),
+      onFail: (error) => console.warn('first send failed', error),
+    });
+}
+```
+
+`LazorkitWalletAdapter` and the Wallet Standard wallet call each `connect`, `disconnect`
+or `change` listener on its own and log what one throws: it neither stops the listeners
+after it nor fails a `connect` that has happened. The React Native SDK keeps the same
+contract.
+
+<Callout type="info" title="Changed in 3.3.0">
+  In 3.2.1 the store's callbacks ran before `isSigning` was cleared: a send started from
+  `onSuccess` was refused with "Already signing", and a throwing `onSuccess` made a landed
+  transaction reject and call `onFail`. Refusals did not call `onFail`, and `disconnect`,
+  `removeAuthority` and `signMessage` took no callbacks.
 </Callout>
 
 ## Transaction options
 
-| `transactionOptions` field | On web (3.2.1) |
+| `transactionOptions` field | On web (3.3.0) |
 | -------------------------- | -------------- |
 | `addressLookupTableAccounts` | Used. Forces the v0 wire format. |
 | `txVersion` | `'v0'` (default) or `'legacy'`. Legacy with lookup tables throws. |
@@ -200,17 +229,17 @@ deserialized payload; see [Session keys › Deferred execution](/web3js-v1/sessi
   answer (no answer within 90 s, a network error, HTTP 5xx or 408): if a later attempt
   gets an answer, the call goes on as usual.
 - Not resent: LazorKit's 3006 and 3014 (unless an earlier attempt may have been sent), a
-  failure that names the transaction's signature (that signature is followed instead),
-  and bytes the paymaster reports as already processed.
+  4018 (`RetiredDeployment`), a failure that names the transaction's signature (that
+  signature is followed instead), and bytes the paymaster reports as already processed.
+  A 4018 fails on the first answer, with `V1WalletRetiredError` for a retired v1 wallet;
+  see [Errors › v1 and v2](/errors#v1-and-v2).
 - If every attempt fails and one of them may have been sent, or the bytes were already
   processed, the call rejects with `TransactionOutcomeUnknownError`. The React Native SDK
   does not resend at all.
 - v1 wallets go to `v1PaymasterConfig`. See [Migrating from v1](/v1-to-v2).
 
-<Callout type="info" title="Next release (3.3.0)">
-  Not published yet. A 4018 (`RetiredDeployment`) will not be resent either: 3.2.1
-  sends it three times, 1 s and 2 s apart. 3.3.0 fails on the first answer, with
-  `V1WalletRetiredError` for a retired v1 wallet. See [Errors › v1 and v2](/errors#v1-and-v2).
+<Callout type="info" title="Changed in 3.3.0">
+  3.2.1 resent a 4018 like other failures, three attempts 1 s and 2 s apart.
 </Callout>
 
 More on running a relayer: [Paymaster › Using a paymaster with the

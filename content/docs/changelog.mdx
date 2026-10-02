@@ -10,31 +10,78 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
-<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
-  In review for `@lazorkit/wallet` 3.3.0 and `@lazorkit/wallet-mobile-adapter` 2.3.0,
-  not published. These docs describe the published releases until they ship.
+## 2026-10-02 — wallet 3.3.0, wallet-mobile-adapter 2.3.0
 
-  - **Breaking:** `addAuthority` (web) and `addAuthorityEd25519` (mobile) have no default
-    role; `role` is required, and a missing or unknown one (or `ROLE_OWNER` on a v2
-    wallet) throws before the prompt.
-    Migration: pass the role you relied on (`ROLE_ADMIN` on web, `ROLE_SPENDER` with a
-    policy on mobile).
-  - The `is*Error` predicates recognise the SDK's own error classes, through `cause` and
-    wallet-adapter wrappers.
-  - One callback contract on web and mobile: callbacks run after `isSigning` clears, one
-    per call, and a throwing callback changes nothing.
-  - Web: the paymaster no longer resends a 4018; it fails on the first answer with
-    `V1WalletRetiredError` for a retired v1 wallet.
-  - Web: session and authority keys are kept as non-extractable WebCrypto keys in
-    IndexedDB instead of plaintext `localStorage` (new `keyStorage` prop,
-    `forgetStoredKeys()`). Each key signs only while the wallet it was registered for is
-    connected (new `KeyWalletMismatchError`, `isKeyWalletMismatchError`). `disconnect`
-    deletes the session key unless `keepSessionKeys: true`, also one whose session lands
-    after it. Expired session keys are deleted when read.
+Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330),
+[React Native › Upgrading to 2.3.0](/react-native-sdk/upgrading#upgrading-to-230).
 
-  Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release),
-  [React Native › Upgrading to 2.3.0](/react-native-sdk/upgrading#upgrading-to-230-next-release).
-</Callout>
+### Breaking
+
+- **`addAuthority` (web) and `addAuthorityEd25519` (mobile) need a `role`.** There is no
+  default any more (3.2.1 made the key an Admin, 2.2.1 a Delegate). A call without `role`
+  does not compile. At runtime a missing role, one that is not `ROLE_OWNER`, `ROLE_ADMIN`
+  or `ROLE_SPENDER`, or `ROLE_OWNER` on a v2 wallet is refused before anything is read or
+  the passkey is prompted, with an error that says what each rank may do. Migration: pass
+  the role you relied on, `ROLE_ADMIN` on web, `ROLE_SPENDER` with a `policy` on mobile.
+  For a key your app holds, prefer `ROLE_SPENDER` with a `policy`.
+
+### Security (web)
+
+- **Session and authority keys are no longer kept in `localStorage` as plaintext.** The
+  SDK keeps each as a non-extractable WebCrypto Ed25519 key in IndexedDB
+  (`lazorkit-keys`); where the browser has no WebCrypto Ed25519, as its seed sealed with
+  AES-GCM in the same database; without IndexedDB, or outside a secure context, in the
+  page's memory. Keys an earlier release left in `localStorage` are moved when
+  `LazorkitProvider` mounts, or on first use. New prop `keyStorage: 'auto' | 'memory'`
+  (`'memory'` keeps nothing at rest) and new export `forgetStoredKeys()`. An app that
+  removed `lazorkit-session` / `lazorkit-authority` at sign-out must call
+  `forgetStoredKeys()` instead. See
+  [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+- **A kept key signs only for the wallet it was registered for.**
+  `signAndSendWithSession`, `signAndSendWithAuthority` and `revokeSession()` (without
+  `sessionPda`) reject with the new `KeyWalletMismatchError` when another wallet, or none,
+  is connected; new `isKeyWalletMismatchError` and type `KeyWalletMismatchReason`. A key
+  3.2 left whose wallet cannot be confirmed is never used (`reason: 'unbound'`).
+- **`disconnect()` deletes the session key**, also one whose `createSession` lands after
+  it; `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept. A
+  session key whose session has expired is deleted when it is next read.
+  `revokeSession()` deletes the kept session key once the revoke lands, and
+  `removeAuthority` deletes the kept authority key when it removes that authority.
+
+### Changed
+
+- **One callback contract on web and mobile.** `onSuccess` / `onFail` run once the action
+  is over (`isSigning` or `isConnecting` already `false`), right before the promise
+  settles, exactly one per call; a refusal ("Already signing", "No wallet connected",
+  "Already connecting") calls `onFail` too. A send started from `onSuccess` runs, and
+  what a callback throws is logged and changes nothing. Web: `disconnect`,
+  `removeAuthority` and `signMessage` take `onSuccess` / `onFail`, and the package exports
+  `ActionCallbacks`, `DisconnectOptions`, `RemoveAuthorityOptions` and
+  `SignMessageOptions`. Mobile: the store's `connect` and `disconnect` honour their
+  callbacks, and `transferSol` with no wallet connected calls `onFail` and sets `error`.
+- Web: `disconnect` no longer clears `isSigning` while an action runs.
+  `LazorkitWalletAdapter` and the Wallet Standard wallet call each listener on its own:
+  one that throws is logged, and no longer fails a `connect` that has connected.
+- **Web: a 4018 is not resent.** The paymaster fails on the first answer, with
+  `V1WalletRetiredError` for a retired v1 wallet; 3.2.1 sent it three times.
+
+### Fixed
+
+- **`isSignatureReusedError` and `isRetiredDeploymentError` are true for the SDK's own
+  `SignatureReusedError` and `V1WalletRetiredError`.** All three `is*Error` predicates
+  read through `cause` and a wallet-adapter `WalletError` (so they work through the Wallet
+  Standard), and match a copy from another build of the package. For a raw error they
+  also read a paymaster's `data` and a TransactionError; `isRetiredDeploymentError`
+  accepts Kora's `Custom(4018)`.
+- Web: the portal dialog no longer leaves a timer polling every 500 ms when a sign request
+  is answered or closed within its first half second.
+
+### Mobile only
+
+- The README says how to keep a session key: in `expo-secure-store`, never in
+  `AsyncStorage`, with the wallet it belongs to. The adapter never stored one.
+
+---
 
 ## 2026-10-01 — wallet 3.2.1, wallet-mobile-adapter 2.2.1
 

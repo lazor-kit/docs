@@ -4,7 +4,7 @@ description: When a send resolves, what isSigning means, callbacks, how passkey 
 ---
 
 Applies to `@lazorkit/wallet-mobile-adapter` **2.1.0 and later** (callback timing and the
-deferred window: 2.2.0; 3014 attribution: 2.2.1).
+deferred window: 2.2.0; 3014 attribution: 2.2.1; `connect` / `disconnect` callbacks: 2.3.0).
 
 ## A send resolves once its transaction is confirmed
 
@@ -55,27 +55,26 @@ Every error a send can reject with: [Errors › Sending a transaction](/errors#s
 
 `isSigning` is `true` from the portal round-trip until the transaction is confirmed or
 fails, up to the two-minute confirmation limit (`ConfirmationTimeoutError`). A sign
-action called while it is `true` rejects with `SigningError` and calls its `onFail`.
+action called while it is `true` rejects with `SigningError` and calls its `onFail` at
+once. One called with no wallet connected rejects with `SigningError` too, calls `onFail`
+and sets `error`.
 
-From 2.2.0, each action's promise settles, and its `onSuccess` or `onFail` runs, only
-**once `isSigning` is `false` again**:
+Each action's promise settles, and its `onSuccess` or `onFail` runs, only **once
+`isSigning` (or `isConnecting` for `connect`) is `false` again**, exactly one per call:
 
 - `await signAndSendTransaction(a, opts); await signAndSendTransaction(b, opts)` runs both;
 - a send started from `onSuccess` runs;
-- a sign action's callback that throws is logged and does not change the outcome: a
-  landed transaction still resolves, and `onFail` is not called.
+- a callback that throws is logged and does not change the outcome: a landed transaction
+  still resolves, a connect that succeeded still resolves, and `onFail` is not called.
 
-`connect` and `disconnect` on the hook run their callbacks after the call settles too;
-there, a callback that throws makes the call reject and runs `onFail` (2.2.1).
+This holds for every action, on the hook and on the store, `connect` and `disconnect`
+included. `@lazorkit/wallet` 3.3.0 keeps the same contract.
 
-<Callout type="info" title="Next release (2.3.0)">
-  Not published yet. 2.3.0 is planned to give `connect` and `disconnect` the same
-  contract as the sign actions: a callback that throws is logged and changes nothing, so
-  a connect that succeeded resolves and `onFail` is not called. The store's `connect`
-  and `disconnect` are planned to call `onSuccess` / `onFail` too (in 2.2.1 the store's
-  `connect` ignores them and its `disconnect` takes none), and `transferSol` with no
-  wallet connected to call `onFail` and set `error`. This page will say so once it
-  ships.
+<Callout type="info" title="Changed in 2.3.0">
+  In 2.2.1 a throwing `onSuccess` on `connect` or `disconnect` made the call reject, the
+  store's `connect` ignored its callbacks and its `disconnect` took none, and
+  `transferSol` with no wallet connected rejected without calling `onFail` or setting
+  `error`. The sign actions have kept this contract since 2.2.0.
 </Callout>
 
 ```ts
@@ -117,7 +116,7 @@ its own: ask the user to approve again.
 
 ## Transaction options
 
-| `transactionOptions` field | On mobile (2.2.1) |
+| `transactionOptions` field | On mobile (2.3.0) |
 | -------------------------- | ----------------- |
 | `addressLookupTableAccounts` | Used for the transaction, and for the portal preview when the preview would be over 1232 bytes without them. |
 | `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). |

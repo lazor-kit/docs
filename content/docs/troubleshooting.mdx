@@ -282,8 +282,8 @@ and a new signature could reuse its counter. Wait, then try again.
 
 Another call is still running: `isSigning` stays `true` until the transaction is
 confirmed. Disable buttons while `isSigning`, and `await` one send before starting the
-next. On web 3.2.1, a send started inside a store action's `onSuccess` is refused this
-way too; on mobile 2.2.0+ it runs.
+next. A send started from an action's `onSuccess` runs (web 3.3.0+, mobile 2.2.0+); on
+web 3.2.1 and earlier it was refused this way too.
 
 ### `DeferredExpiredError` / `0xbc6` (3014)
 

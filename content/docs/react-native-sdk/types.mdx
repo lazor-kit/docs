@@ -194,6 +194,17 @@ interface SignOptions {
 }
 ```
 
+### `DisconnectOptions`
+
+`disconnect`'s argument, on the hook and on the store (2.3.0+).
+
+```ts
+interface DisconnectOptions {
+  onSuccess?: () => void;
+  onFail?: (error: Error) => void;
+}
+```
+
 ### `TxCallbacks`
 
 Trailing argument on **non-passkey** flows — session-signed txs, `executeDeferred`,
@@ -312,7 +323,7 @@ interface RevokeSessionPayload {
 ```ts
 interface AddAuthorityPayload {
   newEd25519Pubkey: PublicKey;
-  role?: number;                          // ROLE_ADMIN (1) | ROLE_SPENDER (2, a Delegate — default)
+  role: number;                           // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
   policy?: Uint8Array;                    // required for ROLE_SPENDER on v2: serializeActions([...])
   unrestricted?: boolean;                 // required to add a key to a v1 wallet
 }
@@ -333,9 +344,9 @@ interface AuthorityEntry {
 type ListAuthoritiesResult = AuthorityEntry[];
 ```
 
-<Callout type="info" title="Next release (2.3.0)">
-  Not published yet, and breaking: `AddAuthorityPayload.role` is required
-  (`role: number`), with no default. See
+<Callout type="info" title="Changed in 2.3.0">
+  Breaking: `AddAuthorityPayload.role` is required. In 2.2.1 it was optional and defaulted
+  to `ROLE_SPENDER`. See
   [useWallet › addAuthorityEd25519](/react-native-sdk/use-wallet#addauthorityed25519).
 </Callout>
 
@@ -466,9 +477,10 @@ class V1WalletMigratedError extends Error {}
 class MinContextSlotNotReachedError extends Error {}
 ```
 
-Also exported: `isDeferredExpiredError`, `isSignatureReusedError`,
-`isRetiredDeploymentError` (in 2.2.1 the last two do not recognise the SDK's own classes:
-use `instanceof`), `SIGNATURE_REUSED_CODE`, `DEFERRED_EXPIRED_CODE`,
+Also exported: `isDeferredExpiredError`, `isSignatureReusedError` and
+`isRetiredDeploymentError`, each true for its class from any copy of the package, also
+wrapped in `cause` or a wallet-adapter `WalletError` (since 2.3.0; in 2.2.1 the last two
+read only the error's text and missed the adapter's own errors), `SIGNATURE_REUSED_CODE`, `DEFERRED_EXPIRED_CODE`,
 `RETIRED_DEPLOYMENT_CODE`, `MIN_DEFERRED_EXPIRY_SLOTS` (10) and
 `MAX_DEFERRED_EXPIRY_SLOTS` (9000).
 
