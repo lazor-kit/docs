@@ -446,7 +446,7 @@ any key you add can spend the whole vault.
 
   | Rank | Constant | May add and remove | Spends |
   | ---- | -------- | ------------------ | ------ |
-  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before the prompt. |
+  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or the portal opens. On a v1 wallet it adds one. |
   | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit |
   | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
 

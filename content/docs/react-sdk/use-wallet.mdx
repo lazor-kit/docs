@@ -109,10 +109,12 @@ session and authority keys `createSession` / `addAuthority` stored; see
 
 <Callout type="info" title="Next release (3.3.0)">
   Not published yet. `disconnect(options?)` deletes the session key the SDK keeps (from
-  IndexedDB, the page's memory and any plaintext 3.2 left), and
-  `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept, and signs
-  only once the same wallet is connected again; `removeAuthority` and
-  `forgetStoredKeys()` delete it. `disconnect` also takes `onSuccess` / `onFail`.
+  IndexedDB, the page's memory and any plaintext 3.2 left), whichever wallet it belongs
+  to, and a `createSession` still waiting for its transaction keeps no key once it
+  lands. `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept,
+  and signs only once the same wallet is connected again; `removeAuthority` and
+  `forgetStoredKeys()` delete it. `disconnect` acts in its own tab: another tab of the
+  app stays connected. It also takes `onSuccess` / `onFail`.
 </Callout>
 
 ---
@@ -363,7 +365,7 @@ const { authorityPda, authorityPublicKey } = await addAuthority({
 
   | Rank | Constant | May add and remove | Spends |
   | ---- | -------- | ------------------ | ------ |
-  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before the prompt. |
+  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
   | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
   | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
 

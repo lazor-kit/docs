@@ -87,7 +87,8 @@ expired.
 
 1. **`addAuthorityEd25519` needs a `role` (breaking).** There is no default any more. A
    call without `role` does not compile, and at runtime a missing role, or one that is
-   not `ROLE_OWNER`, `ROLE_ADMIN` or `ROLE_SPENDER`, throws before the portal opens.
+   not `ROLE_OWNER`, `ROLE_ADMIN` or `ROLE_SPENDER`, throws before the portal opens. So
+   does `ROLE_OWNER` on a v2 wallet, where the adapter never adds an Owner.
    Migration: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, options)`
    keeps 2.2.1's behaviour. Ranks:
    [useWallet › addAuthorityEd25519](/react-native-sdk/use-wallet#addauthorityed25519).

@@ -90,7 +90,9 @@ stored).
 
 1. **`addAuthority` needs a `role` (breaking).** There is no default any more. A call
    without `role` does not compile, and at runtime a missing role, or one that is not
-   `ROLE_OWNER`, `ROLE_ADMIN` or `ROLE_SPENDER`, throws before the passkey prompt.
+   `ROLE_OWNER`, `ROLE_ADMIN` or `ROLE_SPENDER`, throws before anything is read or the
+   passkey is prompted. So does `ROLE_OWNER` on a v2 wallet, where `addAuthority` never
+   adds an Owner.
    Migration: `addAuthority({ role: ROLE_ADMIN, ... })` keeps 3.2.1's behaviour; for a
    key your app spends with, prefer `role: ROLE_SPENDER` with a `policy`. Ranks:
    [useWallet › addAuthority](/react-sdk/use-wallet#addauthority).
@@ -101,19 +103,23 @@ stored).
    `isKeyWalletMismatchError(e)` by creating a session (adding an authority) for the
    connected wallet, or by asking the user to connect the key's wallet. See
    [Errors](/errors#kept-session-and-authority-keys-web).
-3. **`disconnect` deletes the session key.** To keep a session across sign-out and
-   sign-in, pass `disconnect({ keepSessionKeys: true })`; otherwise the user approves a
-   new session after connecting again. The authority key is kept, and signs once the
-   same wallet is connected again.
+3. **`disconnect` deletes the session key**, whichever wallet it belongs to, and a
+   `createSession` still waiting for its transaction keeps no key once it lands. To keep
+   a session across sign-out and sign-in, pass `disconnect({ keepSessionKeys: true })`;
+   otherwise the user approves a new session after connecting again. The authority key
+   is kept, and signs once the same wallet is connected again. `disconnect` acts in its
+   own tab: another tab of the app stays connected.
 4. **Sign-out code.** Removing `lazorkit-session` / `lazorkit-authority` from
    localStorage, or `localStorage.clear()`, no longer removes the keys: they are in
-   IndexedDB. Call `forgetStoredKeys()`, which deletes both.
+   IndexedDB, shared by every tab. Call `forgetStoredKeys()`, which deletes both (and
+   keeps none for a session or authority still landing).
 5. **Keys from 3.2 move to IndexedDB** when `LazorkitProvider` mounts, or on first use.
    On first use each is bound to its wallet, when that can be confirmed from the
    session or authority PDA or from the account on chain. One whose wallet cannot be
-   confirmed is never used (`reason: 'unbound'`): call `forgetStoredKeys()` and create
-   the session (add the authority) again. After the move, going back to 3.2.1 finds no
-   key, and the user creates a new session.
+   confirmed is never used (`reason: 'unbound'`): create the session (add the authority)
+   again, which replaces it (`forgetStoredKeys()` would also delete the other kept key).
+   After the move, going back to 3.2.1 finds no key, and the user creates a new
+   session.
 6. **Expired session keys are deleted** when next read; the call rejects with "No
    session key found: … expired after slot …". Create a new session.
 7. **Callbacks** on the store's actions run once `isSigning` is `false`, exactly one per

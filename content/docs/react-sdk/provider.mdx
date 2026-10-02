@@ -114,9 +114,10 @@ bounded and short, call `revokeSession()` when the user signs out, and pass your
 
   Plaintext keys an earlier release left are moved to IndexedDB when the provider
   mounts, or on first use. Each key is kept with the wallet it was registered for and
-  signs only while that wallet is connected. `disconnect()` deletes the session key
-  (`disconnect({ keepSessionKeys: true })` keeps it); the authority key stays until
-  `removeAuthority` or `forgetStoredKeys()`. An app that removed `lazorkit-session` /
+  signs only while that wallet is connected. `disconnect()` deletes the session key,
+  also one whose session lands after it (`disconnect({ keepSessionKeys: true })` keeps
+  it); the authority key stays until `removeAuthority` or `forgetStoredKeys()`. The keys
+  in IndexedDB are shared by every tab, while `disconnect` acts in its own tab only. An app that removed `lazorkit-session` /
   `lazorkit-authority` at sign-out must call `forgetStoredKeys()` instead. See
   [Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release).
 </Callout>

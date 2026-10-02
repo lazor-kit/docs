@@ -15,7 +15,8 @@ Each package's own CHANGELOG has the full detail:
   not published. These docs describe the published releases until they ship.
 
   - **Breaking:** `addAuthority` (web) and `addAuthorityEd25519` (mobile) have no default
-    role; `role` is required, and a missing or unknown one throws before the prompt.
+    role; `role` is required, and a missing or unknown one (or `ROLE_OWNER` on a v2
+    wallet) throws before the prompt.
     Migration: pass the role you relied on (`ROLE_ADMIN` on web, `ROLE_SPENDER` with a
     policy on mobile).
   - The `is*Error` predicates recognise the SDK's own error classes, through `cause` and
@@ -28,8 +29,8 @@ Each package's own CHANGELOG has the full detail:
     IndexedDB instead of plaintext `localStorage` (new `keyStorage` prop,
     `forgetStoredKeys()`). Each key signs only while the wallet it was registered for is
     connected (new `KeyWalletMismatchError`, `isKeyWalletMismatchError`). `disconnect`
-    deletes the session key unless `keepSessionKeys: true`. Expired session keys are
-    deleted when read.
+    deletes the session key unless `keepSessionKeys: true`, also one whose session lands
+    after it. Expired session keys are deleted when read.
 
   Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release),
   [React Native › Upgrading to 2.3.0](/react-native-sdk/upgrading#upgrading-to-230-next-release).

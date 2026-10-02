@@ -48,9 +48,9 @@ prompt per transaction**.
   WebCrypto Ed25519, the page's memory without IndexedDB), not as plaintext in
   localStorage. It binds the key to the wallet that created the session: the key signs
   only while that wallet is connected, and `KeyWalletMismatchError` is thrown otherwise.
-  `disconnect()` deletes the key unless you pass `disconnect({ keepSessionKeys: true })`,
-  a key whose session has expired is deleted when it is next read, and
-  `forgetStoredKeys()` deletes every key the SDK keeps.
+  `disconnect()` deletes the key (also one whose session lands after it) unless you pass
+  `disconnect({ keepSessionKeys: true })`, a key whose session has expired is deleted
+  when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps.
 </Callout>
 
 Sessions are the **cheapest** execution path: no Secp256r1 precompile runs. Measured in
