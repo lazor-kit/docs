@@ -1,0 +1,129 @@
+---
+title: Networks & versions
+description: Program ids per cluster, which package speaks which protocol version, what is deployed where, and which address is the user's wallet in each SDK.
+---
+
+LazorKit has two protocol versions on chain, each at its own program id. Every SDK
+release speaks one or both of them. This page is the one place that says what is
+deployed where; the rest of the docs link here instead of repeating it.
+
+<Callout type="warn" title="Status on 2026-10-02">
+  - **Mainnet runs protocol v1** (`LazorjRF…`). The v2 mainnet program
+    (`LazorFroi…`) is **not deployed yet**: its account does not exist on chain.
+  - **Devnet runs both.** v2 (`57bTNW…`) is deployed. Its `ProtocolConfig` is not
+    initialised, so no protocol fee is charged there.
+  - v1 will be retired to a **sunset binary** after v2 is live on mainnet. From then
+    on a v1 wallet can only move its funds to v2. See
+    [Migrating from v1](/v1-to-v2).
+</Callout>
+
+## Program ids
+
+| Cluster | Protocol | Program id | Constant | On chain (2026-10-02) |
+| ------- | -------- | ---------- | -------- | --------------------- |
+| mainnet | v2 | `LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` | `PROGRAM_ID_MAINNET` | **not deployed** |
+| mainnet | v1 | `LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi` | `PROGRAM_ID_MAINNET_V1` | deployed (full v1) |
+| devnet | v2 | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | `PROGRAM_ID_DEVNET` | deployed, no protocol fee configured |
+| devnet | v1 | `4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS` | `PROGRAM_ID_DEVNET_V1` | deployed |
+
+The constants are exported by `@lazorkit/sdk-legacy` 1.2.0 and later, by
+`@lazorkit/sdk`, and re-exported by `@lazorkit/wallet` and
+`@lazorkit/wallet-mobile-adapter`. `PROGRAM_ID` in the wallet packages is the **v2
+mainnet** id.
+
+```ts
+import {
+  PROGRAM_ID_MAINNET,
+  PROGRAM_ID_MAINNET_V1,
+  PROGRAM_ID_DEVNET,
+  PROGRAM_ID_DEVNET_V1,
+} from '@lazorkit/sdk-legacy';
+
+console.log(PROGRAM_ID_DEVNET.toBase58()); // 57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv
+```
+
+Each binary embeds its own id and refuses to run anywhere else (`WrongProgramAddress`,
+4017). A v2 address never collides with a v1 one: v2 PDA seeds are prefixed `lk2:`
+and its account discriminators are `0x21`–`0x27`.
+
+## Packages
+
+| Package | Version | npm tag | Protocol | Notes |
+| ------- | ------- | ------- | -------- | ----- |
+| `@lazorkit/wallet` (React) | 3.2.1 | `latest` | v2, and v1 for existing v1 wallets | Routes each action by the wallet's protocol. Creates new wallets on v2 only. |
+| `@lazorkit/wallet-mobile-adapter` (React Native) | 2.2.1 | `latest` | v2, and v1 for existing v1 wallets | Same routing. The `beta` tag still points at the old `2.0.0-beta.4`: do not install `@beta`. |
+| `@lazorkit/sdk-legacy` (web3.js v1) | 1.3.1 | `next` | v2 | `npm install @lazorkit/sdk-legacy@next` |
+| `@lazorkit/sdk-legacy` (web3.js v1) | 0.3.2 | `latest` | v1 | What a plain `npm install @lazorkit/sdk-legacy` installs. |
+| `@lazorkit/sdk` (Solana Kit) | 1.0.0-rc.5 | `latest`, `next` | v2 | Release candidate. |
+
+The two `sdk-legacy` lines are not wire-compatible: the same `userSeed` derives a
+different wallet on each. The wallet packages depend on both: `@lazorkit/sdk-legacy`
+^1.3.0 for v2, and 0.3.2 under the alias `lazorkit-sdk-v1` for v1 wallets.
+
+## What works where today
+
+| You use | Mainnet today | Devnet |
+| ------- | ------------- | ------ |
+| `@lazorkit/wallet` 3.x / adapter 2.x | Existing **v1** wallets keep working, through a relayer that sponsors v1 (`v1PaymasterConfig` / `v1ConfigPaymaster`). A user with no wallet cannot get one yet: new wallets are created on v2, which is not deployed on mainnet. | v2 wallets, plus v1 wallets made earlier on devnet. |
+| `@lazorkit/sdk-legacy` 0.3.x | v1 | v1 (`4h3Xo…`) |
+| `@lazorkit/sdk-legacy` 1.x, `@lazorkit/sdk` | Nothing until v2 is deployed. | v2 |
+
+When v2 is deployed on mainnet, this page is updated first.
+
+## Which address is the user's wallet
+
+Every LazorKit wallet has a **wallet PDA** (an internal account nothing can sign for)
+and a **vault PDA** (where SOL and tokens live). Show the vault, fund the vault, and
+use it as `fromPubkey`. The SDKs name them differently:
+
+| SDK | Vault (show this, send funds here) | Wallet PDA (internal) |
+| --- | ---------------------------------- | --------------------- |
+| `@lazorkit/wallet`, `useWallet()` | `vaultPubkey`, `wallet.vaultPda` | `smartWalletPubkey`, `wallet.smartWallet` |
+| `@lazorkit/wallet`, `LazorkitWalletAdapter` / Wallet Standard | `publicKey` | — |
+| `@lazorkit/wallet-mobile-adapter`, `useWallet()` | `smartWalletPubkey` (= `vaultPubkey`), `wallet.smartWallet` | `walletPdaPubkey`, `wallet.walletPda` |
+| `@lazorkit/sdk-legacy`, `@lazorkit/sdk` | `vaultPda` (`createWallet` also returns it as `depositAddress` in sdk-legacy) | `walletPda` |
+
+<Callout type="error" title="Never send funds to the web SDK's smartWallet">
+  On the web SDK, `smartWallet` / `smartWalletPubkey` is the **wallet PDA**. Funds sent
+  there cannot be spent by anyone. On mobile the same name means the vault. When in
+  doubt, use `vaultPubkey`, which means the vault on both.
+</Callout>
+
+Do not derive a user's vault yourself. The exported PDA helpers (`findVaultPda`,
+`findWalletPda`, …) derive **v2** addresses, at the v2 **mainnet** id unless you pass
+another program id, so they are wrong for a v1 wallet and for devnet. The SDKs store
+the right vault for the wallet's protocol (`vaultPubkey` / `smartWalletPubkey`), and
+backfill it on `connect` for wallets saved by older releases.
+
+## Which cluster the SDK talks to
+
+- **`@lazorkit/wallet` / `@lazorkit/wallet-mobile-adapter`** read the cluster from
+  `rpcUrl`: a URL containing `mainnet`, `devnet` or `localhost`. Anything else is taken
+  as **mainnet**. An RPC URL that does not name its cluster (your own proxy, most keyed
+  provider URLs) needs the `cluster` prop: `cluster="devnet"`.
+- **`@lazorkit/sdk-legacy`**: `new LazorKitClient(connection)` infers the program id the
+  same way, but **throws** for a URL it cannot place. Pass the id:
+  `new LazorKitClient(connection, PROGRAM_ID_DEVNET)`.
+- **`@lazorkit/sdk`** (kit) always takes the program id: `new LazorKit(rpc, PROGRAM_ID_DEVNET)`.
+
+```ts
+import { Connection } from '@solana/web3.js';
+import { LazorKitClient, PROGRAM_ID_DEVNET } from '@lazorkit/sdk-legacy';
+
+const connection = new Connection('https://my-rpc.example.com', 'confirmed');
+const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET);
+```
+
+## Default endpoints
+
+With no props, both UI SDKs use devnet:
+
+| | Default |
+| --- | --- |
+| RPC | `https://api.devnet.solana.com` |
+| Portal | `https://portal.lazor.sh` |
+| Paymaster | `https://kora.devnet.lazorkit.com` (LazorKit's devnet relayer, set up for v2) |
+
+LazorKit's v2 relayer does not sponsor v1 transactions. An app with v1 users needs a
+relayer that does, set as `v1PaymasterConfig` (web) or `v1ConfigPaymaster` (mobile).
+See [Paymaster › Using a paymaster with the SDKs](/concepts/paymaster#using-a-paymaster-with-the-sdks).

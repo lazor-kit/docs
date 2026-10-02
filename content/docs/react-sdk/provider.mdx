@@ -1,18 +1,19 @@
 ---
 title: LazorkitProvider
-description: Provider component — initialises the wallet store and paymaster config.
+description: Provider component — initialises the wallet store, the RPC connection and the paymaster config.
 ---
 
 Mount once at the top of your client tree. `LazorkitProvider` creates the wallet store,
-builds the RPC connection, and stores the paymaster config.
+builds the RPC connection (at `confirmed`), and stores the portal and paymaster config.
 
 ```tsx
 import { LazorkitProvider } from '@lazorkit/wallet';
 ```
 
 <Callout type="warn" title="Client only">
-  This provider uses `navigator.credentials` and `localStorage`. Mount it inside a
-  client-side boundary — in Next.js App Router, wrap it in a `"use client"` file.
+  This provider uses the portal (a dialog iframe or popup), `navigator.credentials` and
+  `localStorage`. Mount it inside a client-side boundary — in Next.js App Router, wrap it
+  in a `"use client"` file.
 </Callout>
 
 ## Minimum setup
@@ -23,58 +24,103 @@ import { LazorkitProvider } from '@lazorkit/wallet';
 </LazorkitProvider>
 ```
 
-Defaults: Solana Devnet, `portal.lazor.sh`, public Kora paymaster.
+Defaults: Solana devnet, `portal.lazor.sh`, LazorKit's devnet Kora paymaster.
 
 ## Production setup
 
 ```tsx
 <LazorkitProvider
   rpcUrl={process.env.NEXT_PUBLIC_RPC_URL}
+  cluster="mainnet"
   portalUrl="https://portal.lazor.sh"
   paymasterConfig={{
     paymasterUrl: process.env.NEXT_PUBLIC_PAYMASTER_URL!,
     apiKey: process.env.NEXT_PUBLIC_PAYMASTER_KEY,
   }}
+  v1PaymasterConfig={{ paymasterUrl: process.env.NEXT_PUBLIC_V1_PAYMASTER_URL! }}
 >
   <App />
 </LazorkitProvider>
 ```
 
+Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
+[Networks & versions](/networks) before you point an app at mainnet.
+
 ## Props
 
-| Prop              | Type                                           | Default                                | Required |
-| ----------------- | ---------------------------------------------- | -------------------------------------- | -------- |
-| `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
-| `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
-| `paymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | Devnet Kora                            | no       |
-| `children`        | `ReactNode`                                    | —                                      | yes      |
+| Prop                | Type                                           | Default                                | Since |
+| ------------------- | ---------------------------------------------- | -------------------------------------- | ----- |
+| `rpcUrl`            | `string`                                       | `https://api.devnet.solana.com`        | |
+| `portalUrl`         | `string`                                       | `https://portal.lazor.sh`              | |
+| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`     | |
+| `v1PaymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | `paymasterConfig`                      | 3.0.0 |
+| `cluster`           | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | 3.0.0 |
+| `onConfirmWallet`   | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'`                            | 3.0.0 |
+| `trustedAuthorities`| `string[]` — your own Ed25519 keys, base58     | none                                   | 3.0.0 |
+| `watchMints`        | `string[]` — SPL Token mints you receive       | none                                   | 3.0.0 |
+| `children`          | `ReactNode`                                    | —                                      | |
 
-### `PaymasterConfig`
+- **`paymasterConfig`** — the Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as
+  `x-api-key`; it ships in your bundle, so it is not a secret.
+- **`v1PaymasterConfig`** — the relayer for users whose wallet is still on LazorKit v1:
+  the one your app used before v2. LazorKit's v2 relayer does not sponsor v1, so set this
+  whenever `paymasterConfig` points at a v2 relayer and you have v1 users. See
+  [Migrating from v1](/v1-to-v2).
+- **`cluster`** — which cluster `rpcUrl` serves. The SDK reads it from the URL
+  (`mainnet`, `devnet`, `localhost`) and takes anything else as **mainnet**. Set it for your
+  own RPC proxy or a keyed provider URL that does not name the cluster.
+- **`onConfirmWallet`, `trustedAuthorities`, `watchMints`** — how `connect` treats a
+  returning user's wallet. `connect` uses a wallet on its own only when it is the one
+  wallet the passkey has signed for and nothing else can spend from it; otherwise it asks
+  the user. See [Wallet Confirmation](/react-sdk/wallet-confirmation).
 
-```ts
-interface PaymasterConfig {
-  paymasterUrl: string;                    // Kora JSON-RPC endpoint
-  apiKey?: string;                         // sent as x-api-key
-}
-```
+The props are typed as `LazorkitProviderProps` internally; the type is not exported, use
+`React.ComponentProps<typeof LazorkitProvider>`.
 
-### Wallet confirmation props
+## What the SDK stores in the browser
 
-<Callout type="warn" title="Version note">
-  These props are in the protocol-v2 major release of `@lazorkit/wallet` (built on
-  `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and before) do not have them.
+All in `localStorage` of your origin:
+
+| Key | What |
+| --- | ---- |
+| `lazorkit-wallet-store`, `lazorkit-wallet`, `CREDENTIAL_ID`, `SMART_WALLET_ADDRESS`, `PUBLIC_KEY` | The connected wallet (credential id, passkey public key, wallet PDA, vault, protocol version) and the provider config. `disconnect` clears the wallet. |
+| `lazorkit-config` | The provider config. |
+| `lazorkit:passkey-lane:…` | Per passkey: the slot of its last transaction (kept ten minutes) and any send whose outcome is not known yet. See [Sending transactions](/react-sdk/sending-transactions#one-passkey-one-transaction-at-a-time). |
+| `lazorkit-session` | The secret key of the session `createSession` generated, **in plain text**. |
+| `lazorkit-authority` | The secret key of the Ed25519 authority `addAuthority` generated, **in plain text**. |
+
+`disconnect` does not remove `lazorkit-session` or `lazorkit-authority`, and
+`signAndSendWithSession` does not need a connected wallet: on a shared browser, a stored
+session key can still spend within its limits after the user disconnects. Keep sessions
+bounded and short, call `revokeSession()` when the user signs out, and pass your own
+`sessionKey` when a backend should hold the key.
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. 3.3.0 writes no key to localStorage. With the new prop
+  `keyStorage="auto"` (the default), it keeps each key in the IndexedDB database
+  `lazorkit-keys`:
+
+  - as a non-extractable WebCrypto Ed25519 key, which a script on the page can make sign
+    while the page is open but cannot copy;
+  - where the browser has no WebCrypto Ed25519 (iOS 16, Chrome 136 and older), as its
+    seed sealed with AES-GCM under a non-extractable key in the same database. Any
+    script on the page can decrypt that seed, so this only keeps the key out of
+    localStorage.
+
+  Without IndexedDB, or outside a secure context, the key lives in the page's memory and
+  is gone on reload. `keyStorage="memory"` always does that and keeps nothing at rest.
+  In the first two cases the key is still at rest in the browser profile: malware that
+  reads the profile can copy it.
+
+  Plaintext keys an earlier release left are moved to IndexedDB when the provider
+  mounts, or on first use. Each key is kept with the wallet it was registered for and
+  signs only while that wallet is connected. `disconnect()` deletes the session key,
+  also one whose session lands after it (`disconnect({ keepSessionKeys: true })` keeps
+  it); the authority key stays until `removeAuthority` or `forgetStoredKeys()`. The keys
+  in IndexedDB are shared by every tab, while `disconnect` acts in its own tab only. An app that removed `lazorkit-session` /
+  `lazorkit-authority` at sign-out must call `forgetStoredKeys()` instead. See
+  [Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release).
 </Callout>
-
-| Prop                 | Type                                           | Default     |
-| -------------------- | ---------------------------------------------- | ----------- |
-| `onConfirmWallet`    | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'` |
-| `trustedAuthorities` | `string[]` — your own Ed25519 keys, base58     | none        |
-| `watchMints`         | `string[]` — SPL Token mints you receive       | none        |
-
-`connect` uses a returning user's wallet on its own only when it is the one wallet the
-passkey has signed for and nothing else can spend from it; otherwise it asks the user.
-`onConfirmWallet` picks how: the SDK's built-in chooser, your own UI, or a thrown
-`WalletNeedsConfirmationError`. See [Wallet Confirmation](/react-sdk/wallet-confirmation).
 
 ## Recipes
 
@@ -83,7 +129,7 @@ passkey has signed for and nothing else can spend from it; otherwise it asks the
 ```tsx title="app/layout.tsx"
 import { Providers } from './providers';
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return <html><body><Providers>{children}</Providers></body></html>;
 }
 ```
@@ -91,9 +137,6 @@ export default function RootLayout({ children }) {
 ```tsx title="app/providers.tsx"
 'use client';
 import { LazorkitProvider } from '@lazorkit/wallet';
-import { Buffer } from 'buffer';
-
-if (typeof window !== 'undefined') (window as any).Buffer ??= Buffer;
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -107,14 +150,23 @@ export function Providers({ children }: { children: React.ReactNode }) {
 ### Switch networks at runtime
 
 ```tsx
-const [cluster, setCluster] = useState<'devnet' | 'mainnet'>('devnet');
+import { useState } from 'react';
+import { LazorkitProvider } from '@lazorkit/wallet';
 
-const rpcUrl = cluster === 'devnet'
-  ? 'https://api.devnet.solana.com'
-  : 'https://api.mainnet-beta.solana.com';
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [cluster] = useState<'devnet' | 'mainnet'>('devnet');
 
-return <LazorkitProvider rpcUrl={rpcUrl}>{children}</LazorkitProvider>;
+  const rpcUrl = cluster === 'devnet'
+    ? 'https://api.devnet.solana.com'
+    : 'https://api.mainnet-beta.solana.com';
+
+  return <LazorkitProvider rpcUrl={rpcUrl} cluster={cluster}>{children}</LazorkitProvider>;
+}
 ```
+
+The stored wallet belongs to the cluster it was created on: switching clusters does not
+move it. Disconnect before switching, or the app keeps showing an address from the other
+cluster.
 
 ### Multiple environments
 

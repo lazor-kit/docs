@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: Core protocol primitives — smart wallets, session keys, RBAC, and the paymaster.
+description: Core protocol primitives — smart wallets, session keys, ranks and policies, and the paymaster.
 ---
 
 import { Wallet, KeyRound, ShieldCheck, Zap } from 'lucide-react'
@@ -15,8 +15,8 @@ starts making sense — every method on every hook maps to one of the concepts b
   <Card icon={<KeyRound />} title="Session Keys"
     description="Scoped, time-bound delegation keys. Action types, spending limits, deferred execution, and revocation."
     href="/concepts/session-keys" />
-  <Card icon={<ShieldCheck />} title="RBAC"
-    description="On-chain permission model. Owner, Admin, and Spender roles with strict enforcement."
+  <Card icon={<ShieldCheck />} title="Ranks & policies"
+    description="On-chain permission model. Owner, Admin and Delegate ranks, and the spending policy a Delegate carries."
     href="/concepts/rbac" />
   <Card icon={<Zap />} title="Paymaster"
     description="Gas abstraction. How fees are collected, routed across treasury shards, and tracked per integrator."
@@ -25,9 +25,12 @@ starts making sense — every method on every hook maps to one of the concepts b
 
 <Callout type="info" title="How they fit together">
   Every execution flow touches all four. A user signs with their **passkey** (Smart Wallet)
-  or a **session key** (delegated), passes the **RBAC** role check, and the transaction is
-  relayed by a **Paymaster** that covers gas + any LazorKit protocol fee. See the
-  [Protocol Overview](/protocol) for the end-to-end picture.
+  or a **session key** (delegated), passes the **rank and policy** checks, and the
+  transaction is relayed by a **Paymaster** that covers gas + any LazorKit protocol fee.
+  See the [Protocol Overview](/protocol) for the end-to-end picture.
+
+  Everything here describes **protocol v2**, which mainnet does not run yet: see
+  [Networks & versions](/networks). Where v1 differs, the page says so.
 </Callout>
 
 ---
@@ -37,14 +40,17 @@ starts making sense — every method on every hook maps to one of the concepts b
 | Term                 | Definition                                                                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
 | **Smart Wallet**     | A cluster of on-chain accounts (wallet PDA, vault PDA, authorities, sessions) controlled by LazorKit. |
-| **Wallet PDA**       | Metadata anchor — 8 bytes, derived from `user_seed`. Internal to the program.                       |
+| **Wallet PDA**       | Metadata anchor — 8 bytes (bump, version, Owner count), derived from `user_seed`. Internal to the program; never send funds here. |
 | **Vault PDA**        | The actual fund-holding address. What end-users see as "their wallet address".                      |
-| **Authority PDA**    | Per-key auth record (pubkey, role, replay counter). One PDA per authorised key.                     |
-| **Session PDA**      | Ephemeral signer record with action constraints + expiry. Closed on revocation or expiry.           |
-| **Passkey**          | WebAuthn credential bound to a device's Secure Enclave. Verified on-chain via the Secp256r1 precompile. |
-| **Action**           | Immutable policy attached to a session (SOL cap, token cap, program allow-list, etc.).               |
-| **Paymaster**        | The transaction's `fee_payer`. Pays SOL, collects reimbursement from the user (or integrator).       |
-| **FeeRecord**        | Per-`fee_payer` on-chain counter used for early-contributor rewards at token launch.                 |
+| **Authority PDA**    | Per-key auth record: key, rank, replay counter, the wallet it belongs to, and an optional spending policy. One PDA per authorised key. |
+| **Session PDA**      | Ephemeral signer record with action constraints + expiry. Closed by revocation, or after expiry by anyone (`CloseExpiredSession`, who keeps the rent). |
+| **Passkey**          | WebAuthn credential held by the device's authenticator (often synced by iCloud Keychain or Google Password Manager). Verified on-chain via the Secp256r1 precompile. |
+| **Action**           | One rule of a spending policy (SOL cap, token cap, program allow-list, etc.). Sessions and Delegate authorities carry them; they cannot be changed afterwards. |
+| **Rank**             | What an authority may manage: Owner (0), Admin (1) or Delegate (2, the SDKs' `ROLE_SPENDER`).     |
+| **Paymaster**        | The transaction's `fee_payer`. Pays SOL; the developer recoups it through the app.                 |
+| **FeeRecord**        | Per-`fee_payer` on-chain counter used for early-contributor rewards at token launch. Created automatically in v2. |
 | **Deferred exec**    | 2-tx flow (`Authorize` + `ExecuteDeferred`) for payloads that exceed a single Secp256r1 transaction. |
 
-Need the exact byte layouts and on-chain account shapes? See the [Protocol Overview](/protocol).
+Need the exact byte layouts and on-chain account shapes? See
+[`docs/Architecture.md`](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/Architecture.md)
+in the protocol repo.

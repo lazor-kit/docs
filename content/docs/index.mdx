@@ -3,12 +3,19 @@ title: LazorKit Documentation
 description: Documentation for LazorKit — execution layer for Web3.
 ---
 
-import { Globe, Smartphone, Code, Zap, Layers, BookOpen } from 'lucide-react'
+import { Globe, Smartphone, Code, Zap, Layers, BookOpen, Network, ArrowRightLeft, TriangleAlert } from 'lucide-react'
 
 LazorKit is an execution layer for Solana. It handles **passkey authentication**, **session key delegation**, **gas sponsorship**, and **on-chain permission enforcement** — so your app or agent can go from user intent to on-chain action without the usual friction.
 
 <Callout type="info" title="New here?">
   Start with the [Protocol Overview](/protocol) to understand how the system works end-to-end, then pick the SDK that fits your stack.
+</Callout>
+
+<Callout type="warn" title="Where things stand (2026-10-02)">
+  Mainnet runs **protocol v1**. Protocol v2 — what the current SDK releases speak — is
+  live on **devnet**; the v2 mainnet program is not deployed yet. Existing v1 wallets keep
+  working through the current React and React Native SDKs. Program ids, package versions
+  and what works where: [Networks & versions](/networks).
 </Callout>
 
 ---
@@ -19,25 +26,25 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   <Card
     icon={<Globe />}
     title="React SDK"
-    description="Hooks and components for web apps. Browser-based passkey auth via WebAuthn."
+    description="@lazorkit/wallet — hooks and a provider for web apps. Passkeys through the LazorKit portal."
     href="/react-sdk"
   />
   <Card
     icon={<Smartphone />}
     title="React Native SDK"
-    description="Native iOS and Android bindings. Integrates with device Secure Enclave."
+    description="@lazorkit/wallet-mobile-adapter — React Native and Expo. Passkeys through the LazorKit portal in the system browser."
     href="/react-native-sdk"
   />
   <Card
     icon={<Code />}
-    title="web3.js v1 SDK"
-    description="Direct contract interaction via LazorKitClient. Full access to all protocol instructions."
+    title="SDK (web3.js v1)"
+    description="@lazorkit/sdk-legacy — direct contract access via LazorKitClient. Every protocol instruction."
     href="/web3js-v1"
   />
   <Card
     icon={<Zap />}
-    title="web3.js v2 SDK"
-    description="Coming soon. Same capabilities as v1 built on the new @solana/web3.js v2 API."
+    title="SDK (Solana Kit)"
+    description="@lazorkit/sdk — the same client for @solana/kit (web3.js v2). Release candidate."
     href="/web3js-v2"
   />
 </Cards>
@@ -56,8 +63,26 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   <Card
     icon={<BookOpen />}
     title="Concepts"
-    description="Deep dives into Smart Wallets, Session Keys, RBAC, and the Paymaster."
+    description="Smart wallets, session keys, ranks and policies, and the paymaster."
     href="/concepts"
+  />
+  <Card
+    icon={<Network />}
+    title="Networks & versions"
+    description="Program ids, which package speaks which protocol, and which address is the user's wallet."
+    href="/networks"
+  />
+  <Card
+    icon={<ArrowRightLeft />}
+    title="Migrating from v1"
+    description="v1 and v2 side by side, the v1 sunset, and moving a wallet with MigrateWallet."
+    href="/v1-to-v2"
+  />
+  <Card
+    icon={<TriangleAlert />}
+    title="Errors"
+    description="Every SDK error class and program error code, and what to do about each."
+    href="/errors"
   />
 </Cards>
 

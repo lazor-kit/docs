@@ -3,59 +3,80 @@ title: Overview
 description: LazorKit SDK for @solana/web3.js v1 — direct contract access via LazorKitClient.
 ---
 
-import { Rocket, KeyRound, Server, HelpCircle } from 'lucide-react'
+import { Rocket, KeyRound, Server, HelpCircle, Fingerprint } from 'lucide-react'
 
-`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction. It
-ships `LazorKitClient` — a typed wrapper that builds every on-chain instruction without
-hiding the transaction flow.
+`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction on
+`@solana/web3.js` v1. It ships `LazorKitClient` — a typed wrapper that builds every
+on-chain instruction without hiding the transaction flow.
 
 Use this SDK when you need:
 
-- Low-level contract access outside of React
+- Low-level contract access outside of React (a backend, a relayer, an agent)
 - Integration with existing `@solana/web3.js` v1 infrastructure
-- Admin / protocol operations (`InitializeProtocol`, `RegisterPayer`, etc.)
+- Protocol operations (`InitializeProtocol`, `RegisterPayer`, etc.)
 - Full control over signer rotation, prepare/finalize flows, and account indexing
 
 For application code, reach for the [React SDK](/react-sdk) or
-[React Native SDK](/react-native-sdk) — both wrap this SDK and handle the portal /
-paymaster round-trips automatically.
+[React Native SDK](/react-native-sdk) — both build on this SDK and handle the portal,
+paymaster, confirmation and sequencing for you.
+
+## Install
+
+Two lines of this package are published, one per protocol version:
+
+| npm | Version | Protocol | Where it works |
+| --- | ------- | -------- | -------------- |
+| `@lazorkit/sdk-legacy@next` | **1.3.1** | v2 | devnet today; mainnet once v2 is deployed there |
+| `@lazorkit/sdk-legacy` (`latest`) | 0.3.2 | v1 | mainnet today, and devnet v1 |
+
+```bash
+npm install @lazorkit/sdk-legacy@next @solana/web3.js   # 1.x — protocol v2, what these pages document
+```
+
+A plain `npm install @lazorkit/sdk-legacy` installs **0.3.2**, the protocol v1 line, which
+has none of the 1.x APIs below. The two are not wire-compatible: the same `userSeed`
+derives a different wallet on each. See [Networks & versions](/networks).
 
 ## What it covers
 
 | Area                | Methods                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------- |
-| Wallet management   | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership`                        |
+| Wallet management   | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` (+ `prepare*` / `finalize*` for passkeys) |
 | Execution           | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute`                                 |
-| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`             |
-| Deferred execution  | `prepareAuthorize`, `finalizeAuthorize`, `executeDeferred`, `reclaimDeferred`                 |
-| Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findWalletsByAuthority` (raw) |
-| Protocol (admin)    | `initializeProtocol`, `registerPayer`, `withdrawTreasury`, `initializeTreasuryShard`          |
+| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`, `prepareRevokeSession` |
+| Deferred execution  | `authorize`, `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
+| Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findAuthoritiesByWallet`, `getRecoveryStatus`, `readCounter`; `findWalletsByAuthority` (raw) |
+| Passkey keys        | `resolvePasskeyPublicKey`, `recoverPasskeyPublicKeys` (1.3.0+, module functions)              |
+| v1 migration        | `migrateV1Wallet`, `findV1WalletsByOwner`, `vetMigrationDestination` (1.2.0+)                 |
+| Protocol            | `registerPayer` (permissionless; added for you), `initializeProtocol`, `updateProtocol`, `initializeTreasuryShard`, `withdrawTreasury` (admin) |
+
+`CloseExpiredSession` (anyone may close an expired session and keep its rent) has no
+client method, and 1.3.1 does not export its instruction builder; `@lazorkit/sdk` (kit)
+exports `createCloseExpiredSessionIx`.
 
 <Callout type="warn" title="Finding a returning passkey user's wallet">
-  Use `findOwnPasskeyWallet`, in `@lazorkit/sdk-legacy` **1.2.0** and later (the published
-  `0.3.x` and `1.1.x` do not have it). Never adopt the first result of
-  `findWalletsByAuthority(credentialIdHash)`: the credential-id hash is public, and anyone can
-  create a wallet that lists it. See
+  Use `findOwnPasskeyWallet` (1.2.0 and later; not in 0.3.x or 1.1.x). Never adopt the
+  first result of `findWalletsByAuthority(credentialIdHash)`: the credential-id hash is
+  public, and anyone can create a wallet that lists it. See
   [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
 </Callout>
-
-## Install
-
-```bash
-npm install @lazorkit/sdk-legacy @solana/web3.js
-```
 
 ## Client setup
 
 ```typescript
 import { Connection } from '@solana/web3.js';
-import { LazorKitClient } from '@lazorkit/sdk-legacy';
+import { LazorKitClient, PROGRAM_ID_DEVNET } from '@lazorkit/sdk-legacy';
 
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-const client = new LazorKitClient(connection);
+const client = new LazorKitClient(connection);                      // program id from the URL
+const explicit = new LazorKitClient(connection, PROGRAM_ID_DEVNET); // or explicit
 ```
 
-`LazorKitClient` is stateless — instantiate once and reuse across your process.
+Without a program id, the client reads the cluster from the RPC URL (`mainnet`, `devnet`,
+`localhost` / `127.0.0.1`) and **throws** for any other URL; pass the id for your own RPC
+proxy or a keyed provider URL. It picks the **v2** program for the cluster. The client
+keeps a small in-memory cache (the protocol config, payers it has seen registered); create
+one per connection and reuse it.
 
 ## Explore
 
@@ -63,13 +84,16 @@ const client = new LazorKitClient(connection);
   <Card icon={<Rocket />} title="Getting Started"
     description="Create a wallet, execute a transaction, look up returning users."
     href="/web3js-v1/getting-started" />
+  <Card icon={<Fingerprint />} title="Passkey signing"
+    description="prepare / finalize, the WebAuthnResponse, minContextSlot, one flow per authority, key recovery."
+    href="/web3js-v1/passkey-signing" />
   <Card icon={<KeyRound />} title="Session Keys"
     description="Create, execute, and revoke sessions — including deferred execution."
     href="/web3js-v1/session-keys" />
   <Card icon={<Server />} title="Types"
-    description="Signer helpers, account decoders, PDA derivation."
+    description="Signer helpers, account readers, PDA derivation, error utilities."
     href="/web3js-v1/types" />
-  <Card icon={<HelpCircle />} title="Troubleshooting"
-    description="Error codes and common pitfalls."
-    href="/troubleshooting" />
+  <Card icon={<HelpCircle />} title="Errors"
+    description="Error classes and program error codes."
+    href="/errors" />
 </Cards>

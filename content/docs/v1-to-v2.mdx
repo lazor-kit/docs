@@ -1,0 +1,167 @@
+---
+title: Migrating from v1
+description: Protocol v1 and v2 side by side, what the v1 sunset changes, and how a v1 wallet moves its funds to v2 with MigrateWallet.
+---
+
+Protocol v2 does not replace v1 in place. It runs at **its own program id**, and the v1
+program keeps running until LazorKit retires it. Program ids and what is deployed
+today: [Networks & versions](/networks).
+
+<Callout type="info" title="Two phases">
+  1. **Now: v1 and v2 side by side.** v1 wallets keep working on the v1 program. New
+     wallets are created on v2 (on mainnet, once v2 is deployed there).
+  2. **Later: the v1 sunset.** The v1 program id is upgraded to a sunset binary. From
+     then on a v1 wallet can only leave: every other instruction fails with
+     `RetiredDeployment` (**4018**). Its funds stay safe in the v1 vault until its
+     owner moves them.
+</Callout>
+
+## What differs between v1 and v2
+
+| | v1 | v2 |
+| --- | --- | --- |
+| Addresses | seeds `wallet`, `vault`, … | seeds `lk2:wallet`, `lk2:vault`, …: **every address differs**, for the same `userSeed` |
+| Ranks | Owner / Admin / Spender, but `Execute` never checked rank: any authority could spend the whole vault | Owner / Admin / **Delegate**; a Delegate must carry a spending policy. See [Ranks & policies](/concepts/rbac). |
+| Owners | one Owner, replaced with `TransferOwnership` | several Owners (one per device); the last one cannot be removed |
+| Passkey challenge | does not name the wallet | names the wallet (an assertion verifies only on the wallet it was made for) |
+| Expired sessions | closed by the wallet's Owner/Admin (`RevokeSession`); after the sunset, by anyone | anyone may close an expired one and keep its rent (`CloseExpiredSession`) |
+| Protocol fee | charged when enabled; tracked only for payers with a registered `FeeRecord` | skipped when not configured; capped at 0.01 SOL; `FeeRecord` created automatically |
+| Deferred payloads | unversioned | carry `version: 2`; refused across the boundary |
+
+Nothing converts automatically. A v1 wallet moves to v2 with one signed
+`MigrateWallet`.
+
+## Apps with v1 users: what to set
+
+The React and React Native SDKs (from `@lazorkit/wallet` 3.0.0 and
+`@lazorkit/wallet-mobile-adapter` 2.0.0) serve both protocols. `connect` finds a user's
+existing v1 wallet and keeps using it; only a passkey with no wallet gets a new one, on
+v2. Every action routes by the connected wallet.
+
+- **A relayer for v1.** LazorKit's v2 relayer does not sponsor v1 transactions. Point
+  `v1PaymasterConfig` (web) or `v1ConfigPaymaster` (mobile) at the relayer your app used
+  before v2. It defaults to the main paymaster, which is only right if that relayer still
+  sponsors v1.
+
+  ```tsx
+  import { LazorkitProvider } from '@lazorkit/wallet';
+
+  export function Providers({ children }: { children: React.ReactNode }) {
+    return (
+      <LazorkitProvider
+        paymasterConfig={{ paymasterUrl: 'https://your-v2-relayer.example.com' }}
+        v1PaymasterConfig={{ paymasterUrl: 'https://your-v1-relayer.example.com' }}
+      >
+        {children}
+      </LazorkitProvider>
+    );
+  }
+  ```
+
+- **`protocolVersion`.** `useWallet().protocolVersion` is `1` or `2` (or `null` while
+  disconnected). Use it to offer a v1 user the move. A wallet saved by an older release
+  has no version and is treated as v1.
+- **Show `vaultPubkey`.** Never derive a v1 user's address with the exported PDA
+  helpers: they derive v2 addresses.
+- **Adding a key to a v1 wallet** requires `unrestricted: true` and refuses a `policy`:
+  v1 has no policies and never checked rank at `Execute`, so any key you add can spend
+  the whole vault.
+- **Errors.** After the sunset, a v1 wallet's actions reject with
+  `V1WalletRetiredError` (code 4018). A stored v1 wallet that has since been migrated is
+  dropped on the next `connect`; actions on it reject with `V1WalletMigratedError`.
+  See [Errors](/errors#v1-and-v2).
+
+## What the sunset binary serves
+
+After the sunset, the v1 program id answers only the instructions a v1 wallet needs to
+leave, and `RetiredDeployment` (4018) to everything else:
+
+| Instruction | Who | What |
+| --- | --- | --- |
+| `MigrateWallet` (17) | the wallet's Owner-rank authority | Moves the vault's SOL and every listed token account to a destination, then closes the v1 wallet and authority. |
+| `ReclaimDeferred` (8) | the payer that funded the `DeferredExec` | Recovers the rent of an expired v1 deferred authorization. |
+| `CloseExpiredSession` (18) | anyone | Closes an expired v1 or v2 session; the caller keeps the rent. |
+
+## MigrateWallet
+
+One Owner-signed instruction, executed at the **v1** id:
+
+1. authenticates the v1 authority (an Ed25519 signer, or a passkey signing a fresh
+   challenge that names the v1 program and the v1 wallet);
+2. moves every named token account from the v1 vault to the destination with
+   `TransferChecked` (Token-2022 transfer-fee mints included), and closes the emptied
+   sources;
+3. sweeps the vault's SOL to the destination through the System Program, and refuses to
+   finish unless the vault is empty;
+4. closes the v1 wallet and authority, refunding their rent.
+
+The owner signs `destination ‖ v1_wallet ‖ num_tokens ‖ refund_dest ‖ source accounts`,
+so a relayer cannot redirect the funds, change which token accounts move, or send the
+rent elsewhere: any of those fails with `InvalidMessageHash` (3005). Nobody but the
+wallet's own key can move its funds. There is no operator path.
+
+Token accounts that are not listed stay behind when the wallet closes. Some can never
+move: a **frozen** account, a Token-2022 mint with a **transfer hook**, a paused or
+non-transferable mint. The SDK leaves those out (they would revert the whole migration)
+and reports them as `skippedTokens`.
+
+## Migrating with the SDK
+
+`migrateV1Wallet` is in `@lazorkit/sdk-legacy` **1.2.0** and later and in
+`@lazorkit/sdk`. Do not use it from `sdk-legacy` 1.1.x or `@lazorkit/sdk` 1.0.0-rc.2:
+those versions could deliver into a wallet someone else controls.
+
+```ts
+import { Connection, Transaction } from '@solana/web3.js';
+import { LazorKitClient, PROGRAM_ID_DEVNET, type OwnershipProof } from '@lazorkit/sdk-legacy';
+
+declare const proof: OwnershipProof;            // a passkey assertion over createOwnershipChallenge()
+declare function confirmWithUser(skipped: unknown[]): Promise<boolean>;
+
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET); // the v2 id
+
+// 1. Find the user's v1 wallet by proof, not by the first hit of a lookup:
+//    v1's CreateWallet took any owner without its consent too.
+const { adopt, needsConfirmation } = await client.findOwnPasskeyWallet({ credentialIdHash, rpId, proof });
+const wallet = adopt ?? needsConfirmation[0]; // let the user choose; this is only a sketch
+if (!wallet || wallet.version !== 1) throw new Error('No v1 wallet to migrate');
+
+// 2. Plan the move. The destination is vetted; a fresh v2 wallet is created when
+//    none of this passkey's can be reused safely.
+const plan = await client.migrateV1Wallet({
+  payer: payer.publicKey,
+  owner: { type: 'secp256r1', credentialIdHash, compressedPubkey: wallet.publicKey, rpId },
+  v1Wallet: wallet.walletPda,
+});
+if (plan.skippedTokens.length && !(await confirmWithUser(plan.skippedTokens))) throw new Error('Cancelled');
+
+// 3. One transaction: setup + migrate. For a passkey owner, sign the challenge.
+if (plan.migrate.type !== 'secp256r1') throw new Error('expected a passkey owner');
+const response = await getWebAuthnResponse(plan.migrate.challenge, rpId, credentialId);
+const tx = new Transaction().add(...plan.setupInstructions, ...plan.migrate.finalize(response));
+// sign with payer, send, and wait for confirmation
+// keep plan.destinationUserSeed when it is set, and use plan.destinationWallet as the new wallet
+```
+
+- `wallet.publicKey` is the passkey key stored on the v1 authority. A returning user's
+  browser cannot give you the key (a WebAuthn assertion carries none); the chain can.
+- Send `setupInstructions` and the migration **in one transaction**. If they do not fit,
+  send the migration only after the setup transaction succeeded: otherwise someone
+  else's wallet at that seed could receive the funds.
+- `getWebAuthnResponse` is the helper from
+  [Passkey signing](/web3js-v1/passkey-signing#the-webauthnresponse-helper).
+- An Ed25519 owner gets `plan.migrate.instructions`, signed by the payer and the owner.
+- `findV1WalletsByOwner` lists v1 wallets by owner key without a proof. Like any lookup
+  by credential, it can return a wallet someone planted: use it only with a proof check.
+
+Full design notes, including how the destination is vetted:
+[`docs/migration-v1-to-v2.md`](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/migration-v1-to-v2.md)
+and [`docs/migration-ui-flow.md`](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/migration-ui-flow.md)
+in the protocol repo.
+
+## Users of the UI SDKs
+
+Users of the React and React Native SDKs can also move with the LazorKit migration
+page. A wallet made there is confirmed once on the next `connect`, like any wallet
+the passkey has not signed for yet (see [Wallet Confirmation](/react-sdk/wallet-confirmation)).

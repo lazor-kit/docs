@@ -1,77 +1,88 @@
 ---
 title: Types
-description: TypeScript interfaces, constants, and the SpendingLimits wrapper.
+description: TypeScript interfaces, constants, error classes, and the SpendingLimits wrapper of @lazorkit/wallet.
 ---
 
-All public types from `@lazorkit/wallet`, grouped by what you're doing.
+The public types of `@lazorkit/wallet` 3.2.1, grouped by what you're doing. Each block says
+whether the type is **exported** (`import type { … } from '@lazorkit/wallet'`) or a
+**shape only**: the SDK uses it internally without exporting it, so derive it from an
+exported type when you need it in your code:
+
+```ts
+import type { WalletHookInterface } from '@lazorkit/wallet';
+
+type SendTxPayload = Parameters<WalletHookInterface['signAndSendTransaction']>[0];
+type CreateSessionOptions = NonNullable<Parameters<WalletHookInterface['createSession']>[0]>;
+```
 
 ## Wallet state
 
 ### `WalletInfo`
 
+Exported from `@lazorkit/wallet`.
+
 ```ts
 interface WalletInfo {
-  credentialId: string;        // WebAuthn credential ID (base64)
-  passkeyPubkey: number[];     // 33-byte compressed secp256r1 pubkey
-
-  /** Wallet PDA — internal authority account (used for signing context). */
-  smartWallet: string;
-
-  /** Vault PDA — the SOL-holding account users deposit into. base58. */
-  vaultPda?: string;
-
-  walletDevice: string;        // authority PDA for the active passkey
-  platform: string;            // 'macIntel' | 'linux' | …
-  expo: string;                // 'web' for React SDK
-  accountName?: string;        // optional WebAuthn display name
+  readonly credentialId: string;        // WebAuthn credential ID (base64)
+  readonly passkeyPubkey: number[];     // 33-byte compressed secp256r1 pubkey
+  readonly expo: string;                // 'web' for the React SDK
+  readonly platform: string;
+  /** Wallet PDA — internal account. Never send funds here. */
+  readonly smartWallet: string;
+  /** Vault PDA — where funds live; what users see and fund. base58. */
+  readonly vaultPda?: string;
+  readonly walletDevice: string;        // this passkey's authority PDA
+  readonly accountName?: string;
+  /** 1 = made before LazorKit v2, 2 = since. Absent on records saved by 2.x (= v1). */
+  readonly protocolVersion?: 1 | 2;
 }
 ```
 
 <Callout type="info" title="smartWallet ≠ vaultPda">
-  `smartWallet` is the **internal** Wallet PDA (used by the program for authority lookup).
-  Funds live at **`vaultPda`** — that's what you pass as `fromPubkey` for transfers and
-  what users should see / fund. Derive it with `findVaultPda(walletPda)` if the field is
-  missing on an older cached `WalletInfo`.
+  `smartWallet` is the **internal** wallet PDA. Funds live at **`vaultPda`**
+  (`useWallet().vaultPubkey`). `connect` fills `vaultPda` in for records saved by releases
+  that did not store it; do not derive it with `findVaultPda`.
 </Callout>
 
-### `LazorkitProviderProps`
+### Provider props
+
+Shape only: not exported.
 
 ```ts
 interface LazorkitProviderProps {
   children: ReactNode;
   rpcUrl?: string;
   portalUrl?: string;
-  paymasterConfig?: PaymasterConfig;
+  paymasterConfig?: PaymasterConfig;      // the relayer for v2 wallets
+  v1PaymasterConfig?: PaymasterConfig;    // the relayer for v1 wallets (3.0.0+)
+  cluster?: 'mainnet' | 'devnet';         // when rpcUrl does not say (3.0.0+)
+  onConfirmWallet?: OnConfirmWallet;      // default 'builtin'
+  trustedAuthorities?: string[];          // your own Ed25519 keys, base58
+  watchMints?: string[];                  // SPL Token mints your app receives, base58
 }
 
 interface PaymasterConfig {
-  paymasterUrl: string;
-  apiKey?: string;
+  paymasterUrl: string;                   // Kora JSON-RPC endpoint
+  apiKey?: string;                        // sent as x-api-key; not a secret
 }
 ```
+
+Use `React.ComponentProps<typeof LazorkitProvider>` in your code. The same settings,
+without `children`, are the exported `WalletConfig` (the stored config) and
+`LazorkitAdapterConfig` (the wallet adapter's, which also takes `clusterSimulation`).
 
 ---
 
 ## Wallet confirmation
 
-<Callout type="warn" title="Version note">
-  Everything in this section is in the protocol-v2 major release of `@lazorkit/wallet`
-  (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and before) do not have
-  it. How it is used: [Wallet Confirmation](/react-sdk/wallet-confirmation).
-</Callout>
+Everything here is exported, from 3.0.0. How it is used:
+[Wallet Confirmation](/react-sdk/wallet-confirmation).
 
-### Provider and `connect` options
+### `ConnectHookOptions`
 
 ```ts
-interface LazorkitProviderProps {
-  // ...the props above, plus:
-  onConfirmWallet?: OnConfirmWallet;   // default 'builtin'
-  trustedAuthorities?: string[];       // your own Ed25519 keys, base58
-  watchMints?: string[];               // SPL Token mints your app receives, base58
-}
-
 interface ConnectHookOptions {
-  feeMode?: 'paymaster' | 'user';
+  feeMode?: 'paymaster' | 'user';      // accepted and ignored by the web SDK
   confirmWallet?: string;              // vault (or wallet PDA) the user chose
   onConfirmWallet?: OnConfirmWallet;   // overrides the provider's for this call
 }
@@ -92,7 +103,7 @@ interface WalletChoice {
   otherAuthorities: {                  // every authority besides this passkey
     address: string;                   // the authority account
     type: 'passkey' | 'key';           // passkey = secp256r1, key = Ed25519
-    role: 'owner' | 'admin' | 'spender' | 'unknown';
+    role: 'owner' | 'admin' | 'spender' | 'unknown'; // 'spender' = Delegate
     key?: string;                      // 'key' only: the Ed25519 public key
     sameRelyingParty?: boolean;        // 'passkey' only: same portal as this passkey
     trusted: boolean;                  // listed in trustedAuthorities; a passkey never is
@@ -129,8 +140,8 @@ interface ConfirmWalletRequest {
 
 ### `ConfirmWalletHandler`
 
-Your own chooser. Resolve with the chosen wallet's `vault` (or `wallet`), or `null` when the
-user recognises none. A throw is passed on as `connect`'s error.
+Your own chooser: resolve with the chosen vault (or wallet), or `null` when the user
+recognises none. A throw is passed on as `connect`'s error.
 
 ```ts
 type ConfirmWalletHandler = (
@@ -144,91 +155,132 @@ type ConfirmWalletHandler = (
 type OnConfirmWallet = ConfirmWalletHandler | 'builtin' | 'throw';
 ```
 
-### Errors
+---
+
+## Errors
+
+All exported as classes. When each is thrown and what to do: [Errors](/errors).
 
 ```ts
-class WalletNeedsConfirmationError extends Error {   // onConfirmWallet: 'throw'
+// Connecting
+class WalletNeedsConfirmationError extends Error {     // onConfirmWallet: 'throw'
   readonly credentialId: string;
   readonly candidates: WalletChoice[];
 }
-class WalletConfirmationDeclinedError extends Error {} // the user chose none; nothing saved
-class PortalCancelledError extends Error {}            // portal closed, or disconnect mid-connect
+class WalletConfirmationDeclinedError extends Error {}  // the user chose none; nothing saved
+class PortalCancelledError extends Error {}             // portal closed, or disconnect mid-connect
+
+// Sending (3.1.0+)
+class TransactionFailedError extends Error {            // landed and failed
+  readonly signature: string;
+  readonly transactionError: TransactionError;
+  readonly slot: number;
+  readonly logs?: string[];
+}
+class TransactionExpiredError extends Error { readonly signature: string } // never landed
+class TransactionOutcomeUnknownError extends Error {    // check before resending
+  readonly signature: string | undefined;
+}
+class ConfirmationTimeoutError extends TransactionOutcomeUnknownError {
+  readonly signature: string;
+  readonly waitedMs: number;
+}
+class PreviousTransactionPendingError extends Error { readonly pendingSignature: string | undefined }
+class SignatureReusedError extends Error { readonly code: 3006 }
+class PaymasterError extends Error {
+  readonly code?: number;          // JSON-RPC error code
+  readonly data?: unknown;         // JSON-RPC error data
+  readonly httpStatus?: number;
+  readonly signature?: string;
+  maybeSent: boolean;
+}
+
+// Deferred execution (3.2.0+)
+class DeferredExpiredError extends Error {
+  readonly code: 3014;
+  readonly deferredExecPda: PublicKey;
+  readonly authorizeSignature: string | undefined;
+  readonly expiresAtSlot: bigint | undefined;
+}
+interface DeferredFailureContext {  // on every TX2 error (3.2.1+)
+  deferredExecPda?: PublicKey;
+  authorizeSignature?: string;
+  expiresAtSlot?: bigint;
+}
+
+// v1 wallets (3.0.0+)
+class V1WalletRetiredError extends Error { readonly code: 4018 }
+class V1WalletMigratedError extends Error {}
 ```
+
+Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`.
+In 3.2.1 the last two do not recognise the SDK's own `SignatureReusedError` /
+`V1WalletRetiredError`; use `instanceof` ([Errors › Telling errors apart](/errors#telling-errors-apart)).
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. The predicates recognise the SDK's own errors, through `cause` and
+  a wallet-adapter `WalletError`. New: `KeyWalletMismatchError` (`code:
+  'KEY_WALLET_MISMATCH'`, `slot`, `reason`, `keyWallet`, `connectedWallet`), its
+  predicate `isKeyWalletMismatchError` and the type `KeyWalletMismatchReason`
+  (`'no-wallet' | 'other-wallet' | 'unbound'`). See
+  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+</Callout>
 
 ---
 
 ## Transaction payloads
 
+Shape only: not exported.
+
 ```ts
 interface TransactionOptions {
-  feeToken?: string;                                       // SPL mint base58
-  addressLookupTableAccounts?: AddressLookupTableAccount[];// v0 only
-  computeUnitLimit?: number;
-  clusterSimulation?: 'devnet' | 'mainnet';
-  /** Wire format. Defaults to 'v0'. */
-  txVersion?: 'legacy' | 'v0';
+  addressLookupTableAccounts?: AddressLookupTableAccount[]; // v0 only
+  txVersion?: 'legacy' | 'v0';                              // default 'v0'
+  clusterSimulation?: 'devnet' | 'mainnet';                 // the portal's preview
+  feeToken?: string;                                        // ignored by the web SDK
+  computeUnitLimit?: number;                                // ignored by the web SDK
 }
-```
 
-### `SendTxPayload`
-
-Shared payload shape for every send-tx method on the hook — `signAndSendTransaction`,
-`signAndSendWithSession`, `signAndSendWithAuthority`, `authorizeAndExecute`, and
-`authorizeDeferred`.
-
-```ts
+// Every send-tx method on the hook.
 interface SendTxPayload {
   instructions: TransactionInstruction[];
   transactionOptions?: TransactionOptions;
 }
 ```
 
-### `SignAndSendTransactionPayload`
+### `DeferredTxPayload`
 
-Internal alias for `SendTxPayload` used by the action layer. Adds optional callbacks when
-calling actions directly (outside the React hook):
+Exported from `@lazorkit/wallet`.
+
+`authorizeAndExecute` and `authorizeDeferred`:
 
 ```ts
-interface SignAndSendTransactionPayload extends SendTxPayload {
-  onSuccess?: (signature: string) => void;
-  onFail?: (error: Error) => void;
+interface DeferredTxPayload extends SendTxPayload {
+  expiryOffset?: number;   // slots after TX1 that TX2 is accepted, 10–9000; default 1500
 }
 ```
+
+`executeDeferred` takes `{ deferredPayload: string; transactionOptions? }`.
+
+### Store-level callbacks
+
+Shape only: not exported.
+
+The store's actions (`useWalletStore`) also accept `onSuccess` / `onFail` on each payload.
+In 3.2.1 they run before `isSigning` clears; see
+[Sending transactions › Callbacks](/react-sdk/sending-transactions#callbacks).
 
 ---
 
 ## Deferred execution payloads
 
-Returned/consumed by `authorizeDeferred` and `executeDeferred`.
-
-### `AuthorizeDeferredPayload`
-
-```ts
-interface AuthorizeDeferredPayload {
-  instructions: TransactionInstruction[];
-  transactionOptions?: TransactionOptions;
-  expiryOffset?: number;   // slots after TX1 that TX2 is accepted, 10–9000; default 1500
-  onSuccess?: (result: { signature: string; deferredPayload: string }) => void;
-  onFail?: (error: Error) => void;
-}
-```
-
-### `ExecuteDeferredPayload`
-
-```ts
-interface ExecuteDeferredPayload {
-  /** Serialized DeferredPayload string returned by authorizeDeferred. */
-  deferredPayload: string;
-  transactionOptions?: TransactionOptions;
-  onSuccess?: (signature: string) => void;
-  onFail?: (error: Error) => void;
-}
-```
-
 ### `DeferredPayload`
 
-Internal representation of what TX1 registered on-chain. The SDK converts to/from its
-wire form via `serializeDeferredPayload` / `deserializeDeferredPayload`.
+Exported from `@lazorkit/wallet`.
+
+What TX1 registered on chain, as `authorizeDeferred` returns it (serialized). The SDK
+converts to and from its wire form with `serializeDeferredPayload` /
+`deserializeDeferredPayload`, both exported.
 
 ```ts
 interface DeferredPayload {
@@ -244,36 +296,40 @@ interface DeferredPayload {
     isSigner: boolean;
     isWritable: boolean;
   }[];
+  executor?: PublicKey;          // who the accounts hash expects to send TX2
+  refundDestination?: PublicKey; // the Authorize payer: the only refund destination the program accepts
 }
-
-// Wire helpers — re-exported from '@lazorkit/wallet'
-serializeDeferredPayload(p: DeferredPayload): string;
-deserializeDeferredPayload(s: string): DeferredPayload;
 ```
+
+The serialized form carries `version: 2`; a payload from the other protocol version is
+refused. Re-authorize rather than replaying one across the boundary.
 
 ---
 
 ## Session payloads
 
+Shape only: not exported.
+
 ```ts
 interface CreateSessionPayload {
-  expiresInSlots?: bigint;
-  spendingLimits?: SpendingLimits;
-  onSuccess?: (sessionPda: string, sessionPublicKey: string) => void;
-  onFail?: (error: Error) => void;
+  expiresInSlots?: bigint;          // default 50,000 slots
+  spendingLimits?: SpendingLimits;  // required unless unrestricted
+  unrestricted?: boolean;           // a session with no limits, explicitly
+  sessionKey?: PublicKey | string;  // register an external key; nothing generated or stored
 }
 
 interface RevokeSessionPayload {
-  onSuccess?: () => void;
-  onFail?: (error: Error) => void;
+  sessionPda?: PublicKey | string;  // default: the session createSession stored
 }
 ```
 
 ### `SpendingLimits`
 
-High-level wrapper around the on-chain action catalogue. Every field is optional —
-omitted limits mean "no cap" on that axis. The SDK translates `SpendingLimits` into
-concrete `SessionAction[]` before submission.
+Exported from `@lazorkit/wallet`.
+
+High-level wrapper around the on-chain action catalogue. The SDK translates
+`SpendingLimits` into `SessionAction[]` before submission. At least one field is required
+unless you pass `unrestricted: true`.
 
 ```ts
 interface SpendingLimits {
@@ -292,57 +348,68 @@ interface SpendingLimits {
 ```
 
 <Callout type="info" title="Need token or program limits?">
-  The high-level `SpendingLimits` covers SOL. For token caps, program whitelisting, or
-  per-action expiries, drop to the raw [`SessionAction`](#low-level-sessionaction) catalogue
-  via `LazorKitClient.createSession` directly.
+  `SpendingLimits` covers SOL. For token caps, program whitelisting, or per-action expiries,
+  use the raw [`SessionAction`](#low-level-sessionaction) catalogue with
+  `LazorKitClient.createSession`.
 </Callout>
 
 ### Common windows
 
-| `windowSlots`  | Minutes | Hours | Days |
-| -------------- | ------- | ----- | ---- |
-| `9_000n`       | 60      | 1     | —    |
-| `54_000n`      | —       | 6     | —    |
-| `216_000n`     | —       | —     | 1    |
-| `1_512_000n`   | —       | —     | 7    |
+| `windowSlots`  | at 400 ms a slot |
+| -------------- | ---------------- |
+| `9_000n`       | 1 hour           |
+| `54_000n`      | 6 hours          |
+| `216_000n`     | 1 day            |
+| `1_512_000n`   | 7 days           |
 
-Slot time ≈ 400 ms — these are approximations. Use on-chain clock math for precise
-enforcement windows.
+A slot's length varies by cluster and load (devnet ran near 230 ms in September 2026), so
+these are approximations.
 
 ---
 
 ## Authority payloads
 
+Shape only: not exported.
+
 ```ts
 interface AddAuthorityPayload {
-  role?: number;                        // ROLE_ADMIN (1) | ROLE_SPENDER (2, default)
-  onSuccess?: (authorityPda: string, authorityPublicKey: string) => void;
-  onFail?: (error: Error) => void;
+  role?: number;           // ROLE_ADMIN (1, default) | ROLE_SPENDER (2, a Delegate)
+  policy?: Uint8Array;     // required for ROLE_SPENDER on v2: serializeActions([...])
+  unrestricted?: boolean;  // required to add a key to a v1 wallet
 }
 ```
 
 `removeAuthority` takes a single positional `targetAuthorityPda: string`.
 
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet, and breaking: `role` is required (`role: number`), with no default.
+  See [useWallet › addAuthority](/react-sdk/use-wallet#addauthority). Also new:
+  `removeAuthority(targetAuthorityPda, options?)` and `disconnect(options?)` take
+  `onSuccess` / `onFail`, and `disconnect`'s options take `keepSessionKeys`.
+</Callout>
+
 ---
 
-## Roles & auth types
+## Ranks & auth types
 
 ```ts
-export const ROLE_OWNER   = 0;   // can transfer ownership
-export const ROLE_ADMIN   = 1;   // manage authorities + sessions
-export const ROLE_SPENDER = 2;   // execute only
+export const ROLE_OWNER   = 0;   // manages every authority, including other Owners
+export const ROLE_ADMIN   = 1;   // manages Delegates and sessions
+export const ROLE_SPENDER = 2;   // a Delegate: manages nothing, spends within its policy
 
 export const AUTH_TYPE_ED25519   = 0;
 export const AUTH_TYPE_SECP256R1 = 1;
 ```
 
+See [Ranks & policies](/concepts/rbac).
+
 ---
 
 ## Low-level `SessionAction`
 
-Drop-down to the raw action catalogue when `SpendingLimits` isn't expressive enough
-(token caps, program filters, per-action expiries). Pass `SessionAction[]` when calling
-`LazorKitClient.createSession` directly.
+The raw action catalogue, for sessions created with `LazorKitClient.createSession` and for
+Delegate policies (`serializeActions`). `Actions`, `SessionActionType`, `SessionAction`
+and `serializeActions` are exported.
 
 ```ts
 enum SessionActionType {
@@ -355,32 +422,64 @@ enum SessionActionType {
   ProgramWhitelist    = 10,
   ProgramBlacklist    = 11,
 }
-
-import { Actions } from '@lazorkit/wallet';
-
-Actions.solLimit(lamports, expiresAt?)
-Actions.solRecurringLimit({ limit, window, expiresAt? })
-Actions.solMaxPerTx(lamports, expiresAt?)
-
-Actions.tokenLimit({ mint, remaining, expiresAt? })
-Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
-Actions.tokenMaxPerTx({ mint, max, expiresAt? })
-
-Actions.programWhitelist(programId, expiresAt?)
-Actions.programBlacklist(programId, expiresAt?)
 ```
+
+```ts
+import { Actions, serializeActions } from '@lazorkit/wallet';
+import { PublicKey } from '@solana/web3.js';
+
+const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const policy = serializeActions([
+  Actions.solLimit(1_000_000_000n),
+  Actions.solRecurringLimit({ limit: 100_000_000n, window: 216_000n }),
+  Actions.solMaxPerTx(50_000_000n),
+  Actions.tokenLimit({ mint, remaining: 100_000_000n }),
+  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, window: 216_000n }),
+  Actions.tokenMaxPerTx({ mint, max: 5_000_000n }),
+  Actions.programWhitelist(new PublicKey('11111111111111111111111111111111')),
+]);
+```
+
+Every builder takes an optional `expiresAt` slot as its last argument (inside the object
+for the object forms).
+
+---
+
+## Constants
+
+| Export | Value |
+| ------ | ----- |
+| `DEFAULTS.PORTAL_URL` | `https://portal.lazor.sh` |
+| `DEFAULTS.PAYMASTER_URL` | `https://kora.devnet.lazorkit.com` |
+| `DEFAULTS.RPC_ENDPOINT` | `https://api.devnet.solana.com` |
+| `DEFAULTS.SESSION_EXPIRY_SLOTS` | `50000n` |
+| `DEFAULTS.DEFERRED_EXPIRY_SLOTS` | `1500` |
+| `MIN_DEFERRED_EXPIRY_SLOTS` / `MAX_DEFERRED_EXPIRY_SLOTS` | `10` / `9000` |
+| `SIGNATURE_REUSED_CODE` | `3006` |
+| `DEFERRED_EXPIRED_CODE` | `3014` |
+| `RETIRED_DEPLOYMENT_CODE` | `4018` |
+| `PROGRAM_ID` / `PROGRAM_ADDRESS` | the v2 **mainnet** id |
+| `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET`, `PROGRAM_ID_MAINNET_V1`, `PROGRAM_ID_DEVNET_V1` | see [Networks & versions](/networks) |
+
+Other exported helpers: `registerCluster(rpcUrl, cluster)` (what the `cluster` prop does),
+`getCredentialHash(credentialIdBase64)`, `createOwnershipChallenge`,
+`verifyOwnershipProof`, `pickOwnWallet`, `selectWalletByAddress`, `readAuthorityCounter`,
+`readAuthorityPubkey`, `extractErrorCode`, `errorFromCode`, `ERROR_NAMES`, and the account
+readers `AuthorityAccount` / `SessionAccount`.
 
 ---
 
 ## Hook interface
 
-Full return type of `useWallet`:
+`WalletHookInterface` (exported) is the full return type of `useWallet`:
 
 ```ts
 interface WalletHookInterface {
   // State
-  smartWalletPubkey: PublicKey | null;
+  smartWalletPubkey: PublicKey | null;   // the wallet PDA (internal)
+  vaultPubkey: PublicKey | null;         // the vault
   wallet: WalletInfo | null;
+  protocolVersion: 1 | 2 | null;
   isConnected: boolean;
   isLoading: boolean;
   isConnecting: boolean;
@@ -388,7 +487,7 @@ interface WalletHookInterface {
   error: Error | null;
 
   // Core
-  connect: (options?: { feeMode?: 'paymaster' | 'user' }) => Promise<WalletInfo>;
+  connect: (options?: ConnectHookOptions) => Promise<WalletInfo>;
   disconnect: () => Promise<void>;
   signAndSendTransaction: (payload: SendTxPayload) => Promise<string>;
   signMessage: (message: string) => Promise<{ signature: string; signedPayload: string }>;
@@ -402,19 +501,21 @@ interface WalletHookInterface {
   createSession: (payload?: {
     expiresInSlots?: bigint;
     spendingLimits?: SpendingLimits;
+    sessionKey?: PublicKey | string;
+    unrestricted?: boolean;
   }) => Promise<{ sessionPda: string; sessionPublicKey: string }>;
-  revokeSession: () => Promise<void>;
+  revokeSession: (payload?: { sessionPda?: PublicKey | string }) => Promise<void>;
   signAndSendWithSession: (payload: SendTxPayload) => Promise<string>;
 
   // Authority
-  addAuthority: (payload?: { role?: number }) => Promise<{
+  addAuthority: (payload?: { role?: number; policy?: Uint8Array; unrestricted?: boolean }) => Promise<{
     authorityPda: string;
     authorityPublicKey: string;
   }>;
   removeAuthority: (targetAuthorityPda: string) => Promise<void>;
   signAndSendWithAuthority: (payload: SendTxPayload) => Promise<string>;
 
-  // Deferred execution (DeferredTxPayload = SendTxPayload & { expiryOffset?: number })
+  // Deferred execution
   authorizeAndExecute: (payload: DeferredTxPayload) => Promise<string>;
   authorizeDeferred: (payload: DeferredTxPayload) => Promise<{
     signature: string;

@@ -7,14 +7,23 @@ A complete working integration takes four steps: install dependencies, add polyf
 the provider, call the hook.
 
 <Callout type="info" title="Zero-config defaults">
-  Every provider prop is optional. If you leave them blank the SDK uses Devnet defaults
-  (`api.devnet.solana.com`, `portal.lazor.sh`, `kora.devnet.lazorkit.com`). Ship to production
-  by overriding `rpcUrl` + `configPaymaster`.
+  Every provider prop is optional. If you leave them blank the SDK uses devnet defaults
+  (`api.devnet.solana.com`, `portal.lazor.sh`, and `kora.devnet.lazorkit.com`, LazorKit's
+  devnet relayer, set up for protocol v2). Ship to production by overriding `rpcUrl` +
+  `configPaymaster`.
+</Callout>
+
+<Callout type="warn" title="Mainnet">
+  Mainnet still runs protocol v1, and the v2 mainnet program is not deployed yet. With
+  adapter 2.x, existing v1 wallets work on mainnet (through a relayer that sponsors v1:
+  `v1ConfigPaymaster`), but a new user cannot get a wallet there until v2 is deployed. See
+  [Networks & versions](/networks).
 </Callout>
 
 ## Prerequisites
 
-- React Native **≥ 0.70** or Expo SDK **≥ 50**
+- React Native **≥ 0.70**; Expo SDK **54** (the adapter depends on `expo-web-browser` 14.2 or
+  15 and `expo-crypto` 15; older Expo SDKs are untested)
 - A physical device or a simulator with biometrics enrolled (see [Troubleshooting](/troubleshooting) if you hit `NotAllowedError`)
 - A deep-link scheme for your app (e.g. `myapp://`)
 
@@ -33,6 +42,10 @@ npm install @lazorkit/wallet-mobile-adapter @solana/web3.js \
   @react-native-async-storage/async-storage expo-web-browser \
   react-native-get-random-values react-native-url-polyfill buffer
 ```
+
+In an Expo app, prefer `npx expo install expo-web-browser @react-native-async-storage/async-storage`
+so the native modules match your SDK. Install `latest`: the npm `beta` tag still points at
+an old pre-v2 build.
 
 <Callout type="warn">
   `@solana/web3.js` is a **peer dependency**. Install it explicitly so bundlers pick one
@@ -112,6 +125,13 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 </Tab>
 </Tabs>
 
+<Callout type="warn" title="Android: prefer a link only your app can receive">
+  Android lets more than one app claim the same custom scheme. An app that also claims
+  yours sees the portal's redirects and could answer in the portal's place. On iOS the auth
+  session hands the redirect to your app alone; on Android prefer a verified
+  [App Link](https://developer.android.com/training/app-links) as `redirectUrl`.
+</Callout>
+
 </Step>
 
 <Step>
@@ -136,15 +156,19 @@ That's the minimum. To override defaults:
 ```tsx
 <LazorKitProvider
   rpcUrl={process.env.EXPO_PUBLIC_RPC_URL}
+  cluster="devnet"                 // needed when the RPC URL does not say which cluster
   portalUrl={process.env.EXPO_PUBLIC_PORTAL_URL}
   configPaymaster={{
     paymasterUrl: process.env.EXPO_PUBLIC_PAYMASTER_URL!,
-    apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY,
+    apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY, // ships in the app: not a secret
   }}
 >
   <Stack />
 </LazorKitProvider>
 ```
+
+If your app already has users on LazorKit v1, also set `v1ConfigPaymaster`; see
+[Migrating from v1](/v1-to-v2).
 
 </Step>
 
@@ -181,10 +205,16 @@ export default function HomeScreen() {
 ```
 
 <Callout type="info" title="smartWalletPubkey = vault">
-  `smartWalletPubkey` is the **vault PDA** — the address that receives and sends funds.
-  Use it for `connection.getBalance`, for QR codes, and wherever you show the user their
-  wallet address.
+  On mobile, `smartWalletPubkey` (alias `vaultPubkey`) is the **vault PDA** — the address
+  that receives and sends funds. Use it for `connection.getBalance`, for QR codes, and
+  wherever you show the user their wallet address. (On the web SDK the same name is the
+  wallet PDA; `vaultPubkey` is the vault on both.)
 </Callout>
+
+The first `connect` opens the portal. For a returning user it may show a "Which wallet is
+yours?" chooser, and for an existing passkey that has no wallet yet it asks for one more
+signature to recover the passkey's key. See
+[Wallet Confirmation](/react-native-sdk/wallet-confirmation).
 
 </Step>
 
@@ -208,6 +238,7 @@ export default function SendScreen() {
       lamports: 0.01 * LAMPORTS_PER_SOL,
     });
 
+    // Resolves once the transaction is confirmed; rejects if it failed on chain.
     const sig = await signAndSendTransaction(
       { instructions: [ix] },
       { redirectUrl: 'myapp://home' },
@@ -219,6 +250,9 @@ export default function SendScreen() {
 }
 ```
 
+What a send can reject with, and how callbacks and `isSigning` behave:
+[Sending transactions](/react-native-sdk/sending-transactions).
+
 </Step>
 
 <Step>
@@ -226,14 +260,22 @@ export default function SendScreen() {
 ### (Optional) Use the vault balance
 
 ```tsx
-const { smartWalletPubkey, connection } = useWallet();
+import { useEffect, useState } from 'react';
+import { Text } from 'react-native';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { useWallet } from '@lazorkit/wallet-mobile-adapter';
 
-useEffect(() => {
-  if (!smartWalletPubkey) return;
-  connection.getBalance(smartWalletPubkey).then((l) =>
-    console.log('balance (SOL):', l / LAMPORTS_PER_SOL),
-  );
-}, [smartWalletPubkey?.toBase58()]);
+export function Balance() {
+  const { smartWalletPubkey, connection } = useWallet();
+  const [sol, setSol] = useState(0);
+
+  useEffect(() => {
+    if (!smartWalletPubkey) return;
+    connection.getBalance(smartWalletPubkey).then((l) => setSol(l / LAMPORTS_PER_SOL));
+  }, [smartWalletPubkey?.toBase58()]);
+
+  return <Text>{sol.toFixed(4)} SOL</Text>;
+}
 ```
 
 </Step>
@@ -242,38 +284,50 @@ useEffect(() => {
 
 ---
 
-## 8. Deferred execution — split TX1 / TX2
+## Deferred execution — split TX1 / TX2
 
 For flows where TX1 and TX2 don't run in the same process — a relayer on your server,
 a scheduled job, a secondary device — use the split API instead of `authorizeAndExecute`:
 
 ```tsx
-import {
-  useWallet,
-  serializeDeferredPayload,
-  deserializeDeferredPayload,
-} from '@lazorkit/wallet-mobile-adapter';
+import { serializeDeferredPayload } from '@lazorkit/wallet-mobile-adapter';
 
-// Device A — passkey-signed TX1 only, returns payload
-const { signature: tx1Sig, deferredPayload } = await authorizeDeferred(
-  { instructions: jupiterSwapIxs, expiryOffset: 4_500 },   // slots after TX1; default 1500, max 9000
+// In the app — passkey-signed TX1 only, returns the payload
+const { deferredPayload } = await authorizeDeferred(
+  { instructions: jupiterSwapIxs, expiryOffset: 4_500 },   // slots after TX1; default 1500, 10–9000
   { redirectUrl: 'myapp://cb' },
 );
 
-// Send the payload to your relayer as a JSON-safe string
-await fetch('/api/relayer', {
+// Send it to your relayer as a JSON-safe string
+await fetch('https://your-backend.example.com/relayer', {
   method: 'POST',
   body: serializeDeferredPayload(deferredPayload),
 });
-
-// Relayer / server / other device — no passkey required
-const payload = deserializeDeferredPayload(await req.text());
-const tx2Sig = await executeDeferred({ deferredPayload: payload });
 ```
 
-If the authorization expires before TX2 is submitted, `executeDeferred` rejects with
-`DeferredExpiredError`, and the rent can be reclaimed (it goes back to the paymaster's
-fee payer, the only destination the program accepts):
+The server has no hook: it sends TX2 with `@lazorkit/sdk-legacy` (no passkey needed):
+
+```ts
+import { Connection, Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { LazorKitClient, PROGRAM_ID_DEVNET, deserializeDeferredPayload } from '@lazorkit/sdk-legacy';
+
+declare const relayer: Keypair; // the relayer's fee payer
+
+export async function handle(req: Request) {
+  const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+  const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET);
+  const deferredPayload = deserializeDeferredPayload(await req.text());
+  const { instructions } = await client.executeDeferredFromPayload({ payer: relayer.publicKey, deferredPayload });
+  return sendAndConfirmTransaction(connection, new Transaction().add(...instructions), [relayer]);
+}
+```
+
+TX2 must land within `expiryOffset` slots of TX1's slot. If an inner instruction pays the
+TX1 payer back, TX2 must be sent by the executor that TX1 named (the paymaster's fee payer
+by default); `executeDeferredFromPayload` refuses another sender for such a payload. If the
+authorization expires first, `executeDeferred` rejects with `DeferredExpiredError`, and
+the rent can be reclaimed (it goes back to the paymaster's fee payer, the only destination
+the program accepts):
 
 ```tsx
 await reclaimDeferred({
@@ -281,18 +335,20 @@ await reclaimDeferred({
 });
 ```
 
-See [`useWallet` → Deferred execution](/react-native-sdk/use-wallet#authorizeanddexecute)
+See [`useWallet` → Deferred execution](/react-native-sdk/use-wallet#authorizeandexecute)
 for the full API.
 
 ## Next level
 
 <Cards>
   <Card title="Session keys" href="/react-native-sdk/use-wallet#createsession"
-    description="One passkey prompt → many prompt-free sends. Optional on-chain spending limits." />
+    description="One passkey prompt → many prompt-free sends, within on-chain spending limits." />
   <Card title="Deferred execution" href="/react-native-sdk/use-wallet#authorizeandexecute"
     description="Authorize once, execute payloads too big for a single tx (Jupiter swaps, batches)." />
   <Card title="Authorities" href="/react-native-sdk/use-wallet#addauthorityed25519"
-    description="Add Ed25519 device keys as admin or spender on the wallet." />
+    description="Add Ed25519 keys as Admin, or as a Delegate bounded by a spending policy." />
+  <Card title="Sending transactions" href="/react-native-sdk/sending-transactions"
+    description="Confirmation, callbacks, sequencing and the errors a send can reject with." />
   <Card title="Troubleshooting" href="/troubleshooting"
     description="Common errors: NotAllowedError, Network request failed, 0x2, 0xbd0, deep-link mismatches." />
 </Cards>

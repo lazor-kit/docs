@@ -7,31 +7,34 @@ description: Hook API — connect, sign, manage sessions & authorities.
 import { useWallet } from '@lazorkit/wallet';
 ```
 
-Returns wallet state and every mutation method. WebAuthn runs inline through
-`navigator.credentials` — no redirect, no popup, no `redirectUrl` argument.
+Returns wallet state and every mutation method. Each passkey method opens the LazorKit
+portal (a dialog iframe, or a popup) where the user approves with their passkey; there is
+no `redirectUrl` argument. Every send resolves once its transaction is **confirmed** —
+see [Sending transactions](/react-sdk/sending-transactions).
 
 ## Quick reference
 
 | Method                     | Passkey prompt   | Use for                                                      |
 | -------------------------- | ---------------- | ------------------------------------------------------------ |
-| `connect`                  | yes (first time) | Authenticate; silently restores on repeat visits             |
-| `disconnect`               | no               | Clear local state                                            |
+| `connect`                  | first time       | Authenticate; returns the stored wallet without a prompt     |
+| `disconnect`               | no               | Clear the stored wallet                                      |
 | `signAndSendTransaction`   | yes              | Single-tx Execute via paymaster                              |
 | `signMessage`              | yes              | Off-chain signature                                          |
 | `verifyMessage`            | no               | Browser-side signature verification via `crypto.subtle`      |
-| `createSession`            | yes              | Mint a scoped Ed25519 session (optional `SpendingLimits`)    |
-| `signAndSendWithSession`   | **no**           | Send using the active session keypair                        |
-| `revokeSession`            | yes              | Close the session, refund rent                               |
-| `addAuthority`             | yes              | Grant an Ed25519 admin / spender (keypair generated + stored)|
-| `signAndSendWithAuthority` | **no**           | Send signed by a stored Ed25519 authority                    |
-| `removeAuthority`          | yes              | Remove any authority by PDA                                  |
-| `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads (atomic)           |
-| `authorizeDeferred`        | yes              | **TX1 only** — returns serialized payload for later TX2      |
-| `executeDeferred`          | **no**           | **TX2 only** — submit from a previously-authorized payload   |
+| `createSession`            | yes              | Mint a scoped Ed25519 session (`SpendingLimits`)             |
+| `signAndSendWithSession`   | **no**           | Send using the stored session keypair                        |
+| `revokeSession`            | yes              | Close a session, refund rent                                 |
+| `addAuthority`             | yes              | Add an Ed25519 Admin or Delegate (keypair generated + stored)|
+| `signAndSendWithAuthority` | **no**           | Send signed by the stored Ed25519 authority                  |
+| `removeAuthority`          | yes              | Remove an authority by PDA                                   |
+| `authorizeAndExecute`      | yes (×1)         | Deferred 2-tx flow for oversized payloads                    |
+| `authorizeDeferred`        | yes              | **TX1 only** — returns a serialized payload for a later TX2  |
+| `executeDeferred`          | **no**           | **TX2 only** — submit a previously authorized payload        |
 
-All send-tx methods share the same [`SendTxPayload`](/react-sdk/types#sendtxpayload) shape and
-accept `transactionOptions.txVersion: 'legacy' | 'v0'` (default `'v0'`) so you can pick the
-wire format per call.
+All send-tx methods take `{ instructions, transactionOptions? }`. `transactionOptions`
+accepts `addressLookupTableAccounts`, `txVersion: 'legacy' | 'v0'` (default `'v0'`) and
+`clusterSimulation`; `feeToken` and `computeUnitLimit` are in the types but **ignored** by
+the web SDK (3.2.1).
 
 ---
 
@@ -39,19 +42,21 @@ wire format per call.
 
 | Field               | Type                 | Notes                                                      |
 | ------------------- | -------------------- | ---------------------------------------------------------- |
-| `smartWalletPubkey` | `PublicKey \| null`  | **Wallet PDA** (internal authority). Not the fund account. |
-| `wallet`            | `WalletInfo \| null` | Full persisted record. Use `wallet.vaultPda` for funds.    |
+| `vaultPubkey`       | `PublicKey \| null`  | **The vault** — where funds live. Show it, fund it, use it as `fromPubkey`. |
+| `smartWalletPubkey` | `PublicKey \| null`  | **Wallet PDA** (internal). Never send funds here.          |
+| `wallet`            | `WalletInfo \| null` | Full stored record. `wallet.vaultPda` is the vault.        |
+| `protocolVersion`   | `1 \| 2 \| null`     | The connected wallet's protocol; `null` while disconnected. |
 | `isConnected`       | `boolean`            |                                                            |
-| `isLoading`         | `boolean`            | `isConnecting \|\| isSigning \|\| ...`                     |
+| `isLoading`         | `boolean`            | `isConnecting \|\| isSigning \|\| …`                       |
 | `isConnecting`      | `boolean`            |                                                            |
-| `isSigning`         | `boolean`            |                                                            |
-| `error`             | `Error \| null`      |                                                            |
+| `isSigning`         | `boolean`            | `true` from the prompt until the transaction is confirmed. |
+| `error`             | `Error \| null`      | The last action's error.                                   |
 
 <Callout type="warn" title="smartWalletPubkey ≠ vault">
-  `smartWalletPubkey` is the Wallet PDA the program uses to resolve authorities. The
-  SOL-holding account is **`wallet.vaultPda`** — always use that as `fromPubkey` and as
-  the address you display to users. If `wallet.vaultPda` is absent on an older cached
-  record, derive it with `findVaultPda(smartWalletPubkey)`.
+  On the web SDK, `smartWalletPubkey` is the wallet PDA the program uses to resolve
+  authorities. The SOL-holding account is **`vaultPubkey`**. (The React Native SDK names
+  them the other way round; `vaultPubkey` is the vault in both.) Do not derive the vault
+  with `findVaultPda`: it derives a v2 mainnet address, wrong for v1 wallets and devnet.
 </Callout>
 
 ---
@@ -60,44 +65,36 @@ wire format per call.
 
 ### `connect`
 
-Authenticate the user. On first login this prompts the passkey; on repeat visits the
-portal silently re-attaches using the cached credential.
-
 ```ts
-const wallet = await connect({ feeMode: 'paymaster' });
+const wallet = await connect();
 ```
 
-| Option     | Type                      | Default       |
-| ---------- | ------------------------- | ------------- |
-| `feeMode`  | `'paymaster' \| 'user'`   | `'paymaster'` |
-
-**Returns** `Promise<WalletInfo>`.
-
-#### Confirming a returning user's wallet
-
-<Callout type="warn" title="Version note">
-  `confirmWallet` and `onConfirmWallet` are in the protocol-v2 major release of
-  `@lazorkit/wallet` (built on `@lazorkit/sdk-legacy` 1.2.0). Earlier versions (`2.x` and
-  before) do not have them.
-</Callout>
-
-With no stored wallet, `connect` proves the passkey and uses a wallet on its own only when
-it is the one wallet this passkey has signed for and nothing else can spend from it.
-Otherwise it asks the user — by default with a built-in "Which wallet is yours?" chooser.
-A user's own wallet that has never been used is confirmed once.
-
-```ts
-// After catching WalletNeedsConfirmationError (onConfirmWallet: 'throw'):
-await connect({ confirmWallet: choice.vault });
-```
+- **A stored wallet** is returned as stored, without the portal. A stored v1 wallet that
+  has since been migrated is dropped, and `connect` runs afresh.
+- **No stored wallet:** the portal opens. `connect` proves the passkey, looks up its
+  wallet on v1 and v2, and uses it on its own only when it is the one wallet this passkey
+  has signed for and nothing else can spend from it; otherwise it asks the user. A passkey
+  with no wallet gets a new v2 wallet.
+- **An existing passkey with no wallet** (made on another device or browser) costs **one
+  extra prompt** (3.1.0+): its public key is recovered from two of its signatures, so the
+  new wallet is created for the right key.
 
 | Option            | Type                                           | Notes                                                        |
 | ----------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| `confirmWallet`   | `string`                                       | Vault (or wallet PDA) the user chose. Within 2 minutes of the error, no second passkey prompt. Naming a wallet the passkey is not proven to hold throws. |
+| `confirmWallet`   | `string`                                       | Vault (or wallet PDA) the user chose. Within 2 minutes of `WalletNeedsConfirmationError`, no second passkey prompt. Naming a wallet the passkey is not proven to hold throws. |
 | `onConfirmWallet` | `'builtin' \| 'throw' \| ConfirmWalletHandler` | Overrides the provider's for this call.                      |
+| `feeMode`         | `'paymaster' \| 'user'`                        | Accepted, **ignored** by the web SDK.                        |
+
+**Returns** `Promise<WalletInfo>`.
 
 `connect` can reject with `WalletNeedsConfirmationError`, `WalletConfirmationDeclinedError`
-or `PortalCancelledError`. Full flow: [Wallet Confirmation](/react-sdk/wallet-confirmation).
+or `PortalCancelledError`, and with "Already connecting" while one is running. Full flow:
+[Wallet Confirmation](/react-sdk/wallet-confirmation).
+
+```ts
+// After catching WalletNeedsConfirmationError (onConfirmWallet: 'throw'):
+await connect({ confirmWallet: 'CHOSEN_VAULT_ADDRESS' });
+```
 
 ### `disconnect`
 
@@ -105,7 +102,20 @@ or `PortalCancelledError`. Full flow: [Wallet Confirmation](/react-sdk/wallet-co
 await disconnect();
 ```
 
-Clears persisted session. The on-chain wallet is untouched.
+Clears the stored wallet. The on-chain wallet is untouched. A `connect` still running
+rejects with `PortalCancelledError` and saves nothing. `disconnect` does **not** remove the
+session and authority keys `createSession` / `addAuthority` stored; see
+[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. `disconnect(options?)` deletes the session key the SDK keeps (from
+  IndexedDB, the page's memory and any plaintext 3.2 left), whichever wallet it belongs
+  to, and a `createSession` still waiting for its transaction keeps no key once it
+  lands. `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept,
+  and signs only once the same wallet is connected again; `removeAuthority` and
+  `forgetStoredKeys()` delete it. `disconnect` acts in its own tab: another tab of the
+  app stays connected. It also takes `onSuccess` / `onFail`.
+</Callout>
 
 ---
 
@@ -114,27 +124,30 @@ Clears persisted session. The on-chain wallet is untouched.
 ### `signAndSendTransaction`
 
 Single-transaction execution, for inner instructions of up to about 345 bytes without a
-lookup table: about 305 with `computeUnitLimit`, 109 fewer when Chrome pads the passkey's
-`clientDataJSON`. Anything larger goes through [`authorizeAndExecute`](#authorizeandexecute),
-and in practice so does a Jupiter swap: a single-hop SOL→USDC route, with Jupiter's lookup
-tables and compute-budget instructions, came to 1245 bytes. Measured 2026-09-29 with
-`@lazorkit/sdk-legacy` 1.2.0 and the portal in an iframe; from a popup, `clientDataJSON` is
-about 40 bytes shorter.
+lookup table (109 fewer when Chrome pads the passkey's `clientDataJSON`). Anything larger
+goes through [`authorizeAndExecute`](#authorizeandexecute), and in practice so does a
+Jupiter swap. Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0 and the portal in an
+iframe; from a popup, `clientDataJSON` is about 40 bytes shorter.
 
 ```ts
 const sig = await signAndSendTransaction({
   instructions: [ix],
   transactionOptions: {
-    feeToken: 'USDC',                   // optional — pay fees in any SPL mint
-    computeUnitLimit: 400_000,
-    addressLookupTableAccounts: [alt],  // auto-switches wire format to v0
-    clusterSimulation: 'devnet',
+    addressLookupTableAccounts: [alt],  // v0 only
+    clusterSimulation: 'devnet',        // the portal's preview
     txVersion: 'v0',                    // 'legacy' | 'v0' (default 'v0')
   },
 });
 ```
 
-**Returns** `Promise<string>` — confirmed signature.
+**Returns** `Promise<string>` — the signature, once the transaction is **confirmed**.
+**Rejects** with `TransactionFailedError`, `TransactionExpiredError`,
+`TransactionOutcomeUnknownError` (`ConfirmationTimeoutError`),
+`PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError` or
+`PortalCancelledError` — what each means: [Errors](/errors#sending-a-transaction).
+
+`isSigning` stays `true` until the transaction is confirmed; another hook call meanwhile
+rejects with "Already signing". `await` one send before starting the next.
 
 <Callout type="info" title="legacy vs v0">
   The SDK defaults to v0 (matches the mobile SDK and supports ALT). Use `txVersion: 'legacy'`
@@ -145,7 +158,8 @@ const sig = await signAndSendTransaction({
 ### `authorizeAndExecute`
 
 Two-transaction deferred flow for payloads that don't fit in a single tx (Jupiter swaps
-with routes + ATAs, multi-CPI batches). One passkey prompt covers both txs.
+with routes + ATAs, multi-CPI batches). One passkey prompt covers both txs; TX2 is sent
+once TX1 is confirmed.
 
 ```ts
 const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
@@ -161,45 +175,48 @@ const sig = await authorizeAndExecute({ instructions: jupiterSwapIxs });
 
 Same protocol mechanism as `authorizeAndExecute`, but split into two callable steps so you
 can defer or delegate TX2. `authorizeDeferred` returns a **serialized payload** that any
-party (server, bot, another device) can redeem later via `executeDeferred` — no passkey
-required for the second step.
+party can redeem later — no passkey required for the second step.
 
 ```ts
 // Step 1 — on the device with the passkey (requires user gesture):
 const { signature: authSig, deferredPayload } = await authorizeDeferred({
   instructions: jupiterSwapIxs,
-  expiryOffset: 4_500,   // slots after TX1 that TX2 is accepted; default 1500, max 9000
+  expiryOffset: 4_500,   // slots after TX1 that TX2 is accepted; default 1500, 10–9000
 });
 
 // Persist / transport — deferredPayload is a plain JSON string.
 await saveToBackend(deferredPayload);
 
-// Step 2 — can run later, anywhere, without the passkey:
+// Step 2 — later, from this app (no passkey):
 const execSig = await executeDeferred({
   deferredPayload,
   transactionOptions: { txVersion: 'v0' },   // optional
 });
 ```
 
-<Callout type="info" title="When to prefer this">
-  Use `authorizeDeferred` + `executeDeferred` when TX2 is sent by another party or
-  process (a relayer, another device) shortly after TX1. For the happy path where both
-  tx fire back-to-back, `authorizeAndExecute` is simpler.
-</Callout>
+A server has no hook: it redeems the payload with `LazorKitClient.executeDeferredFromPayload`
+from `@lazorkit/sdk-legacy` (see [Session keys › Deferred execution](/web3js-v1/session-keys#deferred-execution)).
 
-**Authorization has an on-chain expiry**, counted in slots from the slot TX1 landed in:
-`expiryOffset` (10 to 9000; the wallet's default is 1500). A slot's length depends on
-the cluster and its load, and the maximum is tens of minutes, so this does not suit a
-job that runs hours later. `authorizeAndExecute` takes `expiryOffset` too; the wallet
-may wait up to two minutes for TX1 to be confirmed before it sends TX2, so do not pass
-a small value.
+**The window.** The authorization has an on-chain expiry, counted in slots from the slot
+TX1 landed in: `expiryOffset` (10 to 9000; default 1500, `DEFAULTS.DEFERRED_EXPIRY_SLOTS`).
+A value outside that range throws a `RangeError` before the prompt. A slot's length
+depends on the cluster and its load, and the maximum is tens of minutes, so this does not
+suit a job that runs hours later. `authorizeAndExecute` takes `expiryOffset` too; the
+wallet may wait up to two minutes for TX1 to be confirmed before it sends TX2, so do not
+pass a small value. Until it expires, an unused approval **stays executable**: nothing
+can cancel it.
 
 If the window has passed, TX2 is not sent (and a paymaster's 3014 is not retried): the
 call rejects with `DeferredExpiredError`, carrying `deferredExecPda`, `expiresAtSlot` and,
 for `authorizeAndExecute`, TX1's `authorizeSignature`. Nothing in the payload ran, and the
 passkey approval is spent. The account keeps the paymaster's rent until the Authorize
 payer (the paymaster's fee payer) closes it with `ReclaimDeferred`
-(`LazorKitClient.reclaimDeferred`); only that payer can, and only after the window. See
+(`LazorKitClient.reclaimDeferred`); only that payer can, and only after the window.
+
+Since 3.2.1, an inner program's 3014 (Anchor's `AccountNotAssociatedTokenAccount`) is
+thrown as it came, not as `DeferredExpiredError`, and every TX2 error carries
+`deferredExecPda`, `authorizeSignature` and `expiresAtSlot` (`DeferredFailureContext`).
+`isDeferredExpiredError(e)` is true for every `DeferredExpiredError`. See
 [`DeferredPayload`](/react-sdk/types#deferredpayload).
 
 ---
@@ -218,18 +235,21 @@ Both values are base64. Returns `Promise<{ signature: string; signedPayload: str
 
 ### `verifyMessage`
 
-Verify a `signMessage` result in-browser — no RPC call. Useful for server-side auth flows
-that want to validate before hitting the chain.
+Verify a `signMessage` result in the browser — no RPC call.
 
 ```ts
+const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+const { signature, signedPayload } = await signMessage('Sign in as user-123');
 const ok = await verifyMessage({
-  signedPayload,    // Uint8Array
-  signature,        // Uint8Array
-  publicKey,        // Uint8Array — 33-byte compressed secp256r1
+  signedPayload: fromBase64(signedPayload),
+  signature: fromBase64(signature),
+  publicKey: new Uint8Array(wallet!.passkeyPubkey), // 33-byte compressed secp256r1 key
 });
 ```
 
-**Returns** `Promise<boolean>`.
+**Returns** `Promise<boolean>`. For a server-side check, verify with the same inputs
+against the passkey key stored on chain (`readAuthorityPubkey`).
 
 ---
 
@@ -237,12 +257,11 @@ const ok = await verifyMessage({
 
 ### `createSession`
 
-Mint an Ed25519 session keypair. The SDK persists the private key internally so
-`signAndSendWithSession` can reuse it.
+Mint an Ed25519 session key and register it on the wallet.
 
 ```ts
 const { sessionPda, sessionPublicKey } = await createSession({
-  expiresInSlots: 216_000n,             // ~24h; omit for SDK default
+  expiresInSlots: 216_000n,             // ~24h at 400 ms; default 50,000 slots
   spendingLimits: {
     solLifetimeCap: 5_000_000_000n,     // 5 SOL total
     solPerTxMax:    500_000_000n,       // 0.5 SOL per tx
@@ -254,37 +273,57 @@ const { sessionPda, sessionPublicKey } = await createSession({
 });
 ```
 
-| Field              | Type             | Required |
-| ------------------ | ---------------- | -------- |
-| `expiresInSlots`   | `bigint`         | no       |
-| `spendingLimits`   | `SpendingLimits` | no       |
+| Field              | Type                    | Notes |
+| ------------------ | ----------------------- | ----- |
+| `expiresInSlots`   | `bigint`                | Default 50,000 slots. The program allows at most 6,480,000. |
+| `spendingLimits`   | `SpendingLimits`        | SOL limits. Required unless `unrestricted: true`. |
+| `unrestricted`     | `boolean`               | Mint a session with **no limits**: it can spend the whole vault through any program until it expires. Without limits and without this, `createSession` throws. |
+| `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). The SDK generates nothing and stores nothing. If a session for this key already exists, it is returned without a prompt. |
+
+Without `sessionKey`, the SDK generates the keypair and keeps its secret key in
+`localStorage['lazorkit-session']`, **as plain text**, for `signAndSendWithSession`. There
+is one slot: a new session replaces it. See
+[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
 
 <Callout type="warn" title="Limits are immutable">
-  Session actions can't be changed once created. To adjust, revoke and recreate.
+  Session actions can't be changed once created. To adjust, revoke and recreate. Token
+  caps and program filters are not in `SpendingLimits`; for those use `LazorKitClient`
+  with the `Actions` catalogue.
 </Callout>
 
 **Returns** `Promise<{ sessionPda: string; sessionPublicKey: string }>`.
 
-See [`SpendingLimits`](/react-sdk/types#spendinglimits) for the full shape.
-
 ### `signAndSendWithSession`
 
-Send a transaction using the currently active session keypair. No passkey prompt.
+Send a transaction signed by the stored session key. No passkey prompt.
 
 ```ts
 const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are hit —
-see [Troubleshooting](/troubleshooting).
+see [Errors](/errors#spending-limits-and-policies-30203036). It does not require a
+connected wallet: the stored key is enough.
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. The key is kept as a non-extractable WebCrypto key in IndexedDB,
+  not in localStorage, and signs only for the wallet that created the session: with no
+  wallet connected, or another one, `signAndSendWithSession` rejects with
+  `KeyWalletMismatchError` before anything is signed or sent. A key whose session has
+  expired is deleted when it is next read. See
+  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+</Callout>
 
 ### `revokeSession`
 
 ```ts
-await revokeSession();
+await revokeSession();                                   // the session createSession stored
+await revokeSession({ sessionPda: 'SESSION_PDA_BASE58' }); // a specific one, e.g. an external key's
 ```
 
-Closes the active session PDA and refunds rent.
+Closes the session PDA and refunds the rent. Revoking the stored session also removes its
+key from `localStorage`. After expiry, anyone may close a session with
+`CloseExpiredSession` and keep the rent: revoke yours if you want it back.
 
 ---
 
@@ -292,18 +331,48 @@ Closes the active session PDA and refunds rent.
 
 ### `addAuthority`
 
-Adds a fresh Ed25519 authority on the smart wallet. The SDK generates the keypair
-internally and persists it for `signAndSendWithAuthority`.
+Adds a fresh Ed25519 authority on the wallet. The SDK generates the keypair and keeps its
+secret key in `localStorage['lazorkit-authority']` (plain text) for
+`signAndSendWithAuthority`.
 
 ```ts
-import { ROLE_ADMIN, ROLE_SPENDER } from '@lazorkit/wallet';
+import { Actions, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '@lazorkit/wallet';
 
+// An Admin (the default role):
+await addAuthority({ role: ROLE_ADMIN });
+
+// A Delegate: needs a spending policy on a v2 wallet.
 const { authorityPda, authorityPublicKey } = await addAuthority({
-  role: ROLE_SPENDER,                   // default if omitted
+  role: ROLE_SPENDER,
+  policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
 });
 ```
 
-**Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`.
+| Field          | Type         | Notes |
+| -------------- | ------------ | ----- |
+| `role`         | `number`     | `ROLE_ADMIN` (default) or `ROLE_SPENDER` (Delegate). |
+| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. |
+| `unrestricted` | `boolean`    | Required to add a key to a **v1** wallet, where any added key can spend the whole vault. Ignored on v2. |
+
+**Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
+[Ranks & policies](/concepts/rbac).
+
+<Callout type="warn" title="Next release (3.3.0): role is required">
+  Not published yet, and breaking. `addAuthority` has no default role: `role` is
+  required in the types, and a call without it, or with a value that is not a rank,
+  throws before anything is read or the passkey is prompted. In 3.2.1 the default made
+  the new key an Admin, with no policy and no expiry. Name the rank:
+
+  | Rank | Constant | May add and remove | Spends |
+  | ---- | -------- | ------------------ | ------ |
+  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
+  | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
+  | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
+
+  For a key your app holds, use `ROLE_SPENDER` with a `policy`. `role: ROLE_ADMIN` keeps
+  3.2.1's behaviour. The key the SDK keeps for `signAndSendWithAuthority` is bound to the
+  wallet like a session key: it signs only while that wallet is connected.
+</Callout>
 
 ### `signAndSendWithAuthority`
 
@@ -316,31 +385,46 @@ const sig = await signAndSendWithAuthority({ instructions: [ix] });
 ### `removeAuthority`
 
 ```ts
-await removeAuthority(targetAuthorityPda);   // base58 string
+await removeAuthority('TARGET_AUTHORITY_PDA');   // base58 string
 ```
 
 <Callout type="warn">
-  You can't remove the last Owner. Transfer ownership first — use `LazorKitClient`
-  directly if needed.
+  You can't remove the last Owner, nor the passkey you sign with. An Admin can remove only
+  Delegates.
 </Callout>
+
+---
+
+## v1 wallets
+
+`protocolVersion` is `1` for a wallet made before LazorKit v2. Every method routes to the
+v1 program for it, through `v1PaymasterConfig`. After LazorKit retires v1, its actions
+reject with `V1WalletRetiredError` (4018): the funds are safe and the wallet must move to
+v2. A stored v1 wallet that has been migrated rejects with `V1WalletMigratedError`; call
+`connect` again. See [Migrating from v1](/v1-to-v2).
 
 ---
 
 ## Lower-level escape hatch
 
-Everything from the underlying TS SDK is re-exported:
+The package re-exports the client and helpers from `@lazorkit/sdk-legacy`:
 
 ```ts
 import {
   LazorKitClient,
+  PROGRAM_ID_DEVNET,
   findWalletPda, findVaultPda, findAuthorityPda,
   findSessionPda, findDeferredExecPda,
-  Actions,
+  Actions, serializeActions,
   ROLE_OWNER, ROLE_ADMIN, ROLE_SPENDER,
   AUTH_TYPE_ED25519, AUTH_TYPE_SECP256R1,
-  PublicKey, Connection, Transaction, TransactionInstruction, Keypair,
+  PublicKey, Connection,
 } from '@lazorkit/wallet';
 
-const client = new LazorKitClient(connection);
-const list = await client.listAuthorities(walletPda);
+const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET);
+const authorities = await client.findAuthoritiesByWallet(new PublicKey('WALLET_PDA_BASE58'));
 ```
+
+The PDA helpers derive **v2** addresses (at the v2 mainnet id unless you pass a program
+id); never use them to derive a user's address.

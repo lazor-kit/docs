@@ -1,6 +1,6 @@
 ---
 title: Paymaster
-description: How gas sponsorship and protocol fee collection work in LazorKit — the Paymaster service, fee_payer economics, and on-chain FeeRecord tracking.
+description: How gas sponsorship and protocol fee collection work in LazorKit — the Paymaster service, fee_payer economics, on-chain FeeRecord tracking, and using a paymaster with the SDKs.
 ---
 
 # Paymaster
@@ -8,12 +8,14 @@ description: How gas sponsorship and protocol fee collection work in LazorKit �
 The Paymaster is the entity that sponsors gas for LazorKit transactions. It acts as the transaction's `fee_payer` on Solana — signs the transaction, pays the SOL required for gas, and submits it on-chain.
 
 <Callout type="info" title="In practice, the developer is the Paymaster">
-  Most LazorKit integrations do not use a third-party Paymaster service. The **developer (integrator) is the `fee_payer`** — they fund their users' wallet creation and execution directly.
+  Most LazorKit integrations do not use a third-party Paymaster service. The **developer (integrator) is the `fee_payer`** — they fund their users' wallet creation and execution directly, usually through a [Kora](https://github.com/solana-foundation/kora) relayer they run or use.
 
   The developer recoups the cost through **app-level monetization** — on-ramp markups, subscription fees, product fees, in-app purchases, or direct token collection. LazorKit doesn't prescribe this layer; it only cares about the `fee_payer` pubkey on-chain.
 
   The developer's `fee_payer` pubkey is tracked in `FeeRecord` — that's the basis for early contributor rewards at token launch. **If you sponsor your users' fees, you earn.**
 </Callout>
+
+This page describes protocol v2 (devnet today; see [Networks & versions](/networks)).
 
 ---
 
@@ -37,24 +39,30 @@ The end user never needs to hold SOL. The developer acts as the economic bridge:
 
 ## Protocol Fee Collection
 
-LazorKit captures a protocol fee on sponsored transactions. The fee is deducted from the transaction's `fee_payer` — which is the Paymaster, not the end user.
+LazorKit captures a protocol fee on `CreateWallet`, `Execute` and `ExecuteDeferred`. The
+fee is deducted from the transaction's `fee_payer` — the Paymaster, not the end user.
 
-Fee collection applies to **every transaction** whenever `ProtocolConfig` is enabled — no opt-in required. What *is* opt-in is **reward tracking**: the integrator's cumulative contribution only accumulates in a `FeeRecord` PDA if one has been registered for that `fee_payer`. Unregistered payers still pay the fee, they just don't accrue towards early-contributor rewards.
-
-<Callout type="info" title="Register your FeeRecord to earn">
-  The protocol fee is charged either way. Registering a `FeeRecord` for your `fee_payer`
-  pubkey is what turns those fees into a reward claim at token launch. No registration →
-  no on-chain accumulation → no share.
-</Callout>
+- **Charged when configured.** The fee is collected when `ProtocolConfig` exists, is
+  enabled and sets a fee. Otherwise collection is **skipped and the transaction
+  proceeds**, so a disabled or missing config can never block a wallet's funds. Devnet v2
+  has no `ProtocolConfig` today, so no fee is charged there.
+- **Capped.** Neither fee can be set above **0.01 SOL** (`FeeExceedsMaximum`, 4014).
+- **Every payer is tracked.** Each `fee_payer` gets a `FeeRecord`, created on its first
+  fee-paying transaction: the SDK prepends a permissionless `RegisterPayer` instruction
+  (about 0.00112 SOL of rent, paid by the payer, once), and the program also creates the
+  canonical record inline when a client passes it uncreated. A record at any other address
+  is refused (`InvalidFeeRecord`, 4011). In protocol v1, only payers registered beforehand
+  were tracked.
+- **The fee accounts are mandatory.** The three instructions must carry the four fee
+  accounts even when no fee is charged; without them the program answers
+  `FeeAccountsRequired` (4008). The SDK clients always add them.
 
 Flow per transaction:
 
-1. SDK always appends 4 accounts (`ProtocolConfig`, `FeeRecord` PDA derived from the payer, `TreasuryShard`, `SystemProgram`) when the protocol is enabled.
-2. Entrypoint detects them and transfers SOL from the `fee_payer` to a randomly-selected treasury shard.
-3. If `FeeRecord` is a valid program-owned account, bump `total_fees_paid`, `tx_count`, `wallet_count`. Otherwise skip the counter update.
-4. The 4 protocol accounts are stripped before passing to the processor — processor is unchanged.
-
-Fee collection applies to: `CreateWallet`, `Execute`, and `ExecuteDeferred`.
+1. The SDK appends 4 accounts (`ProtocolConfig`, the payer's `FeeRecord`, a `TreasuryShard`, `SystemProgram`) to every fee-eligible instruction, and prepends `RegisterPayer` on the payer's first fee-paying transaction.
+2. The entrypoint checks that each account is the canonical one, creates the `FeeRecord` if it is still empty, and — when a fee is configured — transfers SOL from the `fee_payer` to the treasury shard.
+3. It bumps the `FeeRecord`'s `total_fees_paid`, `tx_count` and `wallet_count`.
+4. The 4 accounts are stripped before the instruction runs.
 
 ---
 
@@ -80,22 +88,25 @@ Admin calls `WithdrawTreasury` once per shard to sweep accumulated SOL to the tr
 
 ## On-Chain Accounts
 
-### ProtocolConfig — `["protocol_config"]`
+### ProtocolConfig — `["lk2:protocol_config"]`
 
-Global configuration. Set once via `InitializeProtocol`.
+Global configuration. Set once via `InitializeProtocol`, whose signer is fixed in the
+program binary.
 
 | Field | Description |
 |---|---|
 | `admin` | Protocol admin pubkey |
+| `pending_admin` | Admin rotation in progress: the new admin accepts it (two steps) |
 | `treasury` | Withdrawal destination |
-| `creation_fee` | Lamports per `CreateWallet` |
-| `execution_fee` | Lamports per `Execute` / `ExecuteDeferred` |
-| `enabled` | 0 = disabled, 1 = enabled |
+| `creation_fee` | Lamports per `CreateWallet` (at most 0.01 SOL) |
+| `execution_fee` | Lamports per `Execute` / `ExecuteDeferred` (at most 0.01 SOL) |
+| `enabled` | 0 = disabled (collection skipped), 1 = enabled |
 | `num_shards` | Number of treasury shards |
 
-### FeeRecord — `["fee_record", fee_payer_pubkey]`
+### FeeRecord — `["lk2:fee_record", fee_payer_pubkey]`
 
-Created by admin via `RegisterPayer`. One per `fee_payer` — typically one per Paymaster operator.
+Created by the permissionless `RegisterPayer` (the SDK adds it for you) or inline by the
+program. One per `fee_payer` — typically one per Paymaster operator.
 
 | Field | Description |
 |---|---|
@@ -108,23 +119,21 @@ FeeRecord currently tracks the **`fee_payer`** — the developer (or Paymaster s
 
 Future: a parallel tracking mechanism may be added for end users, so that users can also be recognized for their protocol usage.
 
-### TreasuryShard — `["treasury_shard", shard_id]`
+### TreasuryShard — `["lk2:treasury_shard", shard_id]`
 
 8-byte account. SOL accumulates as lamport balance. Created once per shard via `InitializeTreasuryShard`.
+
+Protocol v1 used the same seeds without the `lk2:` prefix.
 
 ---
 
 ## Fee Amounts
 
-Fees are configurable. Current values are set by the protocol admin.
+Fees are set by the protocol admin; read them from `ProtocolConfig` (each is capped at
+0.01 SOL). Devnet v2 has no fee configured today.
 
-| Instruction | Typical Fee |
-|---|---|
-| CreateWallet | ~5,000 lamports |
-| Execute | ~2,000 lamports |
-| ExecuteDeferred | ~2,000 lamports |
-
-Per fee-eligible transaction overhead: ~3,000 additional CU and +128 bytes (4 extra accounts).
+Per fee-eligible transaction, the fee accounts add 4 account keys (about 128 bytes without
+a lookup table).
 
 ---
 
@@ -132,7 +141,7 @@ Per fee-eligible transaction overhead: ~3,000 additional CU and +128 bytes (4 ex
 
 `FeeRecord.total_fees_paid` tracks cumulative fees per `fee_payer` proportional to the volume of activity they sponsored. When the protocol token launches, early contributor rewards are distributed based on this data:
 
-1. Snapshot all `FeeRecord` accounts via `getProgramAccounts` (filter by discriminator `6`)
+1. Snapshot all `FeeRecord` accounts via `getProgramAccounts` (filter by discriminator `0x26` in v2)
 2. Calculate share: `contributor_share = total_fees_paid / sum_all_fees`
 3. Distribute via merkle airdrop or direct transfer
 
@@ -142,9 +151,58 @@ This is a direct growth incentive: LazorKit does not take a cut from your app-le
 
 ---
 
+## Using a paymaster with the SDKs
+
+The React and React Native SDKs send every transaction to a Kora-compatible JSON-RPC
+endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
+`https://kora.devnet.lazorkit.com`.
+
+- **Requests.** `getPayerSigner` for the fee payer, then `signAndSendTransaction` with
+  `{ transaction, signer_key }`, where `signer_key` is the fee payer the transaction names.
+- **`apiKey`** is sent as the `x-api-key` header. It ships inside your web bundle or app,
+  so anyone can read it: it identifies a client, it does not protect the relayer. Protect
+  the relayer with what Kora enforces server-side (reCAPTCHA, usage limits, a lamport cap,
+  `require_one_of_programs`).
+- **Confirmation.** The wallet waits for each transaction to confirm, whatever the relayer
+  answers. Kora confirms before it answers by default, so this costs one status read; a
+  relayer configured to answer early (`respond_after` "sent") makes the wallet poll.
+- **Failures** reject with `PaymasterError` (`code`, `data`, `httpStatus`, `signature`,
+  `maybeSent`). The web SDK resends a failed send with the same signed bytes, up to 3
+  attempts in all, so the transaction can land at most once; it does not resend
+  LazorKit's 3006 or 3014 (nor a 4018 from the next release, 3.3.0, not published yet).
+  The React Native SDK never resends. When the relayer may have
+  sent the transaction but no answer came back (on web, from any attempt), the call
+  rejects with `TransactionOutcomeUnknownError`. A send request may take 90 s, other
+  calls 30 s.
+- **v1 wallets** need a relayer that sponsors the v1 program: `v1PaymasterConfig` (web) /
+  `v1ConfigPaymaster` (mobile). LazorKit's v2 relayer does not, by design: sponsoring the
+  full v1 program lets any v1 transaction pull the fee payer into its inner calls.
+
+`feeToken` is forwarded to the relayer as `fee_token` by the React Native SDK only; the
+web SDK (3.2.1) ignores it. LazorKit's relayer sponsors for free.
+
+### Running your own Kora
+
+Configuration for the v2 programs, with the reasoning for each value, is in
+[`deploy/kora`](https://github.com/lazor-kit/lazorkit-protocol/tree/develop/deploy/kora)
+in the protocol repo. In short:
+
+- `allowed_programs` must include the LazorKit v2 program id **and** the Secp256r1
+  precompile (`Secp256r1SigVerify1111111111111111111111111`), plus whatever your users'
+  transactions call.
+- `require_one_of_programs` set to the LazorKit program, so the relayer refuses
+  transactions that never touch it.
+- `system.allow_transfer` and `system.allow_create_account` stay `true`: the program pays
+  rent and the protocol fee through System CPIs with the fee payer as source.
+- Add the v1 id only once it runs the sunset binary.
+
+---
+
 ## Current Status
 
-- Protocol fee system is live on Solana mainnet
-- Fee collection operates in native SOL
-- Protocol token for governance and fee settlement is not yet deployed
-- Future: open Paymaster competition where multiple providers compete on sponsorship terms (rates, supported tokens, SLAs)
+- Protocol v1's fee system is live on Solana mainnet.
+- Protocol v2's fee system is deployed on devnet, with no fee configured yet; the v2
+  mainnet program is not deployed.
+- Fee collection operates in native SOL.
+- Protocol token for governance and fee settlement is not yet deployed.
+- Future: open Paymaster competition where multiple providers compete on sponsorship terms (rates, supported tokens, SLAs).

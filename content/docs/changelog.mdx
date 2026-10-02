@@ -5,6 +5,212 @@ description: Protocol and SDK changes that affect integrators.
 
 A running log of the changes that move user-visible SDK or on-chain behaviour. Internal
 refactors and perf work are summarised when they affect CU budgets or account sizes.
+Each package's own CHANGELOG has the full detail:
+[`@lazorkit/wallet`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md),
+[`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
+[protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
+
+<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
+  In review for `@lazorkit/wallet` 3.3.0 and `@lazorkit/wallet-mobile-adapter` 2.3.0,
+  not published. These docs describe the published releases until they ship.
+
+  - **Breaking:** `addAuthority` (web) and `addAuthorityEd25519` (mobile) have no default
+    role; `role` is required, and a missing or unknown one (or `ROLE_OWNER` on a v2
+    wallet) throws before the prompt.
+    Migration: pass the role you relied on (`ROLE_ADMIN` on web, `ROLE_SPENDER` with a
+    policy on mobile).
+  - The `is*Error` predicates recognise the SDK's own error classes, through `cause` and
+    wallet-adapter wrappers.
+  - One callback contract on web and mobile: callbacks run after `isSigning` clears, one
+    per call, and a throwing callback changes nothing.
+  - Web: the paymaster no longer resends a 4018; it fails on the first answer with
+    `V1WalletRetiredError` for a retired v1 wallet.
+  - Web: session and authority keys are kept as non-extractable WebCrypto keys in
+    IndexedDB instead of plaintext `localStorage` (new `keyStorage` prop,
+    `forgetStoredKeys()`). Each key signs only while the wallet it was registered for is
+    connected (new `KeyWalletMismatchError`, `isKeyWalletMismatchError`). `disconnect`
+    deletes the session key unless `keepSessionKeys: true`, also one whose session lands
+    after it. Expired session keys are deleted when read.
+
+  Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release),
+  [React Native › Upgrading to 2.3.0](/react-native-sdk/upgrading#upgrading-to-230-next-release).
+</Callout>
+
+## 2026-10-01 — wallet 3.2.1, wallet-mobile-adapter 2.2.1
+
+### Fixed
+
+- **An inner program's 3014 is no longer reported as `DeferredExpiredError`.** A 3014 from
+  TX2 is `DeferredExpiredError` only when it is established: its logs name LazorKit as the
+  first program to fail, it landed after `expires_at`, or the chain is past `expires_at`
+  when the account is read again (now at `processed`). Otherwise — Anchor's
+  `AccountNotAssociatedTokenAccount` in a swap, say — the error is thrown as it came,
+  instead of telling the user to approve again for a failure that would repeat.
+- **`isDeferredExpiredError`** is true for every `DeferredExpiredError` (it was false for
+  the one thrown before sending), including one from another copy of the package. For a
+  raw 3014 it is true only when the logs name LazorKit.
+- Every error from sending TX2 carries `deferredExecPda`, `authorizeSignature` and
+  `expiresAtSlot`: new type `DeferredFailureContext`.
+
+---
+
+## 2026-09-30 — wallet 3.2.0, wallet-mobile-adapter 2.2.0: the deferred window
+
+### Changed
+
+- **`authorizeAndExecute` / `authorizeDeferred` authorize 1500 slots by default**
+  (`DEFAULTS.DEFERRED_EXPIRY_SLOTS`), up from 300, which could run out while the wallet
+  waited up to two minutes for TX1. `expiryOffset` must be 10–9000, or the call throws a
+  `RangeError` before the prompt.
+- Before TX2 is sent, the authorization's expiry is read; an expired one is not sent, and
+  a 3014 rejects with **`DeferredExpiredError`** (`authorizeSignature`,
+  `deferredExecPda`, `expiresAtSlot`). A paymaster's 3014 is no longer retried.
+- New exports: `DeferredExpiredError`, `isDeferredExpiredError`, `DEFERRED_EXPIRED_CODE`,
+  `MIN_DEFERRED_EXPIRY_SLOTS`, `MAX_DEFERRED_EXPIRY_SLOTS`; web also `DeferredTxPayload`.
+
+### Mobile only
+
+- Every action's promise settles, and its `onSuccess` / `onFail` runs, once `isSigning`
+  is `false` again: two sends in a row both run, and so does a send made from `onSuccess`.
+  A callback that throws is logged and does not change the outcome. The store's
+  `signAndExecuteTransaction`, `signMessage` and `transferSol` resolve with their results.
+
+---
+
+## 2026-09-30 — wallet 3.1.0, wallet-mobile-adapter 2.1.0, sdk-legacy 1.3.0–1.3.1, sdk 1.0.0-rc.4–rc.5
+
+### New
+
+- **A passkey with no wallet can connect.** Its public key is recovered from two of its
+  signatures (`resolvePasskeyPublicKey` / `recoverPasskeyPublicKeys`, sdk-legacy 1.3.0),
+  at the cost of one extra prompt, and the wallet is created for that key. Before, such a
+  passkey could never get a wallet. See [Wallet Confirmation](/react-sdk/wallet-confirmation#a-passkey-that-has-no-wallet-yet).
+- **Every send resolves once its transaction is confirmed**, and rejects if it failed on
+  chain. New errors: `TransactionFailedError`, `TransactionExpiredError`,
+  `TransactionOutcomeUnknownError`, `ConfirmationTimeoutError`,
+  `PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError`. See
+  [Sending transactions](/react-sdk/sending-transactions).
+- **sdk-legacy / kit: challenge-read options.** `minContextSlot` and `commitment` on every
+  `prepare*`, on `secp256r1(signer, opts)`, `migrateV1Wallet` and `readCounter`; reads
+  retried on -32016 for up to 10 s (30 s at `finalized`), then
+  `MinContextSlotNotReachedError`. Default commitment `confirmed`. See
+  [Passkey signing](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
+
+### Fixed
+
+- **Passkey transactions back to back no longer fail with `SignatureReused` (3006).**
+  Signatures for one passkey are prepared one at a time, each read at `confirmed` from a
+  node that has executed the previous transaction. The slot floor is kept in
+  `localStorage` / `AsyncStorage` for ten minutes. A 3006 is not retried; an inner
+  program's 3006 is reported as what it is.
+- A landed transaction is no longer reported as expired, and a lost paymaster answer
+  rejects with `TransactionOutcomeUnknownError` instead of a plain error. On web that
+  happens once the same signed bytes, resent up to 3 attempts in all, have brought no
+  answer back; the mobile adapter does not resend.
+- Previews over 1232 bytes are compiled with the lookup tables instead of failing before
+  the prompt; the web adapter now handles dApp v0 transactions with lookup tables.
+- sdk-legacy 1.3.1 / rc.5: a failed protocol-fee read stops the challenge reads.
+
+### Mobile only
+
+- `expo-web-browser` 15 (Expo SDK 54) is accepted alongside 14.2.
+
+---
+
+## 2026-09-29 — wallet 3.0.0–3.0.2, wallet-mobile-adapter 2.0.0, sdk-legacy 1.2.0, sdk 1.0.0-rc.3: protocol v2 support
+
+The UI SDKs speak protocol v2 beside v1, by building on `@lazorkit/sdk-legacy` 1.x (and
+0.3.2 for v1 wallets). Upgrade guides: [React](/react-sdk/upgrading),
+[React Native](/react-native-sdk/upgrading).
+
+### New
+
+- **v1 and v2 side by side, routed per wallet.** `connect` finds a passkey's own wallet on
+  either protocol; only a passkey with none gets a new (v2) wallet. New:
+  `protocolVersion`, `v1PaymasterConfig` (web) / `v1ConfigPaymaster` (mobile) for the
+  relayer that still sponsors v1, `cluster` for RPC URLs that do not name one,
+  `V1WalletRetiredError` (4018), `V1WalletMigratedError`. See [Migrating from v1](/v1-to-v2).
+- **Wallet confirmation.** `connect` uses a wallet on its own only when it is the one
+  wallet the passkey has signed for and nothing else can spend from it; otherwise it asks
+  the user: `onConfirmWallet` (built-in chooser, your handler, or `'throw'`),
+  `confirmWallet`, `trustedAuthorities`, `watchMints`, `WalletNeedsConfirmationError`,
+  `WalletConfirmationDeclinedError`; mobile `<WalletChooser />` and
+  `WalletChooserNotShownError`. Closing the portal rejects at once with
+  `PortalCancelledError`.
+- **sdk-legacy 1.2.0 / rc.3:** `findOwnPasskeyWallet` and its steps; the v2 program ids
+  (`PROGRAM_ID_MAINNET` = `LazorFroi…`, `PROGRAM_ID_DEVNET` = `57bTNW…`) and
+  `PROGRAM_ID_*_V1`; a safe `migrateV1Wallet`.
+
+### Breaking
+
+- `PROGRAM_ID` is the v2 mainnet id; the PDA helpers derive v2 addresses. Use the stored
+  vault (`vaultPubkey` / `smartWalletPubkey`), never a derived one.
+- The web wallet adapter's `publicKey` is the **vault** (it was the wallet PDA).
+- `createSession` without limits throws unless `unrestricted: true`.
+- `addAuthority` with `ROLE_SPENDER` (a Delegate) needs a `policy` on v2; adding a key to a
+  v1 wallet needs `unrestricted: true`.
+- No export of `@lazorkit/wallet` 2.1.0 was removed. The package CHANGELOG also lists the
+  `create*Ix` builders, `appendProtocolFeeAccounts` and `readAuthorityState` as removed
+  from the web package, but no published 2.x exported them.
+
+### Fixed
+
+- 3.0.1: peer `@solana/web3.js` ^1.99.0.
+- 3.0.2: the wallet adapter reads at `confirmed` (it read at `finalized`, up to 15 s behind,
+  and could sign a spent counter); no global `Buffer` needed.
+
+---
+
+## 2026-09-21 → 09-23 — sdk-legacy 0.3.2, 1.0.0, 1.1.0, 1.1.1; sdk 1.0.0-rc.1, rc.2
+
+- **`@lazorkit/sdk-legacy` 1.0.0** speaks protocol v2 and is published under `next`;
+  `latest` stays on **0.3.2**, the v1 line (no Node polyfills needed). Breaking for apps
+  moving to 1.x: every PDA address changes (`lk2:` seeds), sessions need actions or
+  `unrestricted`, a Delegate needs a policy, Owners need `allowOwner`, deferred payloads
+  are versioned, and the protocol-fee accounts are mandatory.
+- **1.1.0 / 1.1.1:** `findV1WalletsByOwner` and `migrateV1Wallet` without the user seed;
+  the owner key returned from the scan. Do not use 1.1.x's `migrateV1Wallet` — fixed in
+  1.2.0.
+- **`@lazorkit/sdk`** (Solana Kit) release candidates rc.1 and rc.2, with the same
+  migration surface. See [SDK (Solana Kit)](/web3js-v2).
+
+---
+
+## Protocol v2 (program 2.0.0) — devnet now, mainnet pending
+
+Deployed on devnet at `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv`; the mainnet id
+`LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` is not deployed yet. v2 runs **at its own
+program id**; v1 keeps running until it is retired to a sunset binary that serves only
+`ReclaimDeferred`, `MigrateWallet` and `CloseExpiredSession` and answers everything else
+with `RetiredDeployment` (4018). See [Networks & versions](/networks).
+
+- **Ranks and policies.** Owner / Admin / Delegate; a Delegate must carry a spending
+  policy (3033–3035); several Owners per wallet. v1's `Execute` never checked rank.
+- **The passkey challenge names the wallet**; a client building the old challenge fails
+  with 3005.
+- **`MigrateWallet`** (17) moves a v1 wallet's funds to v2 in one Owner-signed instruction;
+  **`CloseExpiredSession`** (18) lets anyone close an expired session and keep its rent
+  (3036 for a live one).
+- **Fees:** collection is skipped rather than reverted when not configured; each fee is
+  capped at 0.01 SOL (4014); every fee payer's `FeeRecord` is created automatically; the
+  fee accounts are mandatory (4008).
+- `ExecuteDeferred` moves its rent after its inner calls, so an inner instruction can repay
+  the payer; `ReclaimDeferred` pays only the original payer.
+- `lk2:` seeds and discriminators `0x21`–`0x27`; serialized deferred payloads carry a
+  version.
+- Security fixes C-1, H-1 to H-4 and M-2 to M-6 from the 2026 audit.
+
+---
+
+## 2026-04-29 → 05-06 — sdk-legacy 0.2.0 and 0.3.1 (protocol v1)
+
+- Per-cluster program ids: `LazorKitClient` infers the id from the RPC URL (and throws for
+  one it cannot place); `PROGRAM_ID_MAINNET` / `PROGRAM_ID_DEVNET` replace `PROGRAM_ID`.
+- Error decoding for 3030–3032 and 4001–4007; `PROGRAM_ID_FOUNDATION_DEVNET`.
+- `@lazorkit/wallet-mobile-adapter` 2.0.0-beta.4 was published on 2026-04-30; the npm
+  `beta` tag still points at it.
+
+---
 
 ## 2026-04-22 — React Native SDK: deferred split, cross-device fix, RPC opt
 
@@ -53,12 +259,12 @@ The RN SDK's `WalletInfo` keeps `smartWallet` pointing to the **vault PDA** (whe
 funds live) plus a separate `walletPda` field for the internal metadata account. The
 React SDK's latest convention flipped this: `smartWallet` = internal wallet PDA,
 `vaultPda` = vault. The two SDKs are therefore semantically different at the storage
-layer — [file an issue](https://github.com/lazor-kit/wallet-mobile-adapter/issues) if
-you need them aligned on your project.
+layer; `vaultPubkey` is the vault on both. See
+[Networks & versions](/networks#which-address-is-the-users-wallet).
 
 ---
 
-## 2026-04-22 — React SDK: v0/legacy, deferred split, cross-device fixes
+## 2026-04-22 — React SDK (`@lazorkit/wallet` 2.1.0): v0/legacy, deferred split, cross-device fixes
 
 ### New
 
@@ -126,7 +332,8 @@ you need them aligned on your project.
 - **Fee model.** Protocol fee is now charged on **every transaction** when the protocol
   is enabled — not opt-in per `fee_payer`. Registering a `FeeRecord` is opt-in for
   **reward tracking**; unregistered payers still pay the fee but don't accumulate a
-  claim at token launch.
+  claim at token launch. (Protocol v1. In v2 every fee payer's `FeeRecord` is created
+  automatically.)
 
 ### Improvements
 
@@ -153,16 +360,8 @@ you need them aligned on your project.
 
 ### What to do
 
-<Cards>
-  <Card title="RN SDK upgrade guide" href="/react-native-sdk/getting-started"
-    description="wallet-mobile-adapter ≥ 2.0.0 — no code changes for consumers, internal methods renamed." />
-  <Card title="React SDK upgrade guide" href="/react-sdk/getting-started"
-    description="@lazorkit/wallet upgrades bring prepare/finalize + publicKeyBytes optional." />
-  <Card title="web3.js v1 types" href="/web3js-v1/types"
-    description="Updated Secp256r1Params + cross-machine deferred helpers." />
-  <Card title="Troubleshooting" href="/troubleshooting"
-    description="Full error code map kept in sync — including 0xbd0 session exhaustion." />
-</Cards>
+These April changes are all included in the current releases; follow the upgrade guides
+for [React](/react-sdk/upgrading) and [React Native](/react-native-sdk/upgrading).
 
 ---
 
@@ -170,10 +369,12 @@ you need them aligned on your project.
 
 - **Solita artifacts removed.** The SDK is now fully hand-written for fine-grained
   control over wire layout. No IDL-generated wrappers remain.
-- **Protocol fee system live on mainnet.** Sharded treasury (16 shards by default),
-  per-`fee_payer` `FeeRecord` counters, fees collected in native SOL.
-- **Seedless + session.money launched.** First production integrators running on the
+- **Protocol fee system live on mainnet (protocol v1).** Sharded treasury (16 shards by
+  default), per-`fee_payer` `FeeRecord` counters, fees collected in native SOL.
+- **Seedless launched** on protocol v1: the first production integrator running on the
   LazorKit execution layer.
 
 For the authoritative change history, browse the
-[`lazorkit-protocol` git log](https://github.com/lazor-kit/lazorkit-protocol/commits/main).
+[`lazorkit-protocol` CHANGELOG](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md)
+and its [git log](https://github.com/lazor-kit/lazorkit-protocol/commits/develop) (v2 work
+is on `develop`).

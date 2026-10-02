@@ -1,0 +1,217 @@
+---
+title: Sending transactions
+description: When a send resolves, what isSigning means, how passkey transactions are sequenced, the deferred window, callbacks, and what the paymaster does.
+---
+
+Applies to `@lazorkit/wallet` **3.1.0 and later** (deferred window: 3.2.0; 3014
+attribution: 3.2.1). Earlier releases resolved as soon as the paymaster answered.
+
+## A send resolves once its transaction is confirmed
+
+`signAndSendTransaction`, `signAndSendWithSession`, `signAndSendWithAuthority`,
+`authorizeAndExecute`, `authorizeDeferred`, `executeDeferred`,
+`LazorkitWalletAdapter.sendTransaction` and the Wallet Standard
+`signAndSendTransaction` all resolve with the signature only once the transaction is
+**confirmed**, and reject if it failed on chain. The paymaster's answer is not enough:
+a relayer that answers once the RPC accepted a transaction answers before it ran.
+
+```tsx
+'use client';
+import { useWallet, TransactionFailedError, TransactionOutcomeUnknownError } from '@lazorkit/wallet';
+import { SystemProgram, PublicKey } from '@solana/web3.js';
+
+export function PayButton({ to, lamports }: { to: string; lamports: number }) {
+  const { vaultPubkey, isSigning, signAndSendTransaction } = useWallet();
+
+  const pay = async () => {
+    if (!vaultPubkey) return;
+    try {
+      const signature = await signAndSendTransaction({
+        instructions: [SystemProgram.transfer({ fromPubkey: vaultPubkey, toPubkey: new PublicKey(to), lamports })],
+      });
+      console.log('confirmed', signature);
+    } catch (e) {
+      if (e instanceof TransactionOutcomeUnknownError) {
+        // It may have landed. Check e.signature (or the balance) before offering a retry.
+        console.warn('outcome unknown', e.signature);
+      } else if (e instanceof TransactionFailedError) {
+        console.error('failed on chain', e.logs);
+      } else {
+        throw e;
+      }
+    }
+  };
+
+  return <button onClick={pay} disabled={isSigning}>Pay</button>;
+}
+```
+
+Every error a send can reject with, and what to do about it: [Errors › Sending a
+transaction](/errors#sending-a-transaction).
+
+## `isSigning` stays `true` until the transaction is confirmed
+
+`isSigning` (and `isLoading`) is `true` from the passkey prompt until the transaction is
+confirmed or fails, up to the two-minute confirmation limit
+(`ConfirmationTimeoutError`). While it is `true`, another call to a hook method rejects
+at once with `Error('Already signing')`.
+
+- Disable send buttons while `isSigning`.
+- To send twice, `await` the first call, then make the second.
+- `connect` has its own flag, `isConnecting`.
+
+## One passkey, one transaction at a time
+
+A passkey signature commits to the passkey's counter, read before the prompt opens. If
+it is read before the previous transaction has executed, the new signature reuses the
+counter and LazorKit rejects it with `SignatureReused` (3006), after the user approved.
+The SDK prevents that within a page:
+
+- Signatures for one passkey are prepared one at a time: through the hook, the
+  `LazorkitWalletAdapter` and the Wallet Standard wallet alike. The adapter and Wallet
+  Standard queue a second call; the hook refuses it with "Already signing".
+- Each challenge is read at `confirmed` from an RPC node that has executed the passkey's
+  previous transaction (`minContextSlot`). A load-balanced node that is behind answers
+  "not there yet" and is asked again.
+- That slot, and a send whose outcome is not known yet, are kept in `localStorage` (the
+  slot for ten minutes), so a reload or a second tab of the app starts from them.
+- A call made while the passkey's previous transaction still has no known outcome
+  rejects with `PreviousTransactionPendingError` and signs nothing.
+
+Two tabs or devices that sign with the same passkey **at the same moment** are not
+serialised, and one of them can fail with `SignatureReusedError`. The SDK never resends
+such a signature and never opens a new prompt on its own: ask the user to approve again.
+
+## Callbacks
+
+The `useWallet()` methods take no callbacks: `await` them. The store's actions
+(`useWalletStore`) also take `onSuccess` / `onFail`. In `@lazorkit/wallet` 3.2.1 they
+run **before** `isSigning` is cleared:
+
+- a send started inside `onSuccess` is refused with "Already signing";
+- if `onSuccess` throws, the call rejects and `onFail` runs, although the transaction
+  landed.
+
+So prefer the promise. If you use the callbacks, do not start another send from them, and
+do not let them throw.
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. 3.3.0 is planned to adopt the contract the React Native SDK already
+  has (2.2.0+): callbacks run once `isSigning` is `false`, exactly one per call, a send
+  started from a callback runs, and a callback that throws is logged and changes
+  nothing. A refusal ("Already signing", "No wallet connected") calls `onFail` too. This
+  page will say so once it ships.
+</Callout>
+
+## Transaction options
+
+| `transactionOptions` field | On web (3.2.1) |
+| -------------------------- | -------------- |
+| `addressLookupTableAccounts` | Used. Forces the v0 wire format. |
+| `txVersion` | `'v0'` (default) or `'legacy'`. Legacy with lookup tables throws. |
+| `clusterSimulation` | Passed to the portal's preview for `signAndSendTransaction`. |
+| `computeUnitLimit` | **Ignored**: accepted by the types, never read. |
+| `feeToken` | **Ignored**: accepted by the types, never read. |
+
+`connect({ feeMode })` is ignored on web too.
+
+## How much fits in one transaction
+
+A passkey `Execute` leaves about **345 bytes** for inner instructions without a lookup
+table (v0, the portal in an iframe; about 40 more from a popup). Chrome sometimes pads
+the passkey's `clientDataJSON`, which costs 109 of them. A Jupiter swap usually does not
+fit: a single-hop SOL→USDC route with Jupiter's lookup tables and compute-budget
+instructions came to 1245 bytes. Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0.
+
+Pass your lookup tables in `addressLookupTableAccounts`. The portal's preview is compiled
+without them whenever it fits in a packet, so the portal sees every account; only a
+payload over 1232 bytes is previewed with them. Anything larger goes through deferred
+execution.
+
+## Deferred execution
+
+`authorizeAndExecute` (one call) and `authorizeDeferred` + `executeDeferred` (two
+steps) split a large payload in two transactions: TX1 `Authorize` records hashes of the
+instructions, signed by the passkey; TX2 `ExecuteDeferred` carries the instructions and
+needs no passkey. TX2 leaves about 825 bytes for inner instructions.
+
+**The window.** The program accepts TX2 for `expiryOffset` slots after the slot TX1
+landed in: **10 to 9000, default 1500** (`DEFAULTS.DEFERRED_EXPIRY_SLOTS`). Outside that
+range the call throws a `RangeError` before the prompt.
+
+- A slot's length depends on the cluster and its load (devnet ran near 230 ms in
+  September 2026, mainnet near 400 ms). Do not convert it to minutes with a fixed figure;
+  9000 slots is tens of minutes, not hours.
+- The window starts at TX1's slot, not when `authorizeDeferred` resolves. The wallet may
+  wait up to two minutes for TX1 to confirm before it sends TX2, so do not pass a small
+  value.
+- The window is also how long an **unused approval stays executable**. Nothing can
+  cancel an authorization before it expires: anyone holding the payload can send TX2
+  until then.
+
+**When it expires.** An authorization that has already expired is not sent, and a
+paymaster's 3014 is not retried. The call rejects with `DeferredExpiredError`:
+nothing in the payload ran, the passkey approval is spent, and `deferredExecPda` still
+holds the paymaster's rent until the Authorize payer (the paymaster's fee payer) closes
+it with `ReclaimDeferred`. Only that payer can, and only after the window.
+
+A 3014 is reported as `DeferredExpiredError` only when it is the authorization's own:
+its logs name LazorKit as the first program to fail, it landed after `expires_at`, or the
+chain is past `expires_at` when the wallet reads the account again (at `processed`). An
+inner program's 3014 (Anchor's `AccountNotAssociatedTokenAccount`) is thrown as it came.
+Any error from sending TX2 carries `deferredExecPda`, `authorizeSignature` (when the call
+sent TX1) and `expiresAtSlot`: the `DeferredFailureContext` fields.
+
+```tsx
+import { useWallet, DeferredExpiredError } from '@lazorkit/wallet';
+
+export function useSwap() {
+  const { authorizeAndExecute } = useWallet();
+  return async (instructions: Parameters<typeof authorizeAndExecute>[0]['instructions']) => {
+    try {
+      return await authorizeAndExecute({ instructions, expiryOffset: 3000 });
+    } catch (e) {
+      if (e instanceof DeferredExpiredError) {
+        // Nothing ran. Ask the user to approve again.
+        console.warn('expired; rent held at', e.deferredExecPda.toBase58());
+        return null;
+      }
+      throw e;
+    }
+  };
+}
+```
+
+`executeDeferred` on another device or a server: a server has no hook. Use
+`LazorKitClient.executeDeferredFromPayload` from `@lazorkit/sdk-legacy` with the
+deserialized payload; see [Session keys › Deferred execution](/web3js-v1/session-keys#deferred-execution).
+
+## The paymaster
+
+- Every send goes to the paymaster as a Kora JSON-RPC `signAndSendTransaction` with
+  `{ transaction, signer_key }`. `apiKey` is sent as `x-api-key`. It ships inside your
+  bundle, so it is not a secret: limit what it allows on the relayer side.
+- The wallet waits for confirmation whatever the relayer answers. Kora confirms before it
+  answers by default, so the wait costs one status read. A relayer that answers early
+  (Kora with `respond_after` "sent") makes the wallet poll.
+- A send request may take 90 s; other paymaster calls 30 s.
+- A send that fails is resent with the **same signed bytes**, up to 3 attempts in all
+  (1 s, then 2 s apart), so the transaction can land at most once. That includes a lost
+  answer (no answer within 90 s, a network error, HTTP 5xx or 408): if a later attempt
+  gets an answer, the call goes on as usual.
+- Not resent: LazorKit's 3006 and 3014 (unless an earlier attempt may have been sent), a
+  failure that names the transaction's signature (that signature is followed instead),
+  and bytes the paymaster reports as already processed.
+- If every attempt fails and one of them may have been sent, or the bytes were already
+  processed, the call rejects with `TransactionOutcomeUnknownError`. The React Native SDK
+  does not resend at all.
+- v1 wallets go to `v1PaymasterConfig`. See [Migrating from v1](/v1-to-v2).
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. A 4018 (`RetiredDeployment`) will not be resent either: 3.2.1
+  sends it three times, 1 s and 2 s apart. 3.3.0 fails on the first answer, with
+  `V1WalletRetiredError` for a retired v1 wallet. See [Errors › v1 and v2](/errors#v1-and-v2).
+</Callout>
+
+More on running a relayer: [Paymaster › Using a paymaster with the
+SDKs](/concepts/paymaster#using-a-paymaster-with-the-sdks).

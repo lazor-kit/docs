@@ -4,10 +4,10 @@ description: How connect finds a returning user's wallet, when it asks the user 
 ---
 
 <Callout type="warn" title="Version note">
-  This page describes the protocol-v2 major release of `@lazorkit/wallet-mobile-adapter`,
-  the first built on `@lazorkit/sdk-legacy` 1.2.0. Earlier versions — `1.x`, and the
-  `2.0.0` betas up to `2.0.0-beta.4` — have none of `onConfirmWallet`, `confirmWallet`,
-  `trustedAuthorities`, `watchMints`, `<WalletChooser />` or the built-in chooser.
+  This page describes `@lazorkit/wallet-mobile-adapter` **2.0.0 and later** (key recovery:
+  2.1.0 and later). Earlier versions — `1.x`, and the `2.0.0` betas up to
+  `2.0.0-beta.4` — have none of `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`,
+  `watchMints`, `<WalletChooser />` or the built-in chooser.
 </Callout>
 
 A passkey's credential id is public — it sits in every account the passkey has touched —
@@ -26,14 +26,45 @@ on" at face value.
    transaction or token approval, and a vault that is still a plain system account.
 3. **Otherwise asks the user** which wallet is theirs — see
    [`onConfirmWallet`](#onconfirmwallet).
-4. **Creates a new (v2) wallet** only when the passkey is proven on no live wallet. It is
-   saved as created, never looked up again.
+4. **Creates a new (v2) wallet** only when the passkey is proven on no live wallet, for the
+   passkey's own key ([below](#a-passkey-that-has-no-wallet-yet)). It is saved as created,
+   never looked up again. Until the v2 program is deployed on mainnet, this step fails
+   there ([Networks & versions](/networks)).
 
 This runs only on a fresh `connect`; a stored wallet and sign actions never come through
 it. While a wallet is connected, `connect` returns it without opening the portal — a
 `confirmWallet` naming another wallet throws, so disconnect first to connect another
 passkey's wallet. The lookup reads with `getProgramAccounts`, so `rpcUrl` must allow it;
 a failed read fails `connect` rather than counting as "no wallet".
+
+### A passkey that has no wallet yet
+
+Every passkey starts without a v2 wallet, including one the user made on another device.
+Signing in never reveals a passkey's public key, so the portal's reply carries the key it
+has stored for it: none for a passkey made elsewhere, and possibly another passkey's. A
+wallet for a key the passkey does not hold could never sign, so the new wallet's key is
+always one a signature from this `connect` verifies against:
+
+- the reported key, once the proof from step 1 verifies against it;
+- otherwise the key **recovered from two of the passkey's signatures** over fresh
+  challenges (`resolvePasskeyPublicKey`, `@lazorkit/sdk-legacy` 1.3.0): the step 1 proof
+  and the connect reply's signature, or one more portal sign when the reply has none. That
+  is **one extra passkey prompt** (a portal sign over a random challenge, no transaction).
+
+Closing that prompt, or calling `disconnect` during it, rejects with
+`PortalCancelledError`. If the signatures do not settle on one key, `connect` throws an
+error that says so. A sign redirect that names another passkey than the one being
+connected also fails `connect`. In every case nothing is created.
+
+<Callout type="warn" title="Android: the redirect is the trust boundary">
+  The signatures come back in redirects, over challenges the SDK sent only in the portal
+  URL it opened. An app that merely fires a deep link into your scheme cannot sign them.
+  But Android lets more than one app claim a custom scheme, and an app that can also
+  **receive** your scheme's links sees the portal's redirects and could answer in the
+  portal's place with a key of its own. On iOS the auth session hands the redirect to your
+  app alone. On Android, prefer a redirect only your app can receive, such as a verified
+  App Link.
+</Callout>
 
 ### A never-used wallet is confirmed once
 
@@ -118,6 +149,8 @@ authority, session and token grant, each marked `trusted` or not. Resolve with t
     return chosen ? { wallet: chosen.vault } : null;
   }}
 >
+  <App />
+</LazorKitProvider>
 ```
 
 </Tab>
@@ -159,11 +192,16 @@ draws instead of the provider's:
 
 ```tsx
 import { WalletChooser } from '@lazorkit/wallet-mobile-adapter';
+import { Modal } from 'react-native';
 
-<Modal visible={signInOpen}>
-  <SignInScreen />
-  <WalletChooser />
-</Modal>
+export function SignInModal({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <Modal visible={open}>
+      {children /* your sign-in screen, which calls connect() */}
+      <WalletChooser />
+    </Modal>
+  );
+}
 ```
 
 If the chooser still is not on screen within a few seconds, `connect` rejects with

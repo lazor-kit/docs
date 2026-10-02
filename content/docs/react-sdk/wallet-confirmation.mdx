@@ -4,10 +4,9 @@ description: How connect finds a returning user's wallet, when it asks the user 
 ---
 
 <Callout type="warn" title="Version note">
-  This page describes the protocol-v2 major release of `@lazorkit/wallet`, the first built on
-  `@lazorkit/sdk-legacy` 1.2.0. Earlier versions (`2.x` and before) have none of
-  `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints` or the built-in
-  chooser.
+  This page describes `@lazorkit/wallet` **3.0.0 and later** (key recovery: 3.1.0 and
+  later). Earlier versions (`2.x` and before) have none of `onConfirmWallet`,
+  `confirmWallet`, `trustedAuthorities`, `watchMints` or the built-in chooser.
 </Callout>
 
 When nothing is stored yet, `connect` looks the passkey's wallet up on chain. Looking it
@@ -26,12 +25,34 @@ keeping a way into its vault.
    deferred transaction or token approval, and a vault still owned by the System Program.
 3. **Otherwise asks the user** which wallet is theirs — see
    [`onConfirmWallet`](#onconfirmwallet).
-4. **Creates a new (v2) wallet** only when the passkey holds none. A wallet it just
-   created is saved as it is, never looked up again.
+4. **Creates a new (v2) wallet** only when the passkey holds none, for the passkey's own
+   key ([below](#a-passkey-that-has-no-wallet-yet)). A wallet it just created is saved as
+   it is, never looked up again. Until the v2 program is deployed on mainnet, this step
+   fails there ([Networks & versions](/networks)).
 
 A stored wallet is used as stored; none of this runs for it, or for signing. If the chain
 cannot be read, `connect` fails — that is never taken as "no wallet", so it never creates
 a wallet by mistake. The lookup uses `getProgramAccounts`, so `rpcUrl` must allow it.
+
+### A passkey that has no wallet yet
+
+Every passkey starts without a v2 wallet, including one the user made long ago on another
+device or browser. Signing in never reveals a passkey's public key, so the portal reports
+the key it has stored for that passkey: none for a passkey made elsewhere, and possibly
+another passkey's. A wallet created for a key the passkey does not hold could never sign,
+and whatever reached its vault would be stuck. So the key a new wallet gets is always one
+that a signature from this `connect` verifies against:
+
+- a passkey the portal registered just now: the key it reports (no extra prompt);
+- otherwise the reported key, once the ownership proof verifies against it;
+- otherwise the key **recovered from two of the passkey's signatures** over fresh
+  challenges (`resolvePasskeyPublicKey`, `@lazorkit/sdk-legacy` 1.3.0). That costs **one
+  extra passkey prompt**: a portal sign over a random challenge, with no transaction.
+
+Closing that extra prompt rejects `connect` with `PortalCancelledError`. If the signatures
+do not settle on one key, `connect` throws an error that says so. A portal sign reply that
+names another passkey than the one being connected also fails `connect`. In every case
+nothing is created.
 
 ### A never-used wallet is confirmed once
 
@@ -121,6 +142,8 @@ none:
     return chosen ? { wallet: chosen.vault } : null;
   }}
 >
+  {children}
+</LazorkitProvider>
 ```
 
 Each candidate is a [`WalletChoice`](/react-sdk/types#walletchoice): vault, balance,
@@ -196,8 +219,19 @@ message.
 `LazorkitWalletAdapter` takes the same options in its config, and per call:
 
 ```ts
-const adapter = new LazorkitWalletAdapter({ onConfirmWallet, trustedAuthorities, watchMints /* , ... */ });
-await adapter.connect({ confirmWallet, onConfirmWallet });
+import { LazorkitWalletAdapter } from '@lazorkit/wallet';
+
+const adapter = new LazorkitWalletAdapter({
+  rpcUrl: 'https://api.devnet.solana.com',
+  portalUrl: 'https://portal.lazor.sh',
+  paymasterConfig: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  onConfirmWallet: 'throw',
+  trustedAuthorities: [BACKEND_ADMIN_KEY],
+  watchMints: [MY_TOKEN_MINT],
+});
+
+// Per call, after the user picked a wallet from WalletNeedsConfirmationError.candidates:
+await adapter.connect({ confirmWallet: 'CHOSEN_VAULT_ADDRESS' });
 ```
 
 With `'throw'`, catch the error (wallet-adapter's `onError`), then set

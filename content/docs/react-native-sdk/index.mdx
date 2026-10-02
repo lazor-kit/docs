@@ -3,21 +3,27 @@ title: Overview
 description: LazorKit Wallet Mobile Adapter — passkey smart wallets for React Native & Expo.
 ---
 
-import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck } from 'lucide-react'
+import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck, Send, ArrowRightLeft, TriangleAlert } from 'lucide-react'
 
 React Native / Expo adapter for LazorKit smart wallets on Solana. Users authenticate with a
 device passkey (Face ID, Touch ID, screen lock) through the LazorKit portal — your app never
 touches private key material.
 
 <Callout type="info" title="Package">
-  `@lazorkit/wallet-mobile-adapter` on [npm](https://www.npmjs.com/package/@lazorkit/wallet-mobile-adapter). Requires React Native ≥ 0.70 and Expo SDK ≥ 50 (or bare workflow).
+  `@lazorkit/wallet-mobile-adapter` on [npm](https://www.npmjs.com/package/@lazorkit/wallet-mobile-adapter),
+  current release **2.2.1** (install `latest`; the `beta` tag is an old pre-v2 build).
+  Peers: `react` ≥ 18, `react-native` ≥ 0.70, `@solana/web3.js` ^1.98.2. It depends on
+  `expo-web-browser` (14.2 or 15) and `expo-crypto` 15, so it targets **Expo SDK 54**
+  (53 for `expo-web-browser` alone); older Expo SDKs are untested. Speaks protocol v2, and
+  v1 for wallets made before it — see [Networks & versions](/networks).
 </Callout>
 
 ## Why this SDK
 
 - **No seed phrase.** Passkey-based WebAuthn, synced via iCloud Keychain / Google Password Manager.
-- **No gas.** Kora paymaster sponsors every mutation — users don't need SOL.
-- **Programmable wallet.** Vault + authority PDAs, role-based access (owner / admin / spender), on-chain spending limits.
+- **No gas.** A Kora paymaster sponsors every transaction — users don't need SOL.
+- **Programmable wallet.** Vault + authority PDAs, ranks (Owner / Admin / Delegate), on-chain spending limits.
+- **Confirmed sends.** Every send resolves once its transaction is confirmed.
 - **Session keys.** One prompt mints a scoped Ed25519 signer — subsequent sends are prompt-free.
 - **Deferred execution.** Sign a single challenge to authorise multi-instruction payloads that exceed the single-tx size limit.
 
@@ -35,8 +41,10 @@ touches private key material.
 └──────────────┘                 └──────────────┘
 ```
 
-The portal handles the WebAuthn round-trip; the SDK builds instructions, finalises the
-passkey signature, and submits through the paymaster.
+The adapter is a JavaScript package: it opens the LazorKit portal in the system browser
+(`expo-web-browser`), the portal runs the WebAuthn ceremony, and the result comes back to
+your app on its redirect URL. The SDK builds instructions, finalises the passkey
+signature, submits through the paymaster, and waits for confirmation.
 
 ## Explore
 
@@ -50,12 +58,21 @@ passkey signature, and submits through the paymaster.
   <Card icon={<Key />} title="useWallet hook"
     description="Complete API — connect, sign, sessions, authorities."
     href="/react-native-sdk/use-wallet" />
+  <Card icon={<Send />} title="Sending transactions"
+    description="Confirmation, callbacks, sequencing, the deferred window, the paymaster."
+    href="/react-native-sdk/sending-transactions" />
   <Card icon={<Coins />} title="Types"
     description="TypeScript interfaces and constants."
     href="/react-native-sdk/types" />
   <Card icon={<UserCheck />} title="Wallet Confirmation"
     description="How connect finds a returning user's wallet, and the built-in chooser."
     href="/react-native-sdk/wallet-confirmation" />
+  <Card icon={<ArrowRightLeft />} title="Upgrading to 2.x"
+    description="What changed since 1.x and the 2.0.0 betas, release by release."
+    href="/react-native-sdk/upgrading" />
+  <Card icon={<TriangleAlert />} title="Errors"
+    description="Every error class, when it is thrown, and what to do."
+    href="/errors" />
   <Card icon={<Shield />} title="Session Keys"
     description="Skip the passkey prompt with scoped Ed25519 keys."
     href="/concepts/session-keys" />

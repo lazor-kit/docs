@@ -3,97 +3,134 @@ title: Types
 description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-Every public type and helper exported from `@lazorkit/sdk-legacy`.
+The public types and helpers of `@lazorkit/sdk-legacy` **1.3.1** (`@next`; protocol v2).
 
 ## Signer helpers
 
-Three signer constructors are shared across every `client.*` method that takes a `signer`:
+Three signer constructors are shared across every `client.*` method that takes a `signer`
+(or `adminSigner` / `ownerSigner`):
 
 ```typescript
-import { ed25519, session } from '@lazorkit/sdk-legacy';
+// Signatures of ed25519, session and secp256r1, exported by '@lazorkit/sdk-legacy':
+import type { Commitment, PublicKey } from '@solana/web3.js';
+import type {
+  Ed25519SignerConfig,
+  Secp256r1Signer,
+  Secp256r1SignerConfig,
+  SessionSignerConfig,
+} from '@lazorkit/sdk-legacy';
 
-ed25519(publicKey: PublicKey): Ed25519Signer
-session(sessionPda: PublicKey, sessionKey: PublicKey): SessionSigner
+declare function ed25519(publicKey: PublicKey, authorityPda?: PublicKey): Ed25519SignerConfig;
+declare function session(sessionPda: PublicKey, sessionKeyPubkey: PublicKey): SessionSignerConfig;
+declare function secp256r1(
+  signer: Secp256r1Signer,          // { publicKeyBytes, credentialIdHash, rpId, sign(challenge) }
+  opts?: { authorityPda?: PublicKey; slotOverride?: bigint; minContextSlot?: number; commitment?: Commitment },
+): Secp256r1SignerConfig;
 ```
 
-For Secp256r1 (passkey), pass the `secp256r1` params object directly — the two-phase
-prepare/finalize flow handles the signing round-trip:
+`secp256r1(signer)` is for the one-shot methods (`execute`, `authorize`, `addAuthority`,
+…) with a signer that can sign in-process. In a browser, use the `prepare*` / `finalize*`
+pairs with a `Secp256r1Params` object instead:
 
 ```typescript
+import type { Commitment, PublicKey } from '@solana/web3.js';
+
 interface Secp256r1Params {
-  /** 32-byte SHA256 of the WebAuthn credential ID. */
+  /** 32-byte SHA-256 of the WebAuthn credential ID. */
   credentialIdHash: Uint8Array;
-  /** 33-byte compressed pubkey. Auto-fetched from the on-chain Authority if omitted. */
+  /** 33-byte compressed pubkey. Read from the on-chain authority if omitted. */
   publicKeyBytes?: Uint8Array;
-  /** Pre-derived Authority PDA. Auto-derived from credentialIdHash if omitted. */
+  /** Pre-derived authority PDA. Derived from credentialIdHash if omitted. */
   authorityPda?: PublicKey;
-  /** Override slot (auto-fetched from the connection if omitted). */
+  /** Override slot (read from the connection if omitted). */
   slotOverride?: bigint;
+  /** 1.3.0+: read the counter, key and slot from a node at or past this slot. */
+  minContextSlot?: number;
+  /** 1.3.0+: commitment for those reads. Default 'confirmed'. */
+  commitment?: Commitment;
 }
 ```
 
-<Callout type="info" title="Only credentialIdHash is strictly required">
-  Since v1.8 (upstream commit `830229e`), `publicKeyBytes` and `authorityPda` are optional.
-  Pass only `credentialIdHash` and the client reads the pubkey off-chain and derives the
-  PDA for you. Keeps client state minimal — you only persist the credential ID (or its
-  hash) per user.
-</Callout>
+Only `credentialIdHash` is required: the client reads the public key and derives the PDA.
+`minContextSlot` and `commitment` are explained in
+[Passkey signing › Two passkey transactions in a row](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
 
 ---
 
-## `CreateWalletParams`
+## `createWallet` params
 
 ```typescript
+import type { PublicKey } from '@solana/web3.js';
+
+// client.createWallet({ payer, userSeed, owner })
 interface CreateWalletParams {
   payer: PublicKey;
-  userSeed: Buffer;                                        // 32 bytes, unique per wallet
-  owner: Ed25519OwnerParams | Secp256r1OwnerParams;
+  userSeed: Uint8Array;                                    // 32 bytes, unique per wallet
+  owner: CreateWalletOwner;
 }
 
-interface Ed25519OwnerParams {
+type CreateWalletOwner = CreateWalletEd25519 | CreateWalletSecp256r1; // exported
+
+interface CreateWalletEd25519 {                                       // exported
   type: 'ed25519';
-  pubkey: PublicKey;
+  publicKey: PublicKey;
 }
 
-interface Secp256r1OwnerParams {
+interface CreateWalletSecp256r1 {                                     // exported
   type: 'secp256r1';
-  credentialIdHash: Buffer;
-  compressedPubkey: Buffer;
+  credentialIdHash: Uint8Array;                           // SHA-256 of the credential ID
+  compressedPubkey: Uint8Array;                           // 33 bytes: the passkey's own key
   rpId: string;
 }
 ```
+
+`createWallet` returns `{ instructions, walletPda, vaultPda, depositAddress, authorityPda }`;
+`depositAddress` is the vault. The same owner shape is used by `addAuthority`
+(`newAuthority`), `transferOwnership` (`newOwner`) and `migrateV1Wallet` (`owner`).
 
 ---
 
 ## `WebAuthnResponse`
 
-Returned from the browser authenticator; passed into `finalize*` methods:
+What `finalize*` takes, built from the browser's assertion (exported type):
 
 ```typescript
 interface WebAuthnResponse {
-  signature: Buffer;           // DER-encoded Secp256r1 signature
-  authenticatorData: Buffer;   // WebAuthn authenticator data
-  clientDataJSON: Buffer;      // Raw clientDataJSON bytes
+  signature: Uint8Array;           // 64-byte r||s, low-S — not the DER the browser returns
+  authenticatorData: Uint8Array;   // WebAuthn authenticator data
+  clientDataJsonHash: Uint8Array;  // SHA-256 of clientDataJSON
+  clientDataJson: Uint8Array;      // raw clientDataJSON bytes
 }
 ```
+
+The conversion from `navigator.credentials.get`:
+[Passkey signing › The WebAuthnResponse helper](/web3js-v1/passkey-signing#the-webauthnresponse-helper).
+`OwnershipProof` (below) takes the browser's DER signature as it is.
 
 ---
 
 ## `SessionAction`
 
-Union of all on-chain action types. See [Session Keys concept](/concepts/session-keys#actions-reference)
-for semantics.
+Union of all on-chain action types; `type` is the numeric `SessionActionType` enum. See
+[Session Keys concept](/concepts/session-keys#actions-reference) for semantics. The same
+list, serialized with `serializeActions`, is a Delegate's `policy`.
 
 ```typescript
+enum SessionActionType {
+  SolLimit = 1, SolRecurringLimit = 2, SolMaxPerTx = 3,
+  TokenLimit = 4, TokenRecurringLimit = 5, TokenMaxPerTx = 6,
+  ProgramWhitelist = 10, ProgramBlacklist = 11,
+}
+
 type SessionAction =
-  | { type: 'SolLimit'; remaining: bigint; expiresAt?: bigint }
-  | { type: 'SolRecurringLimit'; limit: bigint; window: bigint; expiresAt?: bigint }
-  | { type: 'SolMaxPerTx'; max: bigint; expiresAt?: bigint }
-  | { type: 'TokenLimit'; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
-  | { type: 'TokenRecurringLimit'; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
-  | { type: 'TokenMaxPerTx'; mint: PublicKey; max: bigint; expiresAt?: bigint }
-  | { type: 'ProgramWhitelist'; programId: PublicKey; expiresAt?: bigint }
-  | { type: 'ProgramBlacklist'; programId: PublicKey; expiresAt?: bigint };
+  | { type: SessionActionType.SolLimit; remaining: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolRecurringLimit; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolMaxPerTx; max: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenLimit; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenMaxPerTx; mint: PublicKey; max: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.ProgramWhitelist; programId: PublicKey; expiresAt?: bigint }
+  | { type: SessionActionType.ProgramBlacklist; programId: PublicKey; expiresAt?: bigint };
 ```
 
 ### `Actions` builders
@@ -101,16 +138,20 @@ type SessionAction =
 Prefer the builder helpers — they match the object shape exactly and are easier to read:
 
 ```typescript
-import { Actions } from '@lazorkit/sdk-legacy';
+import { Actions, serializeActions } from '@lazorkit/sdk-legacy';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
 
-Actions.solLimit(lamports, expiresAt?)
-Actions.solRecurringLimit({ limit, window, expiresAt? })
-Actions.solMaxPerTx(lamports, expiresAt?)
-Actions.tokenLimit({ mint, remaining, expiresAt? })
-Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
-Actions.tokenMaxPerTx({ mint, max, expiresAt? })
-Actions.programWhitelist(programId, expiresAt?)
-Actions.programBlacklist(programId, expiresAt?)
+const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+const actions = [
+  Actions.solLimit(10_000_000_000n),                          // (remaining, expiresAt?)
+  Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
+  Actions.solMaxPerTx(500_000_000n),                          // (max, expiresAt?)
+  Actions.tokenLimit({ mint, remaining: 100_000_000n }),
+  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, window: 216_000n }),
+  Actions.tokenMaxPerTx({ mint, max: 5_000_000n }),
+  Actions.programWhitelist(SystemProgram.programId),          // (programId, expiresAt?)
+];
+const policy = serializeActions(actions);                     // a Delegate's policy bytes
 ```
 
 ---
@@ -125,7 +166,7 @@ interface WalletAuthorityRecord {
   walletPda: PublicKey;
   authorityPda: PublicKey;
   vaultPda: PublicKey;                       // ← the address funds live at
-  role: number;                              // 0=Owner, 1=Admin, 2=Spender
+  role: number;                              // 0=Owner, 1=Admin, 2=Delegate
   authorityType: number;                     // 0=Ed25519, 1=Secp256r1
 }
 ```
@@ -140,8 +181,8 @@ interface WalletAuthorityRecord {
 ## Returning-user lookup
 
 <Callout type="warn" title="Version note">
-  Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later. The versions
-  published before it — `0.3.x` (`latest`) and `1.1.x` (`next`) — do not have it.
+  Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later (`next` is
+  1.3.1). `0.3.x` (`latest`) and `1.1.x` do not have it.
 </Callout>
 
 How to use them together: [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
@@ -247,7 +288,7 @@ What `describeWalletCandidates` reads about each candidate — what to show the 
 everything besides this passkey that can spend from the wallet.
 
 ```typescript
-type AuthorityRoleName = 'owner' | 'admin' | 'spender' | 'unknown';
+type AuthorityRoleName = 'owner' | 'admin' | 'spender' | 'unknown'; // 'spender' = Delegate
 
 interface WalletFacts extends PasskeyWalletCandidate {
   lamports: number;                // vault balance
@@ -297,75 +338,102 @@ show, which is why a wallet with `signatureCount: 0` is never adopted.
 
 ```typescript
 import {
-  deriveWalletPda,
-  deriveVaultPda,
-  deriveAuthorityPda,
-  deriveSessionPda,
-  deriveDeferredExecPda,
+  PROGRAM_ID_DEVNET,
+  findWalletPda,
+  findVaultPda,
+  findAuthorityPda,
+  findSessionPda,
+  findDeferredExecPda,
 } from '@lazorkit/sdk-legacy';
+import type { PublicKey } from '@solana/web3.js';
 
-const [walletPda]      = deriveWalletPda(userSeed);
-const [vaultPda]       = deriveVaultPda(walletPda);
-const [authorityPda]   = deriveAuthorityPda(walletPda, credentialIdHash);
-const [sessionPda]     = deriveSessionPda(walletPda, sessionKey);
-const [deferredExecPda] = deriveDeferredExecPda(walletPda, authorityPda, counter);
+declare const sessionKey: PublicKey, counter: number;
+const programId = PROGRAM_ID_DEVNET;               // required: the helpers take the program id
+
+const [walletPda]       = findWalletPda(userSeed, programId);
+const [vaultPda]        = findVaultPda(walletPda, programId);
+const [authorityPda]    = findAuthorityPda(walletPda, credentialIdHash, programId);
+const [sessionPda]      = findSessionPda(walletPda, sessionKey.toBytes(), programId);
+const [deferredExecPda] = findDeferredExecPda(walletPda, authorityPda, counter, programId);
 ```
 
-Every helper returns `[PublicKey, bump]`.
+Every helper returns `[PublicKey, bump]` and derives **v2** addresses (`lk2:` seeds). The
+client has the same helpers without the program id: `client.findWallet(userSeed)`,
+`client.findVault(walletPda)`, …. For v1 addresses: `findV1WalletPda`, `findV1VaultPda`,
+`findV1AuthorityPda`, `deriveV1Accounts`.
 
 ---
 
-## Account decoders
-
-Read on-chain state without manual byte juggling:
+## Account readers
 
 ```typescript
-import {
-  decodeWalletAccount,
-  decodeAuthorityAccount,
-  decodeSessionAccount,
-  decodeDeferredExecAccount,
-} from '@lazorkit/sdk-legacy';
+import { AuthorityAccount, SessionAccount } from '@lazorkit/sdk-legacy';
 
-const info = await connection.getAccountInfo(walletPda);
-const wallet = decodeWalletAccount(info!.data);
+declare const sessionPda: import('@solana/web3.js').PublicKey;
 
-const authority = decodeAuthorityAccount(authorityInfo.data);
-console.log(authority.role, authority.counter);
+const authority = await AuthorityAccount.fromAccountAddress(connection, authorityPda);
+console.log(authority.role, authority.counter, authority.policyLen, authority.wallet.toBase58());
+
+const session = await SessionAccount.fromAccountAddress(connection, sessionPda);
+console.log(session.sessionKey.toBase58(), session.expiresAt);
+
+// Every authority on a wallet, with rank, counter and policy:
+const authorities = await client.findAuthoritiesByWallet(walletPda);
+// Whether the wallet has an Owner left to manage it:
+const { ownerCount, isRecoverable } = await client.getRecoveryStatus(walletPda);
 ```
+
+Both classes also have `fromBuffer(data)`. There is no exported reader for the wallet or
+`DeferredExec` accounts. `readAuthorityCounter` / `readAuthorityPubkey` (and
+`client.readCounter`) read one field and take the
+[challenge-read options](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
 
 ---
 
 ## Role & auth constants
 
 ```typescript
-export const ROLE_OWNER   = 0;
-export const ROLE_ADMIN   = 1;
-export const ROLE_SPENDER = 2;
+export const ROLE_OWNER   = 0;   // manages every authority, including other Owners
+export const ROLE_ADMIN   = 1;   // manages Delegates and sessions
+export const ROLE_SPENDER = 2;   // a Delegate: must carry a policy
 
 export const AUTH_TYPE_ED25519   = 0;
 export const AUTH_TYPE_SECP256R1 = 1;
 ```
+
+Program ids: `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET` (v2), `PROGRAM_ID_MAINNET_V1`,
+`PROGRAM_ID_DEVNET_V1`, and `legacyProgramIdFor(v2Id)` — see [Networks & versions](/networks).
 
 ---
 
 ## Error utilities
 
 ```typescript
-import { parseError, extractErrorCode, errorFromCode } from '@lazorkit/sdk-legacy';
+import { ERROR_NAMES, MinContextSlotNotReachedError, errorFromCode, extractErrorCode } from '@lazorkit/sdk-legacy';
 
-// From a thrown SendTransactionError:
-const parsed = parseError(err);              // { code, name, message }
-const code   = extractErrorCode(err);        // 3024
-const name   = errorFromCode(3024);          // 'ActionSolLimitExceeded'
+// From a thrown SendTransactionError (reads the error's text):
+const code = extractErrorCode(err);          // e.g. 3024, or null
+const name = errorFromCode(3024);            // 'ActionSolLimitExceeded'
+console.log(code, name, ERROR_NAMES[3006]);
+
+if (err instanceof MinContextSlotNotReachedError) {
+  console.log(err.minContextSlot, err.waitedMs, err.commitment);
+}
 ```
+
+`extractErrorCode` returns `null` for a `{ InstructionError: … }` object, and both read only
+the number: an inner program can return the same code. In 1.3.1, `ERROR_NAMES` has no
+entry for 3036 or 4018.
 
 Error ranges:
 
 | Range       | Category                                          |
 | ----------- | ------------------------------------------------- |
-| 3001–3019   | `AuthError` — authentication and permission failures |
-| 3020–3029   | `ActionError` — session action violations         |
-| 4001–4007   | `ProtocolError` — protocol fee system errors      |
+| 3001–3019   | Authentication and permission failures            |
+| 3020–3029   | Spending-limit (action) violations                |
+| 3030–3032   | Vault and token-authority invariants              |
+| 3033–3035   | Ranks and policies                                |
+| 3036        | `SessionNotExpired`                               |
+| 4001–4018   | Protocol fee and deployment errors, including 4018 `RetiredDeployment` |
 
-Full error map in [Troubleshooting › Program errors](/troubleshooting#program-errors-0xbd0-0xbd1-).
+Full map in [Errors › Program error codes](/errors#program-error-codes).

@@ -3,33 +3,37 @@ title: Overview
 description: LazorKit React SDK — passkey smart wallets for web apps.
 ---
 
-import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck } from 'lucide-react'
+import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck, Send, ArrowRightLeft, TriangleAlert } from 'lucide-react'
 
 Drop-in React hook + provider for LazorKit smart wallets on Solana. Users authenticate with
-a device passkey (Face ID, Touch ID, Windows Hello, security key) via the native
-`navigator.credentials` API — no popups, no extensions, no seed phrase.
+a device passkey (Face ID, Touch ID, Windows Hello, security key) through the **LazorKit
+portal** — no extension, no seed phrase.
 
 <Callout type="info" title="Package">
-  `@lazorkit/wallet` on [npm](https://www.npmjs.com/package/@lazorkit/wallet). Requires
-  React 18+ and a browser that supports WebAuthn.
+  `@lazorkit/wallet` on [npm](https://www.npmjs.com/package/@lazorkit/wallet), current
+  release **3.2.1**. Peers: `react` and `react-dom` ^18.3.1 or ^19, `@solana/web3.js`
+  ^1.99, `zustand` ^5, `@solana/wallet-adapter-base` and the `@wallet-standard` packages.
+  Speaks protocol v2, and v1 for wallets made before it — see
+  [Networks & versions](/networks).
 </Callout>
 
 ## Why this SDK
 
 - **Passkey auth** — synced via iCloud Keychain / Google Password Manager for cross-device continuity.
-- **Gasless by default** — Kora paymaster sponsors every mutation. Users never need SOL.
-- **Session keys** — a single tap mints a scoped Ed25519 signer; subsequent txs are prompt-free.
-- **On-chain spending limits** — optional lifetime caps, per-tx caps, recurring windows, program allow/block-lists.
-- **Ed25519 authorities** — delegate admin / spender roles to companion keys.
-- **Deferred execution** — one tap authorises multi-instruction payloads too big for a single tx.
+- **Gasless by default** — a Kora paymaster sponsors every transaction. Users never need SOL.
+- **Session keys** — a single approval mints a scoped Ed25519 signer; subsequent txs are prompt-free.
+- **On-chain spending limits** — lifetime caps, per-tx caps, recurring windows, program allow/block-lists.
+- **Ed25519 authorities** — add Admin keys, or Delegate keys bounded by a spending policy.
+- **Deferred execution** — one approval authorises payloads too big for a single tx.
+- **Confirmed sends** — every send resolves once its transaction is confirmed.
 
 ## How it fits together
 
 ```
-┌─────────────┐   navigator.   ┌──────────┐
-│  your app   │◀─credentials──▶│  passkey │
-│  (React)    │    (WebAuthn)  │ (device) │
-└──────┬──────┘                └──────────┘
+┌─────────────┐  dialog iframe   ┌─────────────────┐   WebAuthn   ┌──────────┐
+│  your app   │─── (or popup) ──▶│ LazorKit portal │─────────────▶│  passkey │
+│  (React)    │◀── signature ────│ portal.lazor.sh │              │ (device) │
+└──────┬──────┘                  └─────────────────┘              └──────────┘
        │
        ▼ build tx / finalize
 ┌─────────────┐   relay via    ┌─────────┐
@@ -37,8 +41,12 @@ a device passkey (Face ID, Touch ID, Windows Hello, security key) via the native
 └─────────────┘                └─────────┘
 ```
 
-The SDK talks to the passkey directly through the browser — no redirect flow, no portal
-window. Once signed, transactions are relayed by the Kora paymaster.
+The WebAuthn ceremony runs in the LazorKit portal (`portalUrl`, default
+`https://portal.lazor.sh`), opened in a dialog iframe on your page, with a popup window as
+the fallback where an iframe cannot be used. Passkeys are registered under the portal's
+relying party (its domain), not your app's. Closing the dialog or popup rejects the
+pending call with `PortalCancelledError`. Once signed, transactions are
+relayed by the paymaster and confirmed by the SDK.
 
 ## Explore
 
@@ -47,21 +55,30 @@ window. Once signed, transactions are relayed by the Kora paymaster.
     description="Install, mount the provider, send your first transaction."
     href="/react-sdk/getting-started" />
   <Card icon={<Plug />} title="LazorkitProvider"
-    description="Provider props and configuration."
+    description="Provider props, v1 relayer, cluster, and what the SDK stores."
     href="/react-sdk/provider" />
   <Card icon={<Key />} title="useWallet hook"
     description="Complete API — connect, sign, sessions, authorities."
     href="/react-sdk/use-wallet" />
-  <Card icon={<Coins />} title="Types"
-    description="TypeScript interfaces, SpendingLimits, constants."
-    href="/react-sdk/types" />
+  <Card icon={<Send />} title="Sending transactions"
+    description="Confirmation, isSigning, sequencing, the deferred window, the paymaster."
+    href="/react-sdk/sending-transactions" />
   <Card icon={<UserCheck />} title="Wallet Confirmation"
     description="How connect finds a returning user's wallet, and the built-in chooser."
     href="/react-sdk/wallet-confirmation" />
+  <Card icon={<Coins />} title="Types"
+    description="TypeScript interfaces, SpendingLimits, constants."
+    href="/react-sdk/types" />
+  <Card icon={<ArrowRightLeft />} title="Upgrading to 3.x"
+    description="What changed since 2.x, release by release."
+    href="/react-sdk/upgrading" />
+  <Card icon={<TriangleAlert />} title="Errors"
+    description="Every error class, when it is thrown, and what to do."
+    href="/errors" />
   <Card icon={<Shield />} title="Session Keys"
     description="Skip the passkey prompt with scoped Ed25519 keys."
     href="/concepts/session-keys" />
   <Card icon={<HelpCircle />} title="Troubleshooting"
-    description="Common issues: polyfills, SSR, WebAuthn errors, 0xbd0."
+    description="Common issues: SSR, WebAuthn errors, 0xbd0, 3006."
     href="/troubleshooting" />
 </Cards>
