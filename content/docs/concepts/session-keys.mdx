@@ -38,7 +38,20 @@ prompt per transaction**.
   `signAndSendWithSession`. Pass `sessionKey` (a public key) to register a key your
   backend holds instead; it is never stored.
 - **React Native SDK and the contract SDKs:** you generate the keypair and keep the secret
-  key yourself, in secure storage (`expo-secure-store`, a KMS, a backend vault).
+  key yourself, in secure storage (`expo-secure-store`, a KMS, a backend vault). Keep the
+  wallet it belongs to with it, use it only while that wallet is connected, and delete it
+  at disconnect and once its session is revoked or expired.
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. `@lazorkit/wallet` 3.3.0 keeps the session key as a
+  non-extractable WebCrypto key in IndexedDB (a sealed seed where the browser has no
+  WebCrypto Ed25519, the page's memory without IndexedDB), not as plaintext in
+  localStorage. It binds the key to the wallet that created the session: the key signs
+  only while that wallet is connected, and `KeyWalletMismatchError` is thrown otherwise.
+  `disconnect()` deletes the key unless you pass `disconnect({ keepSessionKeys: true })`,
+  a key whose session has expired is deleted when it is next read, and
+  `forgetStoredKeys()` deletes every key the SDK keeps.
+</Callout>
 
 Sessions are the **cheapest** execution path: no Secp256r1 precompile runs. Measured in
 April 2026 on protocol v1, a session `Execute` took about 4,105 CU against about 9,495 CU
@@ -294,10 +307,10 @@ const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
 The SDK signs with the session key it stored during `createSession`. There is one slot:
-a new `createSession` replaces the stored key, `revokeSession()` removes it, and
+a new `createSession` replaces the stored key, `revokeSession()` removes it, and in 3.2.1
 `disconnect` does **not** — the key stays usable within its limits until it expires or is
 revoked, connected wallet or not. On a shared device, revoke sessions when the user signs
-out.
+out. The next release (3.3.0) changes this: see [Mental model](#mental-model).
 
 ### Low-level
 

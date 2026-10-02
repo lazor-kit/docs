@@ -107,6 +107,14 @@ rejects with `PortalCancelledError` and saves nothing. `disconnect` does **not**
 session and authority keys `createSession` / `addAuthority` stored; see
 [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
 
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. `disconnect(options?)` deletes the session key the SDK keeps (from
+  IndexedDB, the page's memory and any plaintext 3.2 left), and
+  `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept, and signs
+  only once the same wallet is connected again; `removeAuthority` and
+  `forgetStoredKeys()` delete it. `disconnect` also takes `onSuccess` / `onFail`.
+</Callout>
+
 ---
 
 ## Transactions
@@ -295,6 +303,15 @@ Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are
 see [Errors](/errors#spending-limits-and-policies-30203036). It does not require a
 connected wallet: the stored key is enough.
 
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. The key is kept as a non-extractable WebCrypto key in IndexedDB,
+  not in localStorage, and signs only for the wallet that created the session: with no
+  wallet connected, or another one, `signAndSendWithSession` rejects with
+  `KeyWalletMismatchError` before anything is signed or sent. A key whose session has
+  expired is deleted when it is next read. See
+  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+</Callout>
+
 ### `revokeSession`
 
 ```ts
@@ -337,6 +354,23 @@ const { authorityPda, authorityPublicKey } = await addAuthority({
 
 **Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
 [Ranks & policies](/concepts/rbac).
+
+<Callout type="warn" title="Next release (3.3.0): role is required">
+  Not published yet, and breaking. `addAuthority` has no default role: `role` is
+  required in the types, and a call without it, or with a value that is not a rank,
+  throws before anything is read or the passkey is prompted. In 3.2.1 the default made
+  the new key an Admin, with no policy and no expiry. Name the rank:
+
+  | Rank | Constant | May add and remove | Spends |
+  | ---- | -------- | ------------------ | ------ |
+  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before the prompt. |
+  | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
+  | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
+
+  For a key your app holds, use `ROLE_SPENDER` with a `policy`. `role: ROLE_ADMIN` keeps
+  3.2.1's behaviour. The key the SDK keeps for `signAndSendWithAuthority` is bound to the
+  wallet like a session key: it signs only while that wallet is connected.
+</Callout>
 
 ### `signAndSendWithAuthority`
 

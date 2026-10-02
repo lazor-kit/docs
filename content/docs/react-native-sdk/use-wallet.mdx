@@ -82,12 +82,12 @@ still running rejects with `SigningError`. A sign action's callback that throws 
 and changes nothing; on `connect` and `disconnect`, a throwing `onSuccess` makes the call
 reject and runs `onFail`.
 
-<Callout type="info" title="Next release (not published yet)">
-  The next release is planned to treat `connect` and `disconnect` like the sign actions:
-  a throwing `onSuccess` is logged and changes nothing, so a connect that succeeded
-  resolves and `onFail` is not called. `transferSol` with no wallet connected is planned
-  to call `onFail` and set `error`; in 2.2.1 it rejects without either. This page will
-  say so once it ships.
+<Callout type="info" title="Next release (2.3.0)">
+  Not published yet. 2.3.0 is planned to treat `connect` and `disconnect` like the sign
+  actions: a throwing `onSuccess` is logged and changes nothing, so a connect that
+  succeeded resolves and `onFail` is not called. `transferSol` with no wallet connected
+  is planned to call `onFail` and set `error`; in 2.2.1 it rejects without either. This
+  page will say so once it ships.
 </Callout>
 
 ---
@@ -438,6 +438,21 @@ The role defaults to `ROLE_SPENDER` (a Delegate), which on a v2 wallet **throws 
 `policy`** (on chain: 3033). A policy on any other rank is refused (3035). On a **v1**
 wallet, pass `unrestricted: true` and no policy: v1 never checked rank at `Execute`, so
 any key you add can spend the whole vault.
+
+<Callout type="warn" title="Next release (2.3.0): role is required">
+  Not published yet, and breaking. `addAuthorityEd25519` has no default role: `role` is
+  required in the types, and a call without it, or with a value that is not a rank,
+  throws before anything is read or the portal opens. Name the rank:
+
+  | Rank | Constant | May add and remove | Spends |
+  | ---- | -------- | ------------------ | ------ |
+  | Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before the prompt. |
+  | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit |
+  | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
+
+  For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`.
+  `role: ROLE_SPENDER` with a `policy` keeps 2.2.1's behaviour.
+</Callout>
 
 ### `removeAuthority`
 

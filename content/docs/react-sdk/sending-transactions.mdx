@@ -95,11 +95,12 @@ run **before** `isSigning` is cleared:
 So prefer the promise. If you use the callbacks, do not start another send from them, and
 do not let them throw.
 
-<Callout type="info" title="Next release (not published yet)">
-  The next release is planned to adopt the contract the React Native SDK already has
-  (2.2.0+): callbacks run once `isSigning` is `false`, a send started from a callback
-  runs, and a callback that throws is logged and changes nothing. This page will say so
-  once it ships.
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. 3.3.0 is planned to adopt the contract the React Native SDK already
+  has (2.2.0+): callbacks run once `isSigning` is `false`, exactly one per call, a send
+  started from a callback runs, and a callback that throws is logged and changes
+  nothing. A refusal ("Already signing", "No wallet connected") calls `onFail` too. This
+  page will say so once it ships.
 </Callout>
 
 ## Transaction options
@@ -205,6 +206,12 @@ deserialized payload; see [Session keys › Deferred execution](/web3js-v1/sessi
   processed, the call rejects with `TransactionOutcomeUnknownError`. The React Native SDK
   does not resend at all.
 - v1 wallets go to `v1PaymasterConfig`. See [Migrating from v1](/v1-to-v2).
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. A 4018 (`RetiredDeployment`) will not be resent either: 3.2.1
+  sends it three times, 1 s and 2 s apart. 3.3.0 fails on the first answer, with
+  `V1WalletRetiredError` for a retired v1 wallet. See [Errors › v1 and v2](/errors#v1-and-v2).
+</Callout>
 
 More on running a relayer: [Paymaster › Using a paymaster with the
 SDKs](/concepts/paymaster#using-a-paymaster-with-the-sdks).

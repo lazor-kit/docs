@@ -68,13 +68,14 @@ From 2.2.0, each action's promise settles, and its `onSuccess` or `onFail` runs,
 `connect` and `disconnect` on the hook run their callbacks after the call settles too;
 there, a callback that throws makes the call reject and runs `onFail` (2.2.1).
 
-<Callout type="info" title="Next release (not published yet)">
-  The next release is planned to give `connect` and `disconnect` the same contract as the
-  sign actions: a callback that throws is logged and changes nothing, so a connect that
-  succeeded resolves and `onFail` is not called. The store's `connect` and `disconnect`
-  are planned to call `onSuccess` / `onFail` too (in 2.2.1 the store's `connect` ignores
-  them and its `disconnect` takes none), and `transferSol` with no wallet connected to
-  call `onFail` and set `error`. This page will say so once it ships.
+<Callout type="info" title="Next release (2.3.0)">
+  Not published yet. 2.3.0 is planned to give `connect` and `disconnect` the same
+  contract as the sign actions: a callback that throws is logged and changes nothing, so
+  a connect that succeeded resolves and `onFail` is not called. The store's `connect`
+  and `disconnect` are planned to call `onSuccess` / `onFail` too (in 2.2.1 the store's
+  `connect` ignores them and its `disconnect` takes none), and `transferSol` with no
+  wallet connected to call `onFail` and set `error`. This page will say so once it
+  ships.
 </Callout>
 
 ```ts

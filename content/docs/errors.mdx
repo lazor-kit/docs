@@ -42,9 +42,11 @@ build, or two versions). Compare `error.name` then: every class sets its own nam
     Use them only on raw program errors (yours, from `@lazorkit/sdk-legacy`); use
     `instanceof` for errors the wallet throws.
 
-  **Next release (not published yet):** all three predicates are planned to recognise
-  their class anywhere in an error's `cause` chain, including a copy from another build
-  of the package.
+  **Next release (3.3.0 / adapter 2.3.0, not published yet):** all three predicates are
+  planned to recognise their class anywhere in an error's `cause` chain and inside a
+  wallet-adapter `WalletError`, including a copy from another build of the package. Web
+  3.3.0 adds `isKeyWalletMismatchError`, built the same way (see
+  [Kept session and authority keys](#kept-session-and-authority-keys-web)).
 </Callout>
 
 ## Sending a transaction
@@ -104,11 +106,33 @@ plain `Error` that says so, and nothing is created.
 
 On mobile, every sign action reports these refusals to its `onFail` as well, except
 `transferSol` with no wallet connected: in 2.2.1 it rejects with `SigningError` without
-calling `onFail` or setting `error`. The next release (not published yet) is planned to
-call `onFail` there too.
+calling `onFail` or setting `error`. The next release (adapter 2.3.0, not published yet)
+is planned to call `onFail` there too.
 
 Calls through `LazorkitWalletAdapter` and the Wallet Standard wallet are not refused:
 they queue behind the passkey's running transaction.
+
+## Kept session and authority keys (web)
+
+In 3.2.1, `signAndSendWithSession` and `signAndSendWithAuthority` sign with the key
+`createSession` / `addAuthority` stored, whichever wallet is connected, or none. See
+[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. `@lazorkit/wallet` 3.3.0 keeps each key with the wallet it was
+  registered for, and uses it only while that wallet is connected. Otherwise the call
+  rejects with a new error before anything is signed or sent:
+
+  | Error | Thrown by | Carries | What to do |
+  | ----- | --------- | ------- | ---------- |
+  | `KeyWalletMismatchError` (`code: 'KEY_WALLET_MISMATCH'`) | `signAndSendWithSession`, `signAndSendWithAuthority`, and `revokeSession()` without `sessionPda`, when the kept key's wallet is not the connected one. `onFail` runs once `isSigning` is `false`. | `slot` (`'session'` or `'authority'`), `reason`, `keyWallet` (the key's wallet PDA), `connectedWallet` (the connected one, `undefined` when none) | `'no-wallet'` or `'other-wallet'`: connect `keyWallet`, or create a session (add an authority) for the connected wallet. `'unbound'`: a key 3.2 left whose wallet could not be confirmed. It is never used: call `forgetStoredKeys()` and create it again. |
+
+  Match it with `isKeyWalletMismatchError(e)`, which reads through `cause` and a
+  wallet-adapter `WalletError`, and matches a copy from another build of the package.
+  A kept session key whose session has expired is deleted when it is next read, and the
+  call rejects with "No session key found: the stored session … expired after slot …".
+  What else changes: [Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release).
+</Callout>
 
 ## v1 and v2
 
@@ -116,6 +140,16 @@ they queue behind the passkey's running transaction.
 | ----- | ----------- | ---------- |
 | `V1WalletRetiredError` (`code: 4018`) | The wallet is on LazorKit v1, which has been retired to its sunset binary. Its funds are safe. | Move it with `migrateV1Wallet` or the LazorKit migration page. See [Migrating from v1](/v1-to-v2). |
 | `V1WalletMigratedError` | The stored v1 wallet no longer exists: it was migrated (or closed). | Call `connect` again; it picks up the passkey's v2 wallet. |
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. In 3.2.1 the web paymaster resends a 4018 like other failures, up to
+  3 attempts 1 s and 2 s apart, although a retired program answers each attempt the same
+  way. 3.3.0 sends it once and fails on the first answer: with `V1WalletRetiredError`
+  (the `PaymasterError` as its `cause`) when the 4018 is the retired v1 program's, that
+  is when the logs name v1 or the wallet is a v1 wallet. A 4018 whose program cannot be
+  told is thrown as the `PaymasterError`, also without a resend. The React Native SDK
+  already sends once.
+</Callout>
 
 ## Input checks (thrown before any prompt)
 
@@ -126,6 +160,14 @@ they queue behind the passkey's running transaction.
 | `authorizeAndExecute` / `authorizeDeferred` | `RangeError` | `expiryOffset` outside 10–9000 slots. |
 | `new LazorKitClient(connection)` (sdk-legacy) | `Error` | The RPC URL names no cluster. Pass a program id. |
 | `migrateV1Wallet` | `Error` | The client was built at a v1 id, or the destination failed its vet. |
+
+<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
+  Not published yet, and breaking: `addAuthority` (web) and `addAuthorityEd25519`
+  (mobile) have no default role. A call without `role`, or with one that is not
+  `ROLE_OWNER` (0), `ROLE_ADMIN` (1) or `ROLE_SPENDER` (2), throws before anything is
+  read or the passkey is prompted, with a message that says what each rank may do. See
+  [Ranks & policies](/concepts/rbac#ranks).
+</Callout>
 
 ## Contract SDKs
 

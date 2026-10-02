@@ -10,13 +10,29 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
-<Callout type="info" title="Not released yet">
-  In review for the next releases of `@lazorkit/wallet` and
-  `@lazorkit/wallet-mobile-adapter`, not published: `isSignatureReusedError` and
-  `isRetiredDeploymentError` recognising the SDK's own error classes; one callback
-  contract on web and mobile (callbacks after `isSigning` clears, as mobile 2.2 does);
-  and web session and authority keys kept as non-extractable WebCrypto keys instead of
-  plaintext `localStorage`. These docs describe the published releases until they ship.
+<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
+  In review for `@lazorkit/wallet` 3.3.0 and `@lazorkit/wallet-mobile-adapter` 2.3.0,
+  not published. These docs describe the published releases until they ship.
+
+  - **Breaking:** `addAuthority` (web) and `addAuthorityEd25519` (mobile) have no default
+    role; `role` is required, and a missing or unknown one throws before the prompt.
+    Migration: pass the role you relied on (`ROLE_ADMIN` on web, `ROLE_SPENDER` with a
+    policy on mobile).
+  - The `is*Error` predicates recognise the SDK's own error classes, through `cause` and
+    wallet-adapter wrappers.
+  - One callback contract on web and mobile: callbacks run after `isSigning` clears, one
+    per call, and a throwing callback changes nothing.
+  - Web: the paymaster no longer resends a 4018; it fails on the first answer with
+    `V1WalletRetiredError` for a retired v1 wallet.
+  - Web: session and authority keys are kept as non-extractable WebCrypto keys in
+    IndexedDB instead of plaintext `localStorage` (new `keyStorage` prop,
+    `forgetStoredKeys()`). Each key signs only while the wallet it was registered for is
+    connected (new `KeyWalletMismatchError`, `isKeyWalletMismatchError`). `disconnect`
+    deletes the session key unless `keepSessionKeys: true`. Expired session keys are
+    deleted when read.
+
+  Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330-next-release),
+  [React Native › Upgrading to 2.3.0](/react-native-sdk/upgrading#upgrading-to-230-next-release).
 </Callout>
 
 ## 2026-10-01 — wallet 3.2.1, wallet-mobile-adapter 2.2.1

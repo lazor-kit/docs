@@ -217,6 +217,15 @@ Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploy
 In 3.2.1 the last two do not recognise the SDK's own `SignatureReusedError` /
 `V1WalletRetiredError`; use `instanceof` ([Errors › Telling errors apart](/errors#telling-errors-apart)).
 
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet. The predicates recognise the SDK's own errors, through `cause` and
+  a wallet-adapter `WalletError`. New: `KeyWalletMismatchError` (`code:
+  'KEY_WALLET_MISMATCH'`, `slot`, `reason`, `keyWallet`, `connectedWallet`), its
+  predicate `isKeyWalletMismatchError` and the type `KeyWalletMismatchReason`
+  (`'no-wallet' | 'other-wallet' | 'unbound'`). See
+  [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+</Callout>
+
 ---
 
 ## Transaction payloads
@@ -371,6 +380,13 @@ interface AddAuthorityPayload {
 ```
 
 `removeAuthority` takes a single positional `targetAuthorityPda: string`.
+
+<Callout type="info" title="Next release (3.3.0)">
+  Not published yet, and breaking: `role` is required (`role: number`), with no default.
+  See [useWallet › addAuthority](/react-sdk/use-wallet#addauthority). Also new:
+  `removeAuthority(targetAuthorityPda, options?)` and `disconnect(options?)` take
+  `onSuccess` / `onFail`, and `disconnect`'s options take `keepSessionKeys`.
+</Callout>
 
 ---
 

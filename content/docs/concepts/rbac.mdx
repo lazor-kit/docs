@@ -123,6 +123,13 @@ The React and React Native SDKs take the same `policy`:
 - React Native: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, { redirectUrl })`.
   The default role is `ROLE_SPENDER`, so pass a `policy` or `role: ROLE_ADMIN`.
 
+<Callout type="info" title="Next release (3.3.0 / adapter 2.3.0)">
+  Not published yet, and breaking: neither method has a default role. `role` is
+  required, and a missing or unknown one throws before the passkey prompt, with a
+  message that says what each rank may do ([Ranks](#ranks)). For a key your app holds,
+  pass `ROLE_SPENDER` with a policy.
+</Callout>
+
 ## v1 wallets
 
 v1 has no policies and never checked rank at `Execute`: any authority on a v1 wallet can
