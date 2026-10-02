@@ -210,8 +210,11 @@ LazorKit address is a program account with no key to sign with, so the signer is
 wallet's passkey. Since 3.3.1 the passkey signs a domain-separated challenge,
 `signedMessageChallenge(message)`, never the message's bytes, so a message signature can
 no longer be confused with a transaction approval
-([React SDK › signMessage](/react-sdk/use-wallet#signmessage)). The JSON carries the four
-fields a verifier needs:
+([React SDK › signMessage](/react-sdk/use-wallet#signmessage)). The portal gets the
+challenge as `message` and the text to show the user as `displayMessage`, which is sent
+only when the message's bytes are valid UTF-8: for any other bytes the user sees no text,
+so pass text, `new TextEncoder().encode(...)`. The JSON carries the four fields a verifier
+needs:
 
 ```tsx
 'use client';
