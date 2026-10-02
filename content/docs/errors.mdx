@@ -3,8 +3,8 @@ title: Errors
 description: Every error class the LazorKit SDKs throw, when each is thrown and what to do, and the program's error codes 3001–3036 and 4001–4018.
 ---
 
-One reference for the React SDK (`@lazorkit/wallet` 3.3.0), the React Native SDK
-(`@lazorkit/wallet-mobile-adapter` 2.3.0) and the contract SDKs (`@lazorkit/sdk-legacy`
+One reference for the React SDK (`@lazorkit/wallet` 3.3.1), the React Native SDK
+(`@lazorkit/wallet-mobile-adapter` 2.3.1) and the contract SDKs (`@lazorkit/sdk-legacy`
 1.3.1, `@lazorkit/sdk` 1.0.0-rc.5). Symptom-first help is in
 [Troubleshooting](/troubleshooting).
 
@@ -114,6 +114,19 @@ running call; "No wallet connected" also sets `error`. (Web since 3.3.0; on mobi
 
 Calls through `LazorkitWalletAdapter` and the Wallet Standard wallet are not refused:
 they queue behind the passkey's running transaction.
+
+## Signing a message
+
+| Error | Package | Thrown when | What to do |
+| ----- | ------- | ----------- | ---------- |
+| `Error('The portal did not sign this message: its reply is over another challenge.')` | both (3.3.1 / 2.3.1) | The portal's reply to `signMessage` is not a `webauthn.get` over `signedMessageChallenge(message)`. The SDK does not hand such a reply to the app. | Ask the user to sign again; if it repeats, check that `portalUrl` is the LazorKit portal. |
+| `PortalCancelledError` | both | The user closed the portal before it answered. | Treat as a cancel. |
+
+`verifyWalletMessage` resolves `false` for a signature that does not check out, and
+**rejects** when it cannot read the chain (an RPC that refuses `getProgramAccounts`, a
+network error): treat a rejection as not verified, never as verified. A signature made
+before 3.3.1 / 2.3.1 is over another challenge and is always `false`. See
+[useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
 
 ## Kept session and authority keys (web)
 

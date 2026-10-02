@@ -44,6 +44,8 @@ npm install @lazorkit/wallet @solana/web3.js@^1.99.0
   1.98.x gets `npm ERESOLVE`. Install it explicitly so your bundler resolves a single
   version. npm installs the other peers (`zustand`, `@solana/wallet-adapter-base`, the
   `@wallet-standard` packages) for you; with yarn or pnpm settings that do not, add them.
+  3.3.1 and later do not declare `@solana/kit`, so an app on kit 6, 7 or 8 installs the
+  wallet without `--legacy-peer-deps` (3.3.0 and earlier failed with `ERESOLVE` there).
 </Callout>
 
 </Step>
@@ -264,8 +266,8 @@ export function Balance() {
     description="Authorize once, execute payloads too big for a single tx." />
   <Card title="Sending transactions" href="/react-sdk/sending-transactions"
     description="Confirmation, isSigning, sequencing and the errors a send can reject with." />
-  <Card title="Verify messages" href="/react-sdk/use-wallet#verifymessage"
-    description="Verify passkey signatures in-browser with crypto.subtle." />
+  <Card title="Sign-in with a message" href="/react-sdk/use-wallet#verifying-a-message-signature"
+    description="Sign a message, then check on your server which wallet signed it." />
   <Card title="Troubleshooting" href="/troubleshooting"
     description="SSR errors, NotAllowedError, 0xbd0, 3006." />
 </Cards>

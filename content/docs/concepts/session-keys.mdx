@@ -39,8 +39,9 @@ prompt per transaction**.
   `keyStorage="memory"`). The key is bound to the wallet that created the session: it
   signs only while that wallet is connected, and `KeyWalletMismatchError` is thrown
   otherwise. `disconnect()` deletes it (also one whose session lands after it) unless you
-  pass `disconnect({ keepSessionKeys: true })`, a key whose session has expired is deleted
-  when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps. Pass
+  pass `disconnect({ keepSessionKeys: true })`, and so, since 3.3.1, do the wallet
+  adapter's `disconnect()` and the Wallet Standard's; a key whose session has expired is
+  deleted when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps. Pass
   `sessionKey` (a public key) to register a key your backend holds instead; it is never
   stored. See [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 - **React Native SDK and the contract SDKs:** you generate the keypair and keep the secret

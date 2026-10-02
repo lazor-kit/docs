@@ -22,9 +22,10 @@ npm install @lazorkit/wallet @solana/web3.js@^1.99.0 \
   @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
 ```
 
-This page describes `@lazorkit/wallet` 3.x (current: 3.3.0). The adapter speaks protocol
+This page describes `@lazorkit/wallet` 3.x (current: 3.3.1). The adapter speaks protocol
 v2, and v1 for wallets made before it; mainnet runs v1 today — see
-[Networks & versions](/networks).
+[Networks & versions](/networks). Since 3.3.1 the wallet declares no `@solana/kit` peer,
+so it installs in an app on `@solana/kit` 6, 7 or 8.
 
 ## Setup
 
@@ -176,46 +177,89 @@ chooser, and the errors `connect` can reject with.
 
 ---
 
+## Disconnecting
+
+The Wallet Standard `standard:disconnect` and `LazorkitWalletAdapter.disconnect()` (what a
+wallet-adapter UI's Disconnect, or `useWallet().disconnect()` from
+`@solana/wallet-adapter-react`, calls) clear the stored wallet and, since 3.3.1, delete
+the session key the SDK keeps for `signAndSendWithSession` — the one a `createSession` on
+the same page made through the [React SDK](/react-sdk/use-wallet#createsession) — as the
+React SDK's own `disconnect()` does. Before 3.3.1 they left it, and it signed again once
+its wallet was connected. The authority key is kept; `forgetStoredKeys()` deletes it.
+
+```ts
+import { LazorkitWalletAdapter } from '@lazorkit/wallet';
+
+declare const adapter: LazorkitWalletAdapter;
+
+await adapter.disconnect();                           // deletes the session key
+await adapter.disconnect({ keepSessionKeys: true });  // keeps it (LazorkitAdapterDisconnectOptions)
+```
+
+`standard:disconnect` takes no options, so it always deletes the session key. A key that
+IndexedDB fails to delete is logged, and the disconnect still succeeds. See
+[What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
+
+---
+
 ## Message signing (P256)
 
-WebAuthn signs over derived WebAuthn payloads, not the raw challenge. `signMessage`
-returns a JSON-encoded `{ signature, signedPayload }` pair so consumers can verify both
-pieces.
+`signMessage` (the Wallet Standard `solana:signMessage`, `LazorkitWalletAdapter.signMessage`)
+resolves with the UTF-8 bytes of a JSON object, not a 64-byte Ed25519 signature: a
+LazorKit address is a program account with no key to sign with, so the signer is the
+wallet's passkey. Since 3.3.1 the passkey signs a domain-separated challenge,
+`signedMessageChallenge(message)`, never the message's bytes, so a message signature can
+no longer be confused with a transaction approval
+([React SDK › signMessage](/react-sdk/use-wallet#signmessage)). The JSON carries the four
+fields a verifier needs:
 
 ```tsx
 'use client';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { StorageManager } from '@lazorkit/wallet';
 
-export function SignAndVerify() {
-  const { signMessage } = useWallet();
+export function SignIn({ message }: { message: string }) {
+  const { publicKey, signMessage } = useWallet();
 
   const handle = async () => {
-    if (!signMessage) return;
+    if (!signMessage || !publicKey) return;
 
-    const message = new TextEncoder().encode('Please verify ownership');
-    const result = await signMessage(message);
+    const signed = await signMessage(new TextEncoder().encode(message));
 
-    // result is a UTF-8 JSON blob — decode it:
-    const { signature, signedPayload } = JSON.parse(new TextDecoder().decode(result));
+    // A UTF-8 JSON blob: { signature, signedPayload, clientDataJsonBase64, authenticatorDataBase64 }
+    const result = JSON.parse(new TextDecoder().decode(signed));
 
-    console.log('signature:', signature);
-    console.log('signed payload:', signedPayload);
-    // Verify with `crypto.subtle` against the wallet's P256 public key
+    // The passkey's credential id, from the wallet LazorKit stored at connect.
+    const credentialId = (await StorageManager.getWallet())?.credentialId;
+
+    // Your server checks it with verifyWalletMessage (below).
+    await fetch('/api/sign-in', {
+      method: 'POST',
+      body: JSON.stringify({ wallet: publicKey.toBase58(), credentialId, ...result }),
+    });
   };
 
-  return <button onClick={handle}>Sign Message</button>;
+  return <button onClick={handle}>Sign in</button>;
 }
 ```
 
-<Callout type="warn" title="Why two fields?">
-  The authenticator doesn't sign the challenge directly — it signs
-  `sha256(authenticatorData || sha256(clientDataJSON))`. The verifier needs the exact
-  bytes that were signed. `signedPayload` gives you that byte sequence; `signature` is
-  the P256 signature over it.
-</Callout>
+**Check it on your server with `verifyWalletMessage`**, which reads the passkey's key from
+chain: `verifyWalletMessage({ connection, wallet, credentialId, rpId: 'portal.lazor.sh',
+message, ...result })`. It is `true` only when the signature is over this message and
+verifies against the key stored on chain in an Owner authority of `wallet` for
+`credentialId`; a credential id that names another passkey simply fails. The Wallet
+Standard account does not carry the credential id, so read it from the stored wallet as
+above (`StorageManager.getWallet()`, or `wallet.credentialId` from the React SDK's
+`useWallet()`). Never accept a public key from the client. Parameters and the offline
+`verifySignedMessage`:
+[React SDK › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
 
-See the [React SDK's `verifyMessage`](/react-sdk/use-wallet#verifymessage) for an
-in-browser verifier that wraps `crypto.subtle`.
+<Callout type="warn" title="Signatures from 3.3.0 and earlier">
+  They were made over the message's bytes, carry only `signature` and `signedPayload`, and
+  do not verify with `verifyWalletMessage`: ask the user to sign again. The deprecated
+  `verifySignatureBrowser` checks only that `signature` is over `signedPayload`, not which
+  message was signed; never use it to authenticate.
+</Callout>
 
 ---
 
@@ -223,10 +267,10 @@ in-browser verifier that wraps `crypto.subtle`.
 
 | Feature                              | Available |
 | ------------------------------------ | --------- |
-| `connect` / `disconnect`             | yes       |
+| `connect` / `disconnect`             | yes — `disconnect` deletes the kept session key (3.3.1+) |
 | `signTransaction` / `signAllTransactions` | **no** — throws `WalletSignTransactionError`; use `sendTransaction` |
 | `sendTransaction` / `signAndSendTransaction` | yes — resolves once confirmed |
-| `signMessage`                        | yes (P256 — see above) |
+| `signMessage`                        | yes (P256, JSON — see above) |
 | Session keys                         | **no** — use React/RN SDK |
 | Deferred execution                   | **no** — use React/RN SDK |
 | Authority management                 | **no** — use React/RN SDK |

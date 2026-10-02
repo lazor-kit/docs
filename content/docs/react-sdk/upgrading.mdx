@@ -3,21 +3,21 @@ title: Upgrading to 3.x
 description: What changes when you move @lazorkit/wallet from 2.x to 3.x, release by release, and what to change in your app.
 ---
 
-`@lazorkit/wallet` 3.0.0 is the release that speaks protocol v2. 3.3.0 is the current
+`@lazorkit/wallet` 3.0.0 is the release that speaks protocol v2. 3.3.1 is the current
 release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md)
 and the [Changelog](/changelog) here.
 
 ```bash
-npm install @lazorkit/wallet@^3.3.0 @solana/web3.js@^1.99.0
+npm install @lazorkit/wallet@^3.3.1 @solana/web3.js@^1.99.0
 ```
 
 `@solana/web3.js` must be **1.99 or later** (3.0.1): `@solana/wallet-adapter-base`
 0.9.28 requires it, and an app pinned to 1.98.x gets `npm ERESOLVE`. The package also
 declares `react`, `react-dom`, `zustand`, `@solana/wallet-adapter-base`,
-`@solana/wallet-standard-features` and `@wallet-standard/*` as peers. It declares
-`@solana/kit`, `@solana/kora` and `@solana-program/token` too, but the bundle never loads
-them.
+`@solana/wallet-standard-features` and `@wallet-standard/*` as peers. Since 3.3.1 it no
+longer declares `@solana/kit`, `@solana/kora` or `@solana-program/token`, which it never
+loaded: it installs next to `@solana/kit` 6, 7 or 8 without `--legacy-peer-deps`.
 
 ## Checklist
 
@@ -56,6 +56,8 @@ them.
    the `assert*` / `validate*` utilities and others) were already dropped in 2.1.0.
 10. **`PROGRAM_ID` / `PROGRAM_ADDRESS` are the v2 mainnet id.** Use the `PROGRAM_ID_*`
     constants ([Networks & versions](/networks)) when you need a specific one.
+11. **Check message signatures with `verifyWalletMessage`** (3.3.1), never with the
+    deprecated `verifyMessage`. See [below](#upgrading-to-331).
 
 ## Release by release
 
@@ -68,20 +70,64 @@ them.
 | **3.2.0** (2026-09-30) | Deferred window: `expiryOffset` 10–9000 slots, default 1500 (was 300). `DeferredExpiredError`, `isDeferredExpiredError`, `MIN_/MAX_DEFERRED_EXPIRY_SLOTS`, `DEFERRED_EXPIRED_CODE`. |
 | **3.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext` on TX2 errors. |
 | **3.3.0** (2026-10-02) | **Breaking:** `addAuthority` needs a `role`. Session and authority keys kept as non-extractable WebCrypto keys in IndexedDB, not plaintext `localStorage`: `keyStorage`, `forgetStoredKeys()`. A kept key signs only for its own wallet: `KeyWalletMismatchError`, `isKeyWalletMismatchError`. `disconnect` deletes the session key unless `keepSessionKeys`; expired session keys are deleted. Callbacks run once the action is over, one per call. The `is*Error` predicates recognise the SDK's own errors through wrappers. A 4018 is not resent. See [below](#upgrading-to-330). |
+| **3.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`; `verifyMessage` and `verifySignatureBrowser` deprecated. Ownership-proof challenges are domain-separated too. `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` delete the session key. The sign dialog sends the stored credentials to the portal's origin only. Peers `@solana/kit`, `@solana/kora`, `@solana-program/token` dropped. See [below](#upgrading-to-331). |
 
 ## Keys the SDK keeps in the browser
 
 `createSession` (without `sessionKey`) and `addAuthority` generate an Ed25519 key and keep
 it, so that `signAndSendWithSession` / `signAndSendWithAuthority` sign without a prompt.
 Since 3.3.0 each key is a non-extractable WebCrypto key in IndexedDB, signs only while the
-wallet it was registered for is connected, and the session key is deleted at `disconnect`:
-see [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser). A
+wallet it was registered for is connected, and the session key is deleted at `disconnect`
+(also through wallet-adapter and the Wallet Standard, since 3.3.1): see
+[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser). A
 `sessionKey` you pass is never stored.
 
 3.2.1 and earlier kept the secret key in `localStorage` as plain text, under
 `lazorkit-session` and `lazorkit-authority`, where any script on your origin could read
 it, and `disconnect` did not remove it. 3.3.0 moves such a key to IndexedDB (item 5
 below).
+
+## Upgrading to 3.3.1
+
+From 3.3.0. Nothing was removed, and no call changes shape; items 1 to 3 change what your
+server checks, and item 4 what a sign-out deletes. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md#331).
+
+1. **Verify message signatures with `verifyWalletMessage`.** `signMessage` (the hook, the
+   store, `LazorkitWalletAdapter.signMessage` and the Wallet Standard `solana:signMessage`)
+   signs `signedMessageChallenge(message)`, a 58-byte challenge tagged
+   `LazorKit signed message v1`, never the message's bytes, so a message signature can no
+   longer be confused with a transaction approval. It resolves with a `SignMessageResult`:
+   `signature` and `signedPayload` as before, plus `clientDataJsonBase64` and
+   `authenticatorDataBase64`. Send all four to your server with the wallet and its
+   `credentialId`, and check them with `verifyWalletMessage`, which reads the passkey's key
+   from chain. A signature made by 3.3.0 or earlier does not verify: ask the user to sign
+   again. See [useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+2. **Stop authenticating with `verifyMessage` or `verifySignatureBrowser`.** Both are
+   deprecated. They check only that `signature` is over `signedPayload`, not which message
+   was signed, so any assertion the passkey ever made passes.
+3. **Adapter and Wallet Standard signatures** are still the UTF-8 bytes of a JSON object,
+   now with the four `SignMessageResult` fields: pass
+   `JSON.parse(new TextDecoder().decode(signature))` to `verifyWalletMessage`. They are not
+   a 64-byte Ed25519 signature: a LazorKit address is a program account, with no key to
+   sign with.
+4. **A wallet-adapter or Wallet Standard sign-out deletes the session key.**
+   `LazorkitWalletAdapter.disconnect()` (what a wallet-adapter UI's Disconnect calls) and
+   `standard:disconnect` delete the session key the SDK keeps, as `useWallet().disconnect()`
+   has since 3.3.0. To keep it, call `adapter.disconnect({ keepSessionKeys: true })` (new
+   type `LazorkitAdapterDisconnectOptions`); `standard:disconnect` takes no options, so it
+   always deletes it. The authority key is kept on both paths; `forgetStoredKeys()`
+   deletes it.
+5. **Ownership proofs.** `createOwnershipChallenge()` from `@lazorkit/wallet` returns
+   `LazorKit ownership proof v1` followed by 32 random bytes (59 bytes), and `connect` signs
+   that. `verifyOwnershipProof` accepts it unchanged.
+6. **Install.** The unused peers `@solana/kit` ^5, `@solana/kora` and
+   `@solana-program/token` are gone, so the wallet installs next to `@solana/kit` 8. Drop
+   `--legacy-peer-deps` if you added it for them.
+7. **The portal's origin.** The sign dialog posts the stored credential id, passkey public
+   key and wallet address only to the origin of `portalUrl`, never to whatever page its
+   iframe shows. A portal that stays on its own origin sees no change. Keep `portalUrl` an
+   absolute URL: with one that has no origin to address, nothing is posted.
 
 ## Upgrading to 3.3.0
 

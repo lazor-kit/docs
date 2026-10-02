@@ -10,6 +10,67 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
+## 2026-10-02 — wallet 3.3.1, wallet-mobile-adapter 2.3.1
+
+Checklists: [React › Upgrading to 3.3.1](/react-sdk/upgrading#upgrading-to-331),
+[React Native › Upgrading to 2.3.1](/react-native-sdk/upgrading#upgrading-to-231).
+
+### Security
+
+- **Message signatures are domain-separated.** `signMessage` (web: the hook, the store,
+  `LazorkitWalletAdapter` and the Wallet Standard `solana:signMessage`; mobile) has the
+  passkey sign `signedMessageChallenge(message)`, `tag || SHA-256(tag || message)` with
+  `tag` = `LazorKit signed message v1` (58 bytes), never the app's bytes. A message
+  signature can no longer be confused with a transaction approval, whose challenge is a
+  32-byte hash. Connect's ownership proofs get their own tag: `createOwnershipChallenge()`
+  returns `LazorKit ownership proof v1` followed by 32 random bytes (59 bytes), and
+  `verifyOwnershipProof` accepts it unchanged. The portal gets the message challenge as
+  `message` and the text as `displayMessage`, and the SDKs refuse a reply over any other
+  challenge. A message signature made by an earlier release does not verify: sign again.
+  See [useWallet › Messages](/react-sdk/use-wallet#messages).
+- **Web: wallet-adapter and Wallet Standard sign-outs delete the session key.**
+  `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` delete the session key the
+  SDK keeps, as `useWallet().disconnect()` has since 3.3.0; in 3.3.0 they left it, and it
+  signed again once its wallet was connected. `adapter.disconnect({ keepSessionKeys: true })`
+  keeps it (new type `LazorkitAdapterDisconnectOptions`). The authority key is kept on both
+  paths. See [Wallet Standard › Disconnecting](/wallet-standard#disconnecting).
+- **Web: the sign dialog sends the stored credentials to the portal's origin only.** The
+  credential id, passkey public key and wallet address it posts to its iframe are addressed
+  to the origin of `portalUrl` instead of `'*'`, so a page the frame was navigated to
+  receives nothing. A `portalUrl` with no origin to address gets nothing.
+
+### New
+
+- **`SignMessageResult`.** `signMessage` resolves with `signature` and `signedPayload` as
+  before, plus `clientDataJsonBase64` and `authenticatorDataBase64`, which a verifier
+  needs. The adapter's and the Wallet Standard `signature` stay UTF-8 JSON, now with the
+  same four fields.
+- **`verifyWalletMessage`** checks that a wallet signed a message, with the passkey's key
+  read from the chain (an Owner authority of the wallet for the credential, created under
+  `rpId`), never taken from the client. **`verifySignedMessage`** is its offline part, for
+  a key you read from chain yourself. Also `signedMessageChallenge`,
+  `SIGNED_MESSAGE_DOMAIN`, `OWNERSHIP_PROOF_DOMAIN` and the types `SignedMessageInput`,
+  `VerifySignedMessageParams`, `VerifyWalletMessageParams`. In both packages.
+
+### Deprecated
+
+- Web: `useWallet().verifyMessage` and `verifySignatureBrowser`. They check only that
+  `signature` is over `signedPayload`, not which message was signed: never use them for
+  authentication.
+
+### Fixed
+
+- `signMessage` signed the base64 decoding of the text instead of the text.
+- **Web: the wallet installs next to `@solana/kit` 8.** The unused peers `@solana/kit` ^5,
+  `@solana/kora` ^0.1 and `@solana-program/token` ^0.9 are gone: an app on kit 6, 7 or 8
+  no longer gets `npm ERESOLVE`, and an app without kit no longer gets kit 5, Kora and the
+  token program installed for nothing. The published bundle is unchanged.
+
+Both packages gain the dependency `@noble/curves`, already a dependency of
+`@solana/web3.js`.
+
+---
+
 ## 2026-10-02 — wallet 3.3.0, wallet-mobile-adapter 2.3.0
 
 Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330),

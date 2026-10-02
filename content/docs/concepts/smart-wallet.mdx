@@ -108,6 +108,15 @@ verification uses the native Secp256r1 precompile and enforces:
 How a client builds and signs the challenge:
 [Passkey signing](/web3js-v1/passkey-signing).
 
+**Off-chain signatures.** The wallet SDKs never have a passkey sign bytes an app chose as
+its challenge. A message signature (`signMessage`) is over a 58-byte challenge tagged
+`LazorKit signed message v1`, and connect's ownership proof over a 59-byte challenge tagged
+`LazorKit ownership proof v1`, while every transaction challenge the program accepts is a
+32-byte hash, so no signature of one kind can be taken for another (`@lazorkit/wallet`
+3.3.1, `@lazorkit/wallet-mobile-adapter` 2.3.1). To check which wallet signed a message,
+use `verifyWalletMessage`, which reads the passkey's key from the wallet's Owner authority
+on chain: [Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+
 ### Ed25519
 
 Standard Solana keypair. Verified by the Solana runtime. No counter required — Solana's

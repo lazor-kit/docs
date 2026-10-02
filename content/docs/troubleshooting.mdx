@@ -18,7 +18,7 @@ and a concrete fix. Every error class and program code is listed on [Errors](/er
 | ------------------------------ | --------------------------------------------------------------------- |
 | [Setup](#setup)                | `Cannot resolve module`, `ERESOLVE`, `Buffer is not defined`, SSR crashes |
 | [Wallet address](#wallet-address) | Funds sent to the wrong address, balance stuck at 0                 |
-| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed |
+| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed, a message signature that does not verify |
 | [Sending transactions](#sending-transactions) | 3006, outcome unknown, "Already signing", deferred expiry |
 | [Network / relay](#network--relay)      | `Network request failed`, paymaster errors, RPC refusals       |
 | [Deep linking](#deep-linking-react-native-only) | Portal never returns, redirect drops signature          |
@@ -46,6 +46,15 @@ Then restart your bundler / Metro to clear module caches.
 
 ```bash
 npm install @solana/web3.js@^1.99.0
+```
+
+`peer @solana/kit@"^5.0" from @solana-program/token@0.9.0` in an app on `@solana/kit` 6, 7
+or 8: 3.3.0 and earlier declared `@solana/kit` ^5, `@solana/kora` and
+`@solana-program/token` as peers, though nothing in the wallet loads them. 3.3.1 dropped
+them; install it instead of using `--legacy-peer-deps`:
+
+```bash
+npm install @lazorkit/wallet@^3.3.1
 ```
 
 ### `Buffer is not defined`
@@ -218,6 +227,26 @@ error that says so. Nothing is created in either case. See
 The built-in chooser is a React Native `Modal` and iOS shows one modal at a time. Mount
 `<WalletChooser />` inside your own modal, or close it before connecting. See
 [Wallet Confirmation › iOS](/react-native-sdk/wallet-confirmation#ios-shows-one-modal-at-a-time).
+
+### A message signature does not verify
+
+`verifyWalletMessage` resolves `false` when any of these differ from what the passkey
+signed, and `verifySignedMessage` likewise:
+
+- The signature was made by `@lazorkit/wallet` 3.3.0 / adapter 2.3.0 or earlier, over the
+  message's own bytes. Since 3.3.1 / 2.3.1 the passkey signs
+  `signedMessageChallenge(message)`; ask the user to sign again.
+- `message` is not the exact string (or bytes) that was signed.
+- `rpId` is not the portal the passkey was created under (`portal.lazor.sh` by default), or
+  `origin`, when you pass it, is not the portal's origin.
+- `wallet` or `credentialId` names another wallet or passkey, or the passkey is not an
+  Owner of that wallet.
+- An adapter or Wallet Standard signature was passed as it came: it is UTF-8 JSON; pass
+  `JSON.parse(new TextDecoder().decode(signature))`.
+
+It rejects, rather than resolving `false`, when it cannot read the chain: use an RPC
+endpoint that allows `getProgramAccounts`. Never fall back to the deprecated
+`verifyMessage` / `verifySignatureBrowser`: they do not check which message was signed.
 
 ### `rpId` mismatch / "credentials don't match"
 

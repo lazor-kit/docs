@@ -68,7 +68,7 @@ Each action's promise settles, and its `onSuccess` or `onFail` runs, only **once
   still resolves, a connect that succeeded still resolves, and `onFail` is not called.
 
 This holds for every action, on the hook and on the store, `connect` and `disconnect`
-included. `@lazorkit/wallet` 3.3.0 keeps the same contract.
+included. `@lazorkit/wallet` 3.3.0 and later keep the same contract.
 
 <Callout type="info" title="Changed in 2.3.0">
   In 2.2.1 a throwing `onSuccess` on `connect` or `disconnect` made the call reject, the
@@ -116,7 +116,7 @@ its own: ask the user to approve again.
 
 ## Transaction options
 
-| `transactionOptions` field | On mobile (2.3.0) |
+| `transactionOptions` field | On mobile (2.3.1) |
 | -------------------------- | ----------------- |
 | `addressLookupTableAccounts` | Used for the transaction, and for the portal preview when the preview would be over 1232 bytes without them. |
 | `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). |

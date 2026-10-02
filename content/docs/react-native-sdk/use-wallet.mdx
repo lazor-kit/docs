@@ -27,7 +27,7 @@ through the paymaster, and resolves once it is **confirmed** — see
 | `connect`                  | yes           | Authenticate + create/load the smart wallet              |
 | `disconnect`               | no            | Clear local state                                        |
 | `signAndSendTransaction`   | yes           | Single-transaction Execute                               |
-| `signMessage`              | yes           | Off-chain passkey signature                              |
+| `signMessage`              | yes           | Off-chain passkey signature; check it with `verifyWalletMessage` |
 | `createSession`            | yes           | Register an Ed25519 session key with its limits          |
 | `signAndSendWithSession`   | **no**        | Send a tx signed by your session keypair                 |
 | `revokeSession`            | yes           | Close a session, refund rent                             |
@@ -493,19 +493,92 @@ const authorities = await listAuthorities();
 
 ### `signMessage`
 
-Off-chain passkey signature over an arbitrary string. Ideal for session-less auth.
+Off-chain passkey signature over a string: a sign-in, or any statement your server checks.
 
 ```ts
-const { signature, signedPayload } = await signMessage(
-  'Sign in as user-123',
+const result = await signMessage(
+  'Sign in to example.com\nNonce: 8f2c…',
   { redirectUrl: 'myapp://callback' },
 );
+// { signature, signedPayload, clientDataJsonBase64, authenticatorDataBase64 }, all base64
 ```
 
-Both values are base64 strings. Verify server-side against the on-chain authority pubkey
-(`readAuthorityPubkey`).
+The passkey never signs the message's bytes as its WebAuthn challenge. It signs a challenge
+made from them, with a tag no other kind of passkey challenge carries (format v1, the same
+as `@lazorkit/wallet`'s):
 
-**Returns** `Promise<{ signature: string; signedPayload: string }>`.
+```
+tag       = UTF-8 "LazorKit signed message v1"     (26 bytes)
+challenge = tag || SHA-256(tag || message)        (58 bytes)
+```
+
+The message is signed as its UTF-8 bytes. `signedMessageChallenge(message)` computes the
+challenge and `SIGNED_MESSAGE_DOMAIN` is the tag. A transaction challenge is a 32-byte hash
+and an ownership proof (`connect`) is 59 bytes tagged `LazorKit ownership proof v1`, so no
+challenge of one kind can be another. The portal gets the challenge as `message` and the
+text as `displayMessage`; the adapter checks the redirect, and a reply over any other
+challenge rejects with "The portal did not sign this message: its reply is over another
+challenge."
+
+**Returns** `Promise<SignMessageResult>`:
+
+| Field | What it is |
+| ----- | ---------- |
+| `signature` | The P-256 signature, 64 bytes (r \|\| s, low-S), base64. |
+| `signedPayload` | What the passkey signed: authenticatorData \|\| SHA-256(clientDataJSON), base64. |
+| `clientDataJsonBase64` | The WebAuthn clientDataJSON, base64. Its `challenge` is the base64url of the challenge above. |
+| `authenticatorDataBase64` | The WebAuthn authenticatorData, base64. |
+
+<Callout type="info" title="Changed in 2.3.1">
+  Message signatures can no longer be confused with transaction approvals. In 2.3.0 and
+  earlier the passkey signed the message itself as its challenge (the base64 decoding of
+  the text rather than the text), and the result had only `signature` and
+  `signedPayload`. A signature made by an earlier release does not verify: ask the user to
+  sign again.
+</Callout>
+
+### Verifying a message signature
+
+A message signature proves that a passkey's key signed the message, not which wallet that
+key belongs to. To authenticate a wallet, read the key from the chain, never from the
+client: a server that takes the key from the request accepts anyone's passkey for any
+wallet they name. Send the result to your server with the wallet's address
+(`smartWalletPubkey`) and `wallet.credentialId`, and check it there with
+`verifyWalletMessage`:
+
+```ts
+import { Connection } from '@solana/web3.js';
+import { verifyWalletMessage } from '@lazorkit/wallet-mobile-adapter';
+// or, on a server without React Native: from '@lazorkit/wallet'
+
+const ok = await verifyWalletMessage({
+  connection: new Connection(RPC_URL),
+  cluster: 'devnet',                   // when RPC_URL does not say which cluster
+  wallet: body.wallet,                 // the wallet the client claims: vault or wallet PDA
+  credentialId: body.credentialId,     // the passkey's credential id, base64
+  rpId: 'portal.lazor.sh',             // the passkey's relying party: the provider's rpId
+  message,                             // the message you issued, with your domain and nonce
+  signature: body.signature,
+  clientDataJsonBase64: body.clientDataJsonBase64,
+  authenticatorDataBase64: body.authenticatorDataBase64,
+  signedPayload: body.signedPayload,   // optional
+});
+```
+
+It is `true` only when the signature is over `signedMessageChallenge(message)` (a
+`webauthn.get` with the user present, under `rpId`), verifies against the key stored on
+chain in an **Owner** authority of `wallet` for `credentialId` (v2 or v1), and the wallet
+account still exists. It reads the chain with one `getProgramAccounts` per program, as
+`connect` does, and **rejects** when the chain cannot be read: treat that as not verified.
+Check the domain and the nonce in the message yourself. The parameters are the same as on
+the web: [React SDK › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+
+`verifySignedMessage({ message, publicKey, ...result })` is the offline part of that check,
+with no RPC: `true` only when `publicKey`'s passkey signed
+`signedMessageChallenge(message)`, and `false` for any other challenge, the raw message
+bytes included. It never throws. Use it alone only with a key you read from the claimed
+wallet's authority on chain yourself: `wallet.passkeyPubkey` comes from the client, and
+proves nothing to a server.
 
 ---
 

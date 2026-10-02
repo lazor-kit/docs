@@ -352,6 +352,55 @@ type ListAuthoritiesResult = AuthorityEntry[];
 
 ---
 
+## Signed messages
+
+Exported from 2.3.1, the same as `@lazorkit/wallet`'s. How they are used:
+[useWallet › Messages](/react-native-sdk/use-wallet#messages).
+
+```ts
+const SIGNED_MESSAGE_DOMAIN = 'LazorKit signed message v1';  // the challenge's tag
+const OWNERSHIP_PROOF_DOMAIN = 'LazorKit ownership proof v1'; // connect's proofs
+
+type SignedMessageInput = string | Uint8Array;  // a string is signed as its UTF-8 bytes
+
+// What signMessage resolves with: the passkey's assertion over signedMessageChallenge(message).
+interface SignMessageResult {
+  readonly signature: string;               // P-256, 64 bytes (r || s, low-S), base64
+  readonly signedPayload: string;           // authenticatorData || SHA-256(clientDataJSON), base64
+  readonly clientDataJsonBase64: string;    // its challenge is base64url(signedMessageChallenge(message))
+  readonly authenticatorDataBase64: string;
+}
+
+interface VerifySignedMessageParams {
+  readonly message: SignedMessageInput;
+  readonly signature: string | Uint8Array;  // 64 bytes, or their base64
+  readonly clientDataJsonBase64: string;
+  readonly authenticatorDataBase64: string;
+  readonly signedPayload?: string;          // checked when given
+  readonly publicKey: string | Uint8Array | ArrayLike<number>; // P-256: 33, 65 or 64 bytes, or base64. Read it from chain.
+  readonly rpId?: string;
+  readonly origin?: string;
+}
+
+interface VerifyWalletMessageParams extends Omit<VerifySignedMessageParams, 'publicKey' | 'rpId'> {
+  readonly connection: Connection;
+  readonly wallet: string | PublicKey;      // the claimed wallet: vault or wallet PDA
+  readonly credentialId: string;            // base64
+  readonly rpId: string;                    // the passkey's relying party (the provider's rpId)
+  readonly cluster?: 'mainnet' | 'devnet';
+}
+
+function signedMessageChallenge(message: SignedMessageInput): Uint8Array; // 58 bytes
+function verifySignedMessage(params: VerifySignedMessageParams): boolean;  // offline; never throws
+function verifyWalletMessage(params: VerifyWalletMessageParams): Promise<boolean>; // key read from chain
+function createOwnershipChallenge(): Uint8Array; // OWNERSHIP_PROOF_DOMAIN || 32 random bytes, 59 bytes
+```
+
+`LazorWalletHook.signMessage` and the store's resolve with `SignMessageResult` (2.3.1; it
+was `{ signature, signedPayload }`).
+
+---
+
 ## Session actions
 
 Actions are **immutable policies** attached to a session at creation — or, serialized with

@@ -3,18 +3,18 @@ title: Upgrading to 2.x
 description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
 ---
 
-`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.3.0 is
+`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.3.1 is
 the current release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md)
 and the [Changelog](/changelog) here.
 
 ```bash
-npm install @lazorkit/wallet-mobile-adapter@^2.3.0
+npm install @lazorkit/wallet-mobile-adapter@^2.3.1
 ```
 
 <Callout type="warn" title="Do not install @beta">
   The npm `beta` tag still points at `2.0.0-beta.4`, a pre-v2 build from April 2026. Use
-  `latest` (2.3.0).
+  `latest` (2.3.1).
 </Callout>
 
 The adapter depends on `expo-web-browser` `^14.2.0 || ^15.0.0` (Expo SDK 53 / 54) and
@@ -55,6 +55,8 @@ Expo SDKs have not been tested.
 10. **Android redirects.** More than one app can claim a custom URL scheme on Android.
     Prefer a redirect only your app can receive, such as a verified App Link; see
     [Wallet Confirmation](/react-native-sdk/wallet-confirmation#a-passkey-that-has-no-wallet-yet).
+11. **Check message signatures with `verifyWalletMessage`** (2.3.1), which reads the
+    passkey's key from chain. See [below](#upgrading-to-231).
 
 ## Release by release
 
@@ -65,6 +67,7 @@ Expo SDKs have not been tested.
 | **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
 | **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
 | **2.3.0** (2026-10-02) | **Breaking:** `addAuthorityEd25519` needs a `role`. `connect` and `disconnect` follow the callback contract, on the hook and the store; `transferSol` with no wallet calls `onFail`. The `is*Error` predicates recognise the adapter's own errors through wrappers. See [below](#upgrading-to-230). |
+| **2.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`. Ownership-proof challenges are domain-separated too. See [below](#upgrading-to-231). |
 
 ## Keys
 
@@ -80,6 +83,29 @@ wallet is connected, and delete it at disconnect and once its session is revoked
 expired. The package README's
 [Session keys](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/README.md#session-keys)
 section (2.3.0) shows this with `expo-secure-store`.
+
+## Upgrading to 2.3.1
+
+From 2.3.0. Nothing was removed, and no call changes shape; what changes is what your
+server checks. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md#231).
+
+1. **Verify message signatures with `verifyWalletMessage`.** `signMessage` signs
+   `signedMessageChallenge(message)`, a 58-byte challenge tagged
+   `LazorKit signed message v1`, never the message's bytes, so a message signature can no
+   longer be confused with a transaction approval. It resolves with a `SignMessageResult`:
+   `signature` and `signedPayload` as before, plus `clientDataJsonBase64` and
+   `authenticatorDataBase64`. Send all four to your server with the wallet and its
+   `credentialId`, and check them with `verifyWalletMessage`, which reads the passkey's key
+   from chain. A signature made by 2.3.0 or earlier does not verify: ask the user to sign
+   again. See [useWallet › Verifying a message signature](/react-native-sdk/use-wallet#verifying-a-message-signature).
+2. **Do not check a message signature against a key the client sends** (such as
+   `passkeyPubkey`): use `verifyWalletMessage`, or `verifySignedMessage` with a key you
+   read from the wallet's authority on chain.
+3. **Ownership proofs.** `connect` signs `LazorKit ownership proof v1` followed by 32
+   random bytes (59 bytes), from `createOwnershipChallenge()`. `verifyOwnershipProof`
+   accepts it unchanged.
+4. **New dependency:** `@noble/curves`, already a dependency of `@solana/web3.js`.
 
 ## Upgrading to 2.3.0
 

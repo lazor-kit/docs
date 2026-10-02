@@ -61,6 +61,11 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
 | `keyStorage`        | `'auto' \| 'memory'`                           | `'auto'`                               | 3.3.0 |
 | `children`          | `ReactNode`                                    | —                                      | |
 
+- **`portalUrl`** — where the passkey ceremony runs, and the relying party passkeys are
+  created under (its hostname). Give an absolute URL: the sign dialog posts the stored
+  credential id, passkey public key and wallet address to this URL's origin only, and
+  posts nothing when it has none (3.3.1+; earlier releases posted them to whatever page
+  the dialog's iframe showed).
 - **`paymasterConfig`** — the Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as
   `x-api-key`; it ships in your bundle, so it is not a secret.
 - **`v1PaymasterConfig`** — the relayer for users whose wallet is still on LazorKit v1:
@@ -128,6 +133,11 @@ with `KeyWalletMismatchError`; see
   `createSession` still waiting for its transaction keeps no key once it lands.
   `disconnect({ keepSessionKeys: true })` keeps it. The authority key is kept, and signs
   once its wallet is connected again.
+- `LazorkitWalletAdapter.disconnect()` (a wallet-adapter UI's Disconnect) and the Wallet
+  Standard `standard:disconnect` delete the session key the same way, whatever
+  `keyStorage` is, and keep the authority key (3.3.1+; earlier releases left the session
+  key). `adapter.disconnect({ keepSessionKeys: true })` keeps it; `standard:disconnect`
+  takes no options.
 - `revokeSession()` deletes the session key once the revoke lands. `removeAuthority`
   deletes the authority key when it removes that authority.
 - A session key whose session has expired is deleted when it is next read.

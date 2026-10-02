@@ -18,8 +18,10 @@ keeping a way into its vault.
 ## What `connect` does
 
 1. **Proves the passkey.** It keeps only the wallets whose stored key the passkey is
-   proven to hold — the key the portal reports, or a signature over a fresh challenge (at
-   most one extra passkey prompt per connect).
+   proven to hold — the key the portal reports, or a signature over a fresh ownership-proof
+   challenge (at most one extra passkey prompt per connect). Since 3.3.1 that challenge is
+   domain-separated, `LazorKit ownership proof v1` followed by 32 random bytes, so it can
+   never be a transaction or message challenge ([Messages](/react-sdk/use-wallet#signmessage)).
 2. **Uses a wallet on its own** only when it is **the one wallet this passkey has signed
    for, and nothing else can spend from it**: no other authority, live session, pending
    deferred transaction or token approval, and a vault still owned by the System Program.
@@ -47,7 +49,8 @@ that a signature from this `connect` verifies against:
 - otherwise the reported key, once the ownership proof verifies against it;
 - otherwise the key **recovered from two of the passkey's signatures** over fresh
   challenges (`resolvePasskeyPublicKey`, `@lazorkit/sdk-legacy` 1.3.0). That costs **one
-  extra passkey prompt**: a portal sign over a random challenge, with no transaction.
+  extra passkey prompt**: a portal sign over a fresh ownership-proof challenge, with no
+  transaction.
 
 Closing that extra prompt rejects `connect` with `PortalCancelledError`. If the signatures
 do not settle on one key, `connect` throws an error that says so. A portal sign reply that
@@ -236,7 +239,10 @@ await adapter.connect({ confirmWallet: 'CHOSEN_VAULT_ADDRESS' });
 
 With `'throw'`, catch the error (wallet-adapter's `onError`), then set
 `adapter.confirmWallet = choice.vault` and connect again. The adapter clears
-`confirmWallet` once a wallet is connected, and on disconnect. A second `connect` without
+`confirmWallet` once a wallet is connected, and on disconnect; since 3.3.1
+`adapter.disconnect()` also deletes the session key the SDK keeps, unless you pass
+`{ keepSessionKeys: true }`
+([Wallet Standard › Disconnecting](/wallet-standard#disconnecting)). A second `connect` without
 options while one is running waits for it rather than opening another portal. One that
 passes `confirmWallet` or `onConfirmWallet` throws `WalletConnectionError` (and emits it as
 `error`) until the first finishes.
@@ -253,5 +259,7 @@ Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
 `findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
 `LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()`; see
 [SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
-`createOwnershipChallenge`, `verifyOwnershipProof`, `pickOwnWallet` and
-`selectWalletByAddress` are re-exported from `@lazorkit/wallet`.
+`verifyOwnershipProof`, `pickOwnWallet` and `selectWalletByAddress` are re-exported from
+`@lazorkit/wallet`. Its `createOwnershipChallenge` is its own (3.3.1+): domain-separated,
+59 bytes, where `@lazorkit/sdk-legacy`'s gives 32 bare random bytes. Prefer it;
+`verifyOwnershipProof` accepts both.
