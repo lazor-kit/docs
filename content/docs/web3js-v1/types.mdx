@@ -3,7 +3,7 @@ title: Types
 description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-The public types and helpers of `@lazorkit/sdk-legacy` **1.3.1** (`@next`; protocol v2).
+The public types and helpers of `@lazorkit/sdk-legacy` **1.4.0** (`@next`; protocol v2).
 
 ## Signer helpers
 
@@ -154,6 +154,14 @@ const actions = [
 const policy = serializeActions(actions);                     // a Delegate's policy bytes
 ```
 
+From the v2 program release that adds errors 3037 and 3038 (not deployed yet), an asset no
+action names cannot leave the vault: SOL needs a `Sol*` action, rent the vault pays
+included, and each mint a `Token*` action; wSOL is a mint. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). When a
+passkey approves the transaction that registers the actions, keep them within about 244
+bytes ([How many actions fit](/concepts/session-keys#how-many-actions-fit)): the list above
+is 301.
+
 ---
 
 ## `WalletAuthorityRecord`
@@ -182,7 +190,8 @@ interface WalletAuthorityRecord {
 
 <Callout type="warn" title="Version note">
   Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later (`next` is
-  1.3.1). `0.3.x` (`latest`) and `1.1.x` do not have it.
+  1.4.0), except `createTaggedOwnershipChallenge` and `OWNERSHIP_PROOF_DOMAIN` (1.4.0).
+  `0.3.x` (`latest`) and `1.1.x` do not have it.
 </Callout>
 
 How to use them together: [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
@@ -228,17 +237,27 @@ the key you create it for.
 
 ```typescript
 import {
+  OWNERSHIP_PROOF_DOMAIN,
+  createTaggedOwnershipChallenge,
   createOwnershipChallenge,
   verifyOwnershipProof,
   pickOwnWallet,
   selectWalletByAddress,
 } from '@lazorkit/sdk-legacy';
 
-// 32 random bytes. Fresh for every proof; never reuse one.
+// OWNERSHIP_PROOF_DOMAIN = 'LazorKit ownership proof v1' (1.4.0+)
+
+// 1.4.0+. OWNERSHIP_PROOF_DOMAIN (UTF-8) followed by 32 random bytes: 59 bytes, the same
+// form as the wallet packages' createOwnershipChallenge. Fresh for every proof; never reuse one.
+createTaggedOwnershipChallenge(): Uint8Array;
+
+// 32 random bytes, unchanged. @deprecated as a passkey challenge (1.4.0): those bytes look
+// like a transaction challenge. Use createTaggedOwnershipChallenge for every new proof.
 createOwnershipChallenge(): Uint8Array;
 
 // Pure. The candidates whose stored key produced the proof: a `webauthn.get` over exactly
-// `proof.challenge`, under `rpId`, with the user present. [] on any failure; never throws.
+// `proof.challenge` (either form, at least 16 bytes), under `rpId`, with the user present.
+// [] on any failure; never throws.
 verifyOwnershipProof<T extends { publicKey: Uint8Array }>(
   candidates: T[], proof: OwnershipProof, rpId: string,
 ): T[];
@@ -262,7 +281,7 @@ selectWalletByAddress<T extends { walletPda: PublicKey; vaultPda: PublicKey }>(
 ```typescript
 /** A WebAuthn assertion over a challenge the caller chose. */
 interface OwnershipProof {
-  challenge: Uint8Array;           // >= 16 bytes; use createOwnershipChallenge()
+  challenge: Uint8Array;           // >= 16 bytes; use createTaggedOwnershipChallenge()
   signature: Uint8Array;           // DER or 64-byte r||s
   authenticatorData: Uint8Array;
   clientDataJson: Uint8Array;
@@ -331,6 +350,25 @@ A pending deferred execution is never trusted — the program does not tie it to
 that signed it — and no key makes up for `vaultIsSystemAccount: false`. `tokenGrants`
 cannot be complete: a vault token account handed away for a mint nobody watches does not
 show, which is why a wallet with `signatureCount: 0` is never adopted.
+
+---
+
+## Signed messages
+
+1.4.0+. The challenge a passkey signs for a message, never the message itself; how to use
+it: [Passkey signing › Messages and ownership proofs](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge).
+
+```typescript
+import { SIGNED_MESSAGE_DOMAIN, signedMessageChallenge, type SignedMessageInput } from '@lazorkit/sdk-legacy';
+
+// SIGNED_MESSAGE_DOMAIN = 'LazorKit signed message v1'
+// SignedMessageInput = string | Uint8Array: a string is signed as its UTF-8 bytes
+
+// tag || SHA-256(tag || message), tag = SIGNED_MESSAGE_DOMAIN: 58 bytes. Throws a
+// TypeError for anything but a string or a typed array. The same bytes as the wallet
+// packages' signedMessageChallenge.
+signedMessageChallenge(message: SignedMessageInput): Uint8Array;
+```
 
 ---
 
@@ -422,8 +460,9 @@ if (err instanceof MinContextSlotNotReachedError) {
 ```
 
 `extractErrorCode` returns `null` for a `{ InstructionError: … }` object, and both read only
-the number: an inner program can return the same code. In 1.3.1, `ERROR_NAMES` has no
-entry for 3036 or 4018.
+the number: an inner program can return the same code. Since 1.4.0 `ERROR_NAMES` names
+3036 (`SessionNotExpired`), 3037 (`ActionUnlistedSolOutflow`), 3038
+(`ActionUnlistedTokenOutflow`) and 4018 (`RetiredDeployment`); 1.3.1 has no entry for them.
 
 Error ranges:
 
@@ -434,6 +473,7 @@ Error ranges:
 | 3030–3032   | Vault and token-authority invariants              |
 | 3033–3035   | Ranks and policies                                |
 | 3036        | `SessionNotExpired`                               |
+| 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). From the v2 program release that adds them, not deployed yet |
 | 4001–4018   | Protocol fee and deployment errors, including 4018 `RetiredDeployment` |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

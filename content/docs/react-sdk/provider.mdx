@@ -126,6 +126,9 @@ for, and `signAndSendWithSession`, `signAndSendWithAuthority` and `revokeSession
 (without `sessionPda`) use it only while that wallet is connected. Otherwise they reject
 with `KeyWalletMismatchError`; see
 [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
+The key checks again when it signs and, since 3.4.0, right before each attempt to send
+what it signed: a send that loaded the key before any disconnect neither signs nor sends
+after it, even if the same wallet is connected again by then.
 
 **When a kept key is deleted:**
 
@@ -137,7 +140,9 @@ with `KeyWalletMismatchError`; see
   Standard `standard:disconnect` delete the session key the same way, whatever
   `keyStorage` is, and keep the authority key (3.3.1+; earlier releases left the session
   key). `adapter.disconnect({ keepSessionKeys: true })` keeps it; `standard:disconnect`
-  takes no options.
+  takes no options. Since 3.4.0 both also disconnect the store, so a kept key signs only
+  once its wallet is connected again; in 3.3.1 the store stayed connected, and the
+  authority key (and a session key kept with `keepSessionKeys`) went on signing.
 - `revokeSession()` deletes the session key once the revoke lands. `removeAuthority`
   deletes the authority key when it removes that authority.
 - A session key whose session has expired is deleted when it is next read.

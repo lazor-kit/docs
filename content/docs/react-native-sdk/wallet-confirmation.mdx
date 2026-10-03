@@ -247,6 +247,9 @@ All are exported from `@lazorkit/wallet-mobile-adapter`.
 
 Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
 `findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
-`LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()` (from
-the adapter, 2.3.1+: domain-separated, 59 bytes; `verifyOwnershipProof` accepts it); see
+`LazorKitClient.findOwnPasskeyWallet` with a proof over a tagged ownership challenge:
+`createOwnershipChallenge()` from the adapter (2.3.1+), or `createTaggedOwnershipChallenge()`
+from `@lazorkit/sdk-legacy` 1.4.0, both domain-separated and 59 bytes (sdk-legacy's
+`createOwnershipChallenge()` still gives 32 bare random bytes, deprecated as a passkey
+challenge; `verifyOwnershipProof` accepts both); see
 [SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).

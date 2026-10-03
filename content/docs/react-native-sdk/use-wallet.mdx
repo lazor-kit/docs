@@ -353,7 +353,8 @@ const { signature, sessionPda } = await createSession(
     expiresAtSlot: currentSlot + 216_000n,    // ~24h on mainnet
     actions: [
       Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
-      Actions.solMaxPerTx(500_000_000n),
+      Actions.solMaxPerTx(500_000_000n),      // rent the vault pays counts as SOL
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 50_000_000n }), // each mint it may spend
       Actions.programWhitelist(JUPITER_PROGRAM_ID),
     ],
   },
@@ -372,9 +373,26 @@ section has a worked example.
 `unrestricted: true` for a session that can spend the whole vault through any program until
 it expires. The program allows at most 6,480,000 slots of expiry.
 
+**Name every asset the session may spend.** From the v2 program release that adds errors
+3037 and 3038, SOL leaves the wallet only with an `Actions.sol*` action (`solMaxPerTx`,
+`solLimit`, `solRecurringLimit`), rent the vault pays for a new account included, and a
+token only with an `Actions.token*` action (`tokenMaxPerTx`, `tokenLimit`,
+`tokenRecurringLimit`) for its mint. wSOL is a mint of its own. That release is not
+deployed yet; until it is, an asset the actions do not name is not bounded at all. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+**Keep the actions within 244 bytes**, at most 16 of them and one of each kind per mint:
+they share the transaction that registers them with the passkey's response. A `sol*`
+action takes 19 bytes (`solRecurringLimit` 43), `tokenMaxPerTx` and `tokenLimit` 51,
+`tokenRecurringLimit` 75: `solMaxPerTx` with `tokenMaxPerTx` and `tokenLimit` for 2 mints,
+or with `tokenMaxPerTx` for 4. Nothing checks this before the portal opens: actions that do
+not fit fail after the user approved.
+
 <Callout type="warn" title="Actions are immutable">
   Once a session is created, its action list can't be modified. To change limits, revoke
-  the session and create a new one.
+  the session and create a new one. The program does not create a second session for a
+  key while the first exists: revoke first, or use a new key. A session whose actions name
+  SOL only moves no token once the program release above is deployed.
 </Callout>
 
 **Returns** `Promise<{ signature: string; sessionPda: PublicKey }>`.
@@ -393,7 +411,12 @@ const sig = await signAndSendWithSession({
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) or related action errors once limits are hit.
-See [Troubleshooting](/troubleshooting).
+See [Troubleshooting](/troubleshooting). From the program release that adds errors 3037
+and 3038, a transaction that would move SOL, or a token, that the session's actions do not
+name rejects with `UnlistedSolOutflowError` ("This session is not allowed to spend SOL") or
+`UnlistedTokenOutflowError` ("This session is not allowed to spend this token") (2.4.0),
+with the original error as `cause`; nothing in it ran. See
+[Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
 
 ### `revokeSession`
 
@@ -428,7 +451,11 @@ const { signature, newAuthorityPda } = await addAuthorityEd25519(
   {
     newEd25519Pubkey: deviceKp.publicKey,
     role: ROLE_SPENDER,
-    policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
+    // Up to 1 SOL in all and 5 USDC a transaction; no other token can leave.
+    policy: serializeActions([
+      Actions.solLimit(1_000_000_000n),
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 5_000_000n }),
+    ]),
   },
   { redirectUrl: 'myapp://callback' },
 );
@@ -452,8 +479,11 @@ each rank may do:
 
 For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a v2 wallet a
 Delegate **throws without a `policy`** (on chain: 3033), and a policy on any other rank is
-refused (3035). On a **v1** wallet, pass `unrestricted: true` and no policy: v1 never
-checked rank at `Execute`, so any key you add can spend the whole vault.
+refused (3035). A policy names what may leave the wallet, as a session's actions do, and
+must fit in the same 244 bytes; see
+[What a policy bounds](/concepts/session-keys#what-a-policy-bounds). On a **v1** wallet,
+pass `unrestricted: true` and no policy: v1 never checked rank at `Execute`, so any key
+you add can spend the whole vault.
 
 <Callout type="warn" title="Changed in 2.3.0: role is required">
   Breaking. In 2.2.1 `role` was optional and defaulted to `ROLE_SPENDER`.

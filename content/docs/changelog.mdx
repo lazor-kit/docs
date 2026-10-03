@@ -10,6 +10,92 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
+## 2026-10-03 — wallet 3.4.0, wallet-mobile-adapter 2.4.0, sdk-legacy 1.4.0, sdk 1.0.0-rc.6
+
+Checklists: [React › Upgrading to 3.4.0](/react-sdk/upgrading#upgrading-to-340),
+[React Native › Upgrading to 2.4.0](/react-native-sdk/upgrading#upgrading-to-240).
+
+### Security (web)
+
+- **A send running when the wallet is disconnected is not finished.** A
+  `signAndSendWithSession` or `signAndSendWithAuthority` that loaded its kept key before
+  any disconnect (`disconnect()`, `LazorkitWalletAdapter.disconnect()`,
+  `standard:disconnect`) is refused right before the key signs and right before each
+  attempt to send, retries included. It rejects with `KeyWalletMismatchError`: `reason`
+  `'no-wallet'`, or the new `'disconnected'` when the same wallet is connected again by
+  then (send again). If an earlier attempt got no answer from the paymaster, that attempt
+  may still land: the send rejects with `TransactionOutcomeUnknownError` and is not sent
+  again. In 3.3.1 only the store's own `disconnect()` stopped such a send, and only at
+  signing.
+- **The adapter's and the Wallet Standard's disconnect disconnect the store.**
+  `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` disconnect it as its own
+  `disconnect()` does: `useWallet()` shows no wallet, also after a reload; a `connect` it
+  is running rejects with `PortalCancelledError`; a kept key signs only once its wallet is
+  connected again. In 3.3.1 they deleted the session key but left the store connected, so
+  the authority key, and a session key kept with `keepSessionKeys`, went on signing.
+  See [Wallet Standard › Disconnecting](/wallet-standard#disconnecting).
+
+### New
+
+- **`SpendingLimits.tokens`** (web): one entry per mint a session may spend,
+  `{ mint, lifetimeCap?, perTxMax?, recurring?: { limit, windowSlots } }`, in the mint's
+  base units; type `TokenSpendingLimit`. **`spendingLimitsToActions(limits)`** gives the
+  actions a `SpendingLimits` stands for, so
+  `serializeActions(spendingLimitsToActions(limits))` is a Delegate `policy`.
+- **`UnlistedSolOutflowError` and `UnlistedTokenOutflowError`** (both packages), which
+  `signAndSendWithSession` (and on web `signAndSendWithAuthority`) reject with for the
+  program's 3037 / 3038, with `signer` and the original error as `cause`; predicates
+  `isUnlistedSolOutflowError` / `isUnlistedTokenOutflowError`, codes
+  `UNLISTED_SOL_OUTFLOW_CODE` / `UNLISTED_TOKEN_OUTFLOW_CODE`. See
+  [Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
+- `ERROR_NAMES` / `errorFromCode` name 3036 (`SessionNotExpired`), 3037
+  (`ActionUnlistedSolOutflow`), 3038 (`ActionUnlistedTokenOutflow`) and 4018
+  (`RetiredDeployment`): in both wallet packages and in `@lazorkit/sdk-legacy` 1.4.0.
+- Web: the `Paymaster` constructor's options take `beforeAttempt`, run right before each
+  attempt to send, retries included; what it throws stops the send.
+- **sdk-legacy 1.4.0 / sdk rc.6: tagged challenges.** `createTaggedOwnershipChallenge()`
+  (with `OWNERSHIP_PROOF_DOMAIN`) gives `LazorKit ownership proof v1` followed by 32
+  random bytes (59 bytes), and `signedMessageChallenge(message)` (with
+  `SIGNED_MESSAGE_DOMAIN` and the type `SignedMessageInput`) the 58-byte message challenge:
+  the same bytes as the wallet packages' own since 3.3.1 / 2.3.1. Use the tagged ownership
+  challenge for every new proof. `createOwnershipChallenge()` is unchanged, 32 random
+  bytes, and deprecated as a passkey challenge, since those bytes look like a transaction
+  challenge. `verifyOwnershipProof`, `recoverPasskeyPublicKeys`, `resolvePasskeyPublicKey`
+  and `findOwnPasskeyWallet` accept proofs over either. See
+  [Passkey signing › Messages and ownership proofs](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge).
+
+### Changed
+
+- **Web: `createSession` checks the limits before anything is read or the passkey is
+  asked**, and throws on a `tokens` entry with no limit, a mint named twice, an amount
+  outside a u64, a window of 0 slots, more than 16 actions, or more than 244 bytes of
+  actions, which would not fit in the transaction beside the passkey's response.
+- **Behaviour change (web): an external `sessionKey` that already has a session.** The
+  limits are checked first, so a call with no `spendingLimits` (and not `unrestricted`),
+  or invalid ones, throws where 3.3.1 resolved with the existing session. With valid
+  limits it still resolves with that session as it was made: to change its limits, revoke
+  it (`revokeSession({ sessionPda })`) or register a new key.
+- Web: the paymaster does not resend a transaction refused with 3037 or 3038 (the same
+  bytes move the same assets), unless an earlier attempt's answer was lost.
+
+### Next v2 program release (not deployed)
+
+The v2 program release that adds errors 3037 and 3038 is not deployed on devnet or mainnet
+yet ([Networks & versions](/networks)). From it, a session's actions and a Delegate's
+policy name what may leave the wallet, and nothing else may: SOL only with a `Sol*`
+action, rent the vault pays for a new account included (3037), and a token only with a
+`Token*` action naming its mint (3038); the vault's token accounts passed writable may
+change only their balance (3032). **Breaking** for a session or Delegate that names SOL
+only, as every `SpendingLimits` session made before 3.4.0 does: it will move no token.
+Until that release an asset the actions do not name is not bounded at all. The SDK
+releases above work with the program deployed today. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+`@lazorkit/wallet-mobile-adapter` has no wallet-adapter or Wallet Standard disconnect and
+keeps no session key, so the disconnect changes are web only.
+
+---
+
 ## 2026-10-02 — wallet 3.3.1, wallet-mobile-adapter 2.3.1
 
 Checklists: [React › Upgrading to 3.3.1](/react-sdk/upgrading#upgrading-to-331),

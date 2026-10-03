@@ -26,7 +26,7 @@ Two lines of this package are published, one per protocol version:
 
 | npm | Version | Protocol | Where it works |
 | --- | ------- | -------- | -------------- |
-| `@lazorkit/sdk-legacy@next` | **1.3.1** | v2 | devnet today; mainnet once v2 is deployed there |
+| `@lazorkit/sdk-legacy@next` | **1.4.0** | v2 | devnet today; mainnet once v2 is deployed there |
 | `@lazorkit/sdk-legacy` (`latest`) | 0.3.2 | v1 | mainnet today, and devnet v1 |
 
 ```bash
@@ -47,11 +47,12 @@ derives a different wallet on each. See [Networks & versions](/networks).
 | Deferred execution  | `authorize`, `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
 | Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findAuthoritiesByWallet`, `getRecoveryStatus`, `readCounter`; `findWalletsByAuthority` (raw) |
 | Passkey keys        | `resolvePasskeyPublicKey`, `recoverPasskeyPublicKeys` (1.3.0+, module functions)              |
+| Passkey challenges  | `createTaggedOwnershipChallenge`, `signedMessageChallenge`, `OWNERSHIP_PROOF_DOMAIN`, `SIGNED_MESSAGE_DOMAIN` (1.4.0+); see [Passkey signing](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge) |
 | v1 migration        | `migrateV1Wallet`, `findV1WalletsByOwner`, `vetMigrationDestination` (1.2.0+)                 |
 | Protocol            | `registerPayer` (permissionless; added for you), `initializeProtocol`, `updateProtocol`, `initializeTreasuryShard`, `withdrawTreasury` (admin) |
 
 `CloseExpiredSession` (anyone may close an expired session and keep its rent) has no
-client method, and 1.3.1 does not export its instruction builder; `@lazorkit/sdk` (kit)
+client method, and 1.4.0 does not export its instruction builder; `@lazorkit/sdk` (kit)
 exports `createCloseExpiredSessionIx`.
 
 <Callout type="warn" title="Finding a returning passkey user's wallet">

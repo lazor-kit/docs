@@ -3,18 +3,18 @@ title: Upgrading to 2.x
 description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
 ---
 
-`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.3.1 is
+`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.4.0 is
 the current release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md)
 and the [Changelog](/changelog) here.
 
 ```bash
-npm install @lazorkit/wallet-mobile-adapter@^2.3.1
+npm install @lazorkit/wallet-mobile-adapter@^2.4.0
 ```
 
 <Callout type="warn" title="Do not install @beta">
   The npm `beta` tag still points at `2.0.0-beta.4`, a pre-v2 build from April 2026. Use
-  `latest` (2.3.1).
+  `latest` (2.4.0).
 </Callout>
 
 The adapter depends on `expo-web-browser` `^14.2.0 || ^15.0.0` (Expo SDK 53 / 54) and
@@ -57,6 +57,9 @@ Expo SDKs have not been tested.
     [Wallet Confirmation](/react-native-sdk/wallet-confirmation#a-passkey-that-has-no-wallet-yet).
 11. **Check message signatures with `verifyWalletMessage`** (2.3.1), which reads the
     passkey's key from chain. See [below](#upgrading-to-231).
+12. **Name every mint a session or Delegate spends** (2.4.0), with an `Actions.token*`
+    action. From the v2 program release that adds errors 3037 and 3038, an asset the
+    actions do not name cannot leave the wallet. See [below](#upgrading-to-240).
 
 ## Release by release
 
@@ -67,6 +70,7 @@ Expo SDKs have not been tested.
 | **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
 | **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
 | **2.3.0** (2026-10-02) | **Breaking:** `addAuthorityEd25519` needs a `role`. `connect` and `disconnect` follow the callback contract, on the hook and the store; `transferSol` with no wallet calls `onFail`. The `is*Error` predicates recognise the adapter's own errors through wrappers. See [below](#upgrading-to-230). |
+| **2.4.0** (2026-10-03) | `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for the program's 3037 / 3038 (a session moving SOL, or a token, its actions do not name), with predicates and codes. `ERROR_NAMES` names 3036–3038 and 4018. Docs: name each mint, keep actions within 244 bytes. No disconnect change: the adapter keeps no session key. See [below](#upgrading-to-240). |
 | **2.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`. Ownership-proof challenges are domain-separated too. See [below](#upgrading-to-231). |
 
 ## Keys
@@ -83,6 +87,40 @@ wallet is connected, and delete it at disconnect and once its session is revoked
 expired. The package README's
 [Session keys](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/README.md#session-keys)
 section (2.3.0) shows this with `expo-secure-store`.
+
+## Upgrading to 2.4.0
+
+From 2.3.1. Nothing was removed, and no call changes shape. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md#240).
+
+1. **Name every mint a session spends.** From the v2 program release that adds errors 3037
+   and 3038, a session's `actions` (and a Delegate's `policy`) name what may leave the
+   wallet, and nothing else may: SOL leaves only with an `Actions.sol*` action, rent the
+   vault pays for a new account included, and a token only with an `Actions.token*` action
+   for its mint. wSOL is a mint of its own. That release is not deployed yet; until it is,
+   an asset the actions do not name is not bounded at all, so a session with token actions
+   only can spend all the wallet's SOL. See
+   [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+2. **Sessions and Delegates that name SOL only** move no token once that release is
+   deployed. Revoke them (`revokeSession`, or `removeAuthority` for a Delegate) and
+   register ones whose actions name the mints they spend. The program does not create a
+   second session for a key while the first exists: revoke first, or use a new key.
+3. **Keep actions within 244 bytes.** A session's actions, and a Delegate's policy, must
+   fit in the transaction that registers them, beside the passkey's response. An
+   `Actions.sol*` action takes 19 bytes (`solRecurringLimit` 43), `tokenMaxPerTx` and
+   `tokenLimit` 51, `tokenRecurringLimit` 75: `solMaxPerTx` with `tokenMaxPerTx` and
+   `tokenLimit` for 2 mints, or with `tokenMaxPerTx` for 4. The adapter does not check this
+   before the portal opens: actions that do not fit fail after the user approved.
+4. **New errors.** `signAndSendWithSession` rejects with `UnlistedSolOutflowError` ("This
+   session is not allowed to spend SOL") for a 3037 and `UnlistedTokenOutflowError` ("This
+   session is not allowed to spend this token") for a 3038, with the original error as
+   `cause`. A send whose outcome is unknown stays `TransactionOutcomeUnknownError`. Match
+   them with `isUnlistedSolOutflowError` / `isUnlistedTokenOutflowError`, which also
+   recognise a raw 3037 / 3038 through wrappers; codes `UNLISTED_SOL_OUTFLOW_CODE`,
+   `UNLISTED_TOKEN_OUTFLOW_CODE`. See
+   [Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
+5. **`ERROR_NAMES` / `errorFromCode`** name 3036 (`SessionNotExpired`), 3037, 3038 and
+   4018 (`RetiredDeployment`).
 
 ## Upgrading to 2.3.1
 

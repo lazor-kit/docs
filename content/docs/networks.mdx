@@ -7,11 +7,16 @@ LazorKit has two protocol versions on chain, each at its own program id. Every S
 release speaks one or both of them. This page is the one place that says what is
 deployed where; the rest of the docs link here instead of repeating it.
 
-<Callout type="warn" title="Status on 2026-10-02">
+<Callout type="warn" title="Status on 2026-10-03">
   - **Mainnet runs protocol v1** (`LazorjRF…`). The v2 mainnet program
     (`LazorFroi…`) is **not deployed yet**: its account does not exist on chain.
   - **Devnet runs both.** v2 (`57bTNW…`) is deployed. Its `ProtocolConfig` is not
     initialised, so no protocol fee is charged there.
+  - **The v2 program release that adds errors 3037 and 3038 is not deployed on any
+    cluster yet.** From that release, a session's or a Delegate's policy names what may
+    leave the wallet, and nothing else may; until then an asset it does not name is not
+    bounded at all. See
+    [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
   - v1 will be retired to a **sunset binary** after v2 is live on mainnet. From then
     on a v1 wallet can only move its funds to v2. See
     [Migrating from v1](/v1-to-v2).
@@ -19,11 +24,11 @@ deployed where; the rest of the docs link here instead of repeating it.
 
 ## Program ids
 
-| Cluster | Protocol | Program id | Constant | On chain (2026-10-02) |
+| Cluster | Protocol | Program id | Constant | On chain (2026-10-03) |
 | ------- | -------- | ---------- | -------- | --------------------- |
 | mainnet | v2 | `LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` | `PROGRAM_ID_MAINNET` | **not deployed** |
 | mainnet | v1 | `LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi` | `PROGRAM_ID_MAINNET_V1` | deployed (full v1) |
-| devnet | v2 | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | `PROGRAM_ID_DEVNET` | deployed, no protocol fee configured |
+| devnet | v2 | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | `PROGRAM_ID_DEVNET` | deployed, no protocol fee configured; without errors 3037 / 3038 |
 | devnet | v1 | `4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS` | `PROGRAM_ID_DEVNET_V1` | deployed |
 
 The constants are exported by `@lazorkit/sdk-legacy` 1.2.0 and later, by
@@ -50,15 +55,21 @@ and its account discriminators are `0x21`–`0x27`.
 
 | Package | Version | npm tag | Protocol | Notes |
 | ------- | ------- | ------- | -------- | ----- |
-| `@lazorkit/wallet` (React) | 3.3.1 | `latest` | v2, and v1 for existing v1 wallets | Routes each action by the wallet's protocol. Creates new wallets on v2 only. |
-| `@lazorkit/wallet-mobile-adapter` (React Native) | 2.3.1 | `latest` | v2, and v1 for existing v1 wallets | Same routing. The `beta` tag still points at the old `2.0.0-beta.4`: do not install `@beta`. |
-| `@lazorkit/sdk-legacy` (web3.js v1) | 1.3.1 | `next` | v2 | `npm install @lazorkit/sdk-legacy@next` |
+| `@lazorkit/wallet` (React) | 3.4.0 | `latest` | v2, and v1 for existing v1 wallets | Routes each action by the wallet's protocol. Creates new wallets on v2 only. |
+| `@lazorkit/wallet-mobile-adapter` (React Native) | 2.4.0 | `latest` | v2, and v1 for existing v1 wallets | Same routing. The `beta` tag still points at the old `2.0.0-beta.4`: do not install `@beta`. |
+| `@lazorkit/sdk-legacy` (web3.js v1) | 1.4.0 | `next` | v2 | `npm install @lazorkit/sdk-legacy@next` |
 | `@lazorkit/sdk-legacy` (web3.js v1) | 0.3.2 | `latest` | v1 | What a plain `npm install @lazorkit/sdk-legacy` installs. |
-| `@lazorkit/sdk` (Solana Kit) | 1.0.0-rc.5 | `latest`, `next` | v2 | Release candidate. |
+| `@lazorkit/sdk` (Solana Kit) | 1.0.0-rc.6 | `latest`, `next` | v2 | Release candidate. |
 
 The two `sdk-legacy` lines are not wire-compatible: the same `userSeed` derives a
 different wallet on each. The wallet packages depend on both: `@lazorkit/sdk-legacy`
-^1.3.0 for v2, and 0.3.2 under the alias `lazorkit-sdk-v1` for v1 wallets.
+^1.3.0 for v2 (a fresh install gets 1.4.0), and 0.3.2 under the alias `lazorkit-sdk-v1`
+for v1 wallets.
+
+`@lazorkit/wallet` 3.4.0, `@lazorkit/wallet-mobile-adapter` 2.4.0 and
+`@lazorkit/sdk-legacy` 1.4.0 already name errors 3037 and 3038, and the wallet packages
+report them as `UnlistedSolOutflowError` / `UnlistedTokenOutflowError`. They work with the
+v2 program deployed today, which never returns those errors.
 
 ## What works where today
 

@@ -67,9 +67,16 @@ session's ([Session Keys › Actions](/concepts/session-keys#actions-reference))
 - **Only a Delegate carries one.** Adding a Delegate without a policy fails with
   `DelegateRequiresPolicy` (3033); a policy on an Owner or Admin fails with
   `PolicyRankMismatch` (3035).
-- **A policy bounds only what it names.** A whitelist without a SOL cap leaves SOL
-  uncapped; a SOL cap leaves tokens uncapped. To bound a Delegate, write a value cap for
-  every asset it can reach.
+- **A policy names what may leave the wallet.** From the v2 program release that adds
+  errors 3037 and 3038, nothing it does not name may: SOL leaves only with a `Sol*` action,
+  rent the vault pays for a new account included, and a token only with a `Token*` action
+  for its mint. That release is not deployed yet; on the program deployed today a policy
+  bounds only what it names, so a whitelist without a SOL cap leaves SOL uncapped and a SOL
+  cap leaves tokens uncapped. Either way, give every asset the Delegate should spend a
+  limit. See [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+- **A policy must fit in its transaction.** At most 16 actions, and when a passkey approves
+  the `AddAuthority`, within about 244 bytes beside its response
+  ([How many actions fit](/concepts/session-keys#how-many-actions-fit)).
 - Policies cannot be changed. Remove the authority and add it again with a new one.
 
 ## Adding authorities with the SDKs
@@ -87,14 +94,18 @@ import {
 
 const delegateKp = Keypair.generate();
 
-// A Delegate: needs a policy.
+// A Delegate: needs a policy. It names SOL and USDC, so no other token can leave.
 await client.addAuthority({
   payer: payer.publicKey,
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   newAuthority: { type: 'ed25519', publicKey: delegateKp.publicKey },
   role: ROLE_SPENDER,
-  policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
+  policy: serializeActions([
+    Actions.solLimit(1_000_000_000n),
+    Actions.solMaxPerTx(100_000_000n),
+    Actions.tokenLimit({ mint: USDC_MINT, remaining: 100_000_000n }),
+  ]),
 });
 
 // An Admin: no policy.
@@ -122,7 +133,9 @@ has a default role. A missing or unknown one throws before the passkey prompt, w
 message that says what each rank may do, and so does `ROLE_OWNER` on a v2 wallet (neither
 passes `allowOwner`).
 
-- React: `addAuthority({ role: ROLE_SPENDER, policy })`.
+- React: `addAuthority({ role: ROLE_SPENDER, policy })`; since 3.4.0
+  `policy: serializeActions(spendingLimitsToActions(limits))` gives a Delegate the same
+  limits as a session.
 - React Native: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, { redirectUrl })`.
 
 For a key your app holds, pass `ROLE_SPENDER` with a policy.

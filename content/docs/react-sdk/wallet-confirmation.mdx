@@ -241,7 +241,7 @@ With `'throw'`, catch the error (wallet-adapter's `onError`), then set
 `adapter.confirmWallet = choice.vault` and connect again. The adapter clears
 `confirmWallet` once a wallet is connected, and on disconnect; since 3.3.1
 `adapter.disconnect()` also deletes the session key the SDK keeps, unless you pass
-`{ keepSessionKeys: true }`
+`{ keepSessionKeys: true }`, and since 3.4.0 it disconnects the React SDK's store too
 ([Wallet Standard › Disconnecting](/wallet-standard#disconnecting)). A second `connect` without
 options while one is running waits for it rather than opening another portal. One that
 passes `confirmWallet` or `onConfirmWallet` throws `WalletConnectionError` (and emits it as
@@ -257,9 +257,11 @@ passes `confirmWallet` or `onConfirmWallet` throws `WalletConnectionError` (and 
 
 Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
 `findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
-`LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()`; see
+`LazorKitClient.findOwnPasskeyWallet` with a proof over a tagged ownership challenge; see
 [SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
 `verifyOwnershipProof`, `pickOwnWallet` and `selectWalletByAddress` are re-exported from
 `@lazorkit/wallet`. Its `createOwnershipChallenge` is its own (3.3.1+): domain-separated,
-59 bytes, where `@lazorkit/sdk-legacy`'s gives 32 bare random bytes. Prefer it;
+59 bytes. `@lazorkit/sdk-legacy` 1.4.0 gives the same bytes as
+`createTaggedOwnershipChallenge()`, while its `createOwnershipChallenge()` still gives 32
+bare random bytes, deprecated as a passkey challenge. Use the tagged form;
 `verifyOwnershipProof` accepts both.

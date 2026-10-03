@@ -170,7 +170,7 @@ can fail with `SignatureReused` (3006) — see
 
 <Callout type="warn" title="Version note">
   This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (protocol v2; `next`
-  is 1.3.1). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
+  is 1.4.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
   below applies to every version.
 </Callout>
 
@@ -202,13 +202,13 @@ wallet only when
 
 ```typescript
 import {
-  createOwnershipChallenge,
+  createTaggedOwnershipChallenge,
   selectWalletByAddress,
   verifyOwnershipProof,
 } from '@lazorkit/sdk-legacy';
 
 const rpId = 'your-app.com';
-const challenge = createOwnershipChallenge(); // fresh for every sign-in, never reused
+const challenge = createTaggedOwnershipChallenge(); // fresh for every sign-in, never reused
 
 const credential = (await navigator.credentials.get({
   // A copy: WebAuthn's BufferSource type wants a Uint8Array backed by an ArrayBuffer.
@@ -259,6 +259,17 @@ if (adopt) {
 }
 // wallet: { walletPda, vaultPda, authorityPda, publicKey, version, lamports, ... }
 ```
+
+`createTaggedOwnershipChallenge()` (1.4.0) returns `LazorKit ownership proof v1` followed by
+32 random bytes (59 bytes), the same form as the wallet packages' own ownership challenge,
+so no transaction challenge (32 bytes) can ever equal it. On 1.2.x and 1.3.x, use
+`createOwnershipChallenge()`. It is unchanged in 1.4.0, 32 bare random bytes, and
+deprecated there as a passkey challenge, since those bytes look exactly like a transaction
+challenge to whatever is asked to sign them. `verifyOwnershipProof` and
+`findOwnPasskeyWallet` check a proof over exactly the challenge it carries, so proofs over
+either form verify, and the client that asks for the proof and the server that checks it
+can move to the tagged form in either order. See
+[Passkey signing › Messages and ownership proofs](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge).
 
 `askUserToChoose` is your UI. A wallet in `needsConfirmation` is a
 [`WalletFacts`](/web3js-v1/types#returning-user-lookup): everything the user needs to
@@ -336,10 +347,11 @@ const facts = await client.describeWalletCandidates(proven, { trustedKeys, watch
 const { adopt, needsConfirmation } = pickOwnWallet(facts);    // pure: the rule above
 ```
 
-Freshness is yours: generate the challenge with `createOwnershipChallenge()` for each proof
-and never reuse one. An empty `proven` is also what a proof that fails gives — a challenge
-the browser did not sign, say — so before creating a wallet, check the proof against its
-key with `verifyOwnershipProof([{ publicKey }], proof, rpId)`, as the example above does.
+Freshness is yours: generate the challenge with `createTaggedOwnershipChallenge()` for each
+proof and never reuse one. An empty `proven` is also what a proof that fails gives — a
+challenge the browser did not sign, say — so before creating a wallet, check the proof
+against its key with `verifyOwnershipProof([{ publicKey }], proof, rpId)`, as the example
+above does.
 
 ### Ed25519 owners
 
