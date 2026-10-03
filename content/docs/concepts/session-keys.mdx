@@ -248,7 +248,9 @@ A session's actions, and a Delegate's policy, name what may leave the wallet. Fr
   That program release is not deployed on devnet or mainnet yet
   ([Networks & versions](/networks)). Until it is, an asset the actions do not name is not
   bounded at all: a session with token limits only can spend all the wallet's SOL, and one
-  with SOL limits only any token. Write the limits you want now; they hold under both.
+  with SOL limits only any token. Write the limits you want now. That release also
+  tightens how named token limits are measured, so until it is deployed, treat the token
+  limits of a session or Delegate as weaker than this page describes.
 </Callout>
 
 From that release, for an `Execute` signed by a session with actions or by a Delegate:
@@ -274,8 +276,10 @@ From that release, for an `Execute` signed by a session with actions or by a Del
 
 Value the vault controls in other ways than its own SOL and the token accounts it owns
 (stake or nonce accounts it is the authority of, positions in other programs, authorities
-it holds over mints or programs) is bounded only by the program whitelist: keep the
-whitelist narrow for a key on such a wallet. The full rule set is in
+it holds over mints or programs) is bounded only by the program whitelist. Value such an
+account releases into the vault during a transaction can leave again in that same
+transaction, whatever the actions name. Keep the whitelist narrow for a key on such a
+wallet. The full rule set is in
 [`docs/Architecture.md` › What a policy bounds](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/Architecture.md#what-a-policy-bounds).
 
 The wallet SDKs report the two refusals as `UnlistedSolOutflowError` and

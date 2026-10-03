@@ -87,8 +87,9 @@ action, rent the vault pays for a new account included (3037), and a token only 
 `Token*` action naming its mint (3038); the vault's token accounts passed writable may
 change only their balance (3032). **Breaking** for a session or Delegate that names SOL
 only, as every `SpendingLimits` session made before 3.4.0 does: it will move no token.
-Until that release an asset the actions do not name is not bounded at all. The SDK
-releases above work with the program deployed today. See
+Until that release an asset the actions do not name is not bounded at all, and named
+token limits are weaker than described: the release also tightens how they are measured.
+The SDK releases above work with the program deployed today. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
 `@lazorkit/wallet-mobile-adapter` has no wallet-adapter or Wallet Standard disconnect and

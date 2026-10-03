@@ -70,8 +70,8 @@ Expo SDKs have not been tested.
 | **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
 | **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
 | **2.3.0** (2026-10-02) | **Breaking:** `addAuthorityEd25519` needs a `role`. `connect` and `disconnect` follow the callback contract, on the hook and the store; `transferSol` with no wallet calls `onFail`. The `is*Error` predicates recognise the adapter's own errors through wrappers. See [below](#upgrading-to-230). |
-| **2.4.0** (2026-10-03) | `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for the program's 3037 / 3038 (a session moving SOL, or a token, its actions do not name), with predicates and codes. `ERROR_NAMES` names 3036–3038 and 4018. Docs: name each mint, keep actions within 244 bytes. No disconnect change: the adapter keeps no session key. See [below](#upgrading-to-240). |
 | **2.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`. Ownership-proof challenges are domain-separated too. See [below](#upgrading-to-231). |
+| **2.4.0** (2026-10-03) | `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for the program's 3037 / 3038 (a session moving SOL, or a token, its actions do not name), with predicates and codes. `ERROR_NAMES` names 3036–3038 and 4018. Docs: name each mint, keep actions within 244 bytes. No disconnect change: the adapter keeps no session key. See [below](#upgrading-to-240). |
 
 ## Keys
 

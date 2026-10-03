@@ -447,11 +447,11 @@ wallet. There is one slot: a new session replaces it. See
 [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 
 <Callout type="warn" title="Limits are immutable">
-  Session actions can't be changed once created. To adjust, revoke and recreate. A session
-  made before 3.4.0 names SOL only, so from the program release that adds errors 3037 and
-  3038 it moves no token: create a new one with `tokens`. Program filters and per-action
-  expiries are not in `SpendingLimits`; for those use `LazorKitClient` with the `Actions`
-  catalogue.
+  Session actions can't be changed once created. To adjust, revoke and recreate. Every
+  session made with `SpendingLimits` before 3.4.0 names SOL only, so from the program
+  release that adds errors 3037 and 3038 it moves no token: create a new one with
+  `tokens`. Program filters and per-action expiries are not in `SpendingLimits`; for those
+  use `LazorKitClient` with the `Actions` catalogue.
 </Callout>
 
 **Returns** `Promise<{ sessionPda: string; sessionPublicKey: string }>`.
@@ -481,14 +481,29 @@ when it is next read, and the call rejects. See
 [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
 
 ```ts
-import { isKeyWalletMismatchError } from '@lazorkit/wallet';
+import { isKeyWalletMismatchError, type KeyWalletMismatchError } from '@lazorkit/wallet';
+
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 try {
   await signAndSendWithSession({ instructions: [ix] });
 } catch (e) {
   if (!isKeyWalletMismatchError(e)) throw e;
-  // Not the connected wallet's session: create one for it.
-  await createSession({ spendingLimits: { solPerTxMax: 100_000_000n } });
+  const { reason } = e as KeyWalletMismatchError;
+  if (reason === 'disconnected') {
+    // Its wallet is connected again, but a disconnect ran during this send: send again.
+    await signAndSendWithSession({ instructions: [ix] });
+  } else if (reason === 'no-wallet') {
+    throw e; // connect, then send again
+  } else {
+    // 'other-wallet' or 'unbound': create a session for the connected wallet.
+    await createSession({
+      spendingLimits: {
+        solPerTxMax: 100_000_000n,
+        tokens: [{ mint: USDC, perTxMax: 5_000_000n }],
+      },
+    });
+  }
 }
 ```
 

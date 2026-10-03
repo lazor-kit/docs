@@ -74,8 +74,8 @@ loaded: it installs next to `@solana/kit` 6, 7 or 8 without `--legacy-peer-deps`
 | **3.2.0** (2026-09-30) | Deferred window: `expiryOffset` 10–9000 slots, default 1500 (was 300). `DeferredExpiredError`, `isDeferredExpiredError`, `MIN_/MAX_DEFERRED_EXPIRY_SLOTS`, `DEFERRED_EXPIRED_CODE`. |
 | **3.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext` on TX2 errors. |
 | **3.3.0** (2026-10-02) | **Breaking:** `addAuthority` needs a `role`. Session and authority keys kept as non-extractable WebCrypto keys in IndexedDB, not plaintext `localStorage`: `keyStorage`, `forgetStoredKeys()`. A kept key signs only for its own wallet: `KeyWalletMismatchError`, `isKeyWalletMismatchError`. `disconnect` deletes the session key unless `keepSessionKeys`; expired session keys are deleted. Callbacks run once the action is over, one per call. The `is*Error` predicates recognise the SDK's own errors through wrappers. A 4018 is not resent. See [below](#upgrading-to-330). |
-| **3.4.0** (2026-10-03) | **Security:** a session or authority send running when the wallet is disconnected, whichever way, neither signs nor sends after it (`KeyWalletMismatchReason` `'disconnected'`), and `LazorkitWalletAdapter.disconnect()` / `standard:disconnect` disconnect the store too. `SpendingLimits.tokens`, checked before the prompt (at most 244 bytes of actions); `spendingLimitsToActions`; `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for 3037 / 3038, not resent. **Changed:** `createSession` with a `sessionKey` that already has a session checks the limits first. `Paymaster` option `beforeAttempt`. See [below](#upgrading-to-340). |
 | **3.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`; `verifyMessage` and `verifySignatureBrowser` deprecated. Ownership-proof challenges are domain-separated too. `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` delete the session key. The sign dialog sends the stored credentials to the portal's origin only. Peers `@solana/kit`, `@solana/kora`, `@solana-program/token` dropped. See [below](#upgrading-to-331). |
+| **3.4.0** (2026-10-03) | **Security:** a session or authority send running when the wallet is disconnected, whichever way, neither signs nor sends after it (`KeyWalletMismatchReason` `'disconnected'`), and `LazorkitWalletAdapter.disconnect()` / `standard:disconnect` disconnect the store too. `SpendingLimits.tokens`, checked before the prompt (at most 244 bytes of actions); `spendingLimitsToActions`; `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for 3037 / 3038, not resent. **Changed:** `createSession` with a `sessionKey` that already has a session checks the limits first. `Paymaster` option `beforeAttempt`. See [below](#upgrading-to-340). |
 
 ## Keys the SDK keeps in the browser
 
@@ -127,9 +127,9 @@ a `sessionKey` of your own. Full notes: the package
    adds errors 3037 and 3038, a session moves SOL only with a SOL limit (rent the vault
    pays for a new account included) and a token only with a `tokens` entry for its mint;
    that release is not deployed yet, and until it is an asset the limits do not name is
-   not bounded at all. A session made with SOL limits only, as every session before this
-   release, will move no token once the program release is deployed: create a new one
-   that names the mints it spends. See
+   not bounded at all. A session made with SOL limits only, as every session made with
+   `SpendingLimits` before 3.4.0, will move no token once the program release is
+   deployed: create a new one that names the mints it spends. See
    [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 4. **`createSession` checks the limits before anything is read or the passkey is asked**,
    and throws on a `tokens` entry with no limit, a mint named twice, an amount outside a
