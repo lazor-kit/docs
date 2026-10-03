@@ -115,7 +115,7 @@ those versions could deliver into a wallet someone else controls.
 import { Connection, Transaction } from '@solana/web3.js';
 import { LazorKitClient, PROGRAM_ID_DEVNET, type OwnershipProof } from '@lazorkit/sdk-legacy';
 
-declare const proof: OwnershipProof;            // a passkey assertion over createOwnershipChallenge()
+declare const proof: OwnershipProof;            // a passkey assertion over createTaggedOwnershipChallenge() (1.4.0+)
 declare function confirmWithUser(skipped: unknown[]): Promise<boolean>;
 
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
@@ -144,6 +144,11 @@ const tx = new Transaction().add(...plan.setupInstructions, ...plan.migrate.fina
 // keep plan.destinationUserSeed when it is set, and use plan.destinationWallet as the new wallet
 ```
 
+- `proof` is an assertion over a fresh ownership challenge: `createTaggedOwnershipChallenge()`
+  (1.4.0), or on 1.2.x and 1.3.x `createOwnershipChallenge()`, which is unchanged (32
+  random bytes) and deprecated as a passkey challenge in 1.4.0.
+  `findOwnPasskeyWallet` accepts a proof over either; see
+  [Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
 - `wallet.publicKey` is the passkey key stored on the v1 authority. A returning user's
   browser cannot give you the key (a WebAuthn assertion carries none); the chain can.
 - Send `setupInstructions` and the migration **in one transaction**. If they do not fit,

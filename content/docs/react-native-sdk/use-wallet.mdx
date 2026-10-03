@@ -27,7 +27,7 @@ through the paymaster, and resolves once it is **confirmed** — see
 | `connect`                  | yes           | Authenticate + create/load the smart wallet              |
 | `disconnect`               | no            | Clear local state                                        |
 | `signAndSendTransaction`   | yes           | Single-transaction Execute                               |
-| `signMessage`              | yes           | Off-chain passkey signature                              |
+| `signMessage`              | yes           | Off-chain passkey signature; check it with `verifyWalletMessage` |
 | `createSession`            | yes           | Register an Ed25519 session key with its limits          |
 | `signAndSendWithSession`   | **no**        | Send a tx signed by your session keypair                 |
 | `revokeSession`            | yes           | Close a session, refund rent                             |
@@ -353,7 +353,8 @@ const { signature, sessionPda } = await createSession(
     expiresAtSlot: currentSlot + 216_000n,    // ~24h on mainnet
     actions: [
       Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
-      Actions.solMaxPerTx(500_000_000n),
+      Actions.solMaxPerTx(500_000_000n),      // rent the vault pays counts as SOL
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 50_000_000n }), // each mint it may spend
       Actions.programWhitelist(JUPITER_PROGRAM_ID),
     ],
   },
@@ -372,9 +373,26 @@ section has a worked example.
 `unrestricted: true` for a session that can spend the whole vault through any program until
 it expires. The program allows at most 6,480,000 slots of expiry.
 
+**Name every asset the session may spend.** From the v2 program release that adds errors
+3037 and 3038, SOL leaves the wallet only with an `Actions.sol*` action (`solMaxPerTx`,
+`solLimit`, `solRecurringLimit`), rent the vault pays for a new account included, and a
+token only with an `Actions.token*` action (`tokenMaxPerTx`, `tokenLimit`,
+`tokenRecurringLimit`) for its mint. wSOL is a mint of its own. That release is not
+deployed yet; until it is, an asset the actions do not name is not bounded at all. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+**Keep the actions within 244 bytes**, at most 16 of them and one of each kind per mint:
+they share the transaction that registers them with the passkey's response. A `sol*`
+action takes 19 bytes (`solRecurringLimit` 43), `tokenMaxPerTx` and `tokenLimit` 51,
+`tokenRecurringLimit` 75: `solMaxPerTx` with `tokenMaxPerTx` and `tokenLimit` for 2 mints,
+or with `tokenMaxPerTx` for 4. Nothing checks this before the portal opens: actions that do
+not fit fail after the user approved.
+
 <Callout type="warn" title="Actions are immutable">
   Once a session is created, its action list can't be modified. To change limits, revoke
-  the session and create a new one.
+  the session and create a new one. The program does not create a second session for a
+  key while the first exists: revoke first, or use a new key. A session whose actions name
+  SOL only moves no token once the program release above is deployed.
 </Callout>
 
 **Returns** `Promise<{ signature: string; sessionPda: PublicKey }>`.
@@ -393,7 +411,12 @@ const sig = await signAndSendWithSession({
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) or related action errors once limits are hit.
-See [Troubleshooting](/troubleshooting).
+See [Troubleshooting](/troubleshooting). From the program release that adds errors 3037
+and 3038, a transaction that would move SOL, or a token, that the session's actions do not
+name rejects with `UnlistedSolOutflowError` ("This session is not allowed to spend SOL") or
+`UnlistedTokenOutflowError` ("This session is not allowed to spend this token") (2.4.0),
+with the original error as `cause`; nothing in it ran. See
+[Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
 
 ### `revokeSession`
 
@@ -428,7 +451,11 @@ const { signature, newAuthorityPda } = await addAuthorityEd25519(
   {
     newEd25519Pubkey: deviceKp.publicKey,
     role: ROLE_SPENDER,
-    policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
+    // Up to 1 SOL in all and 5 USDC a transaction; no other token can leave.
+    policy: serializeActions([
+      Actions.solLimit(1_000_000_000n),
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 5_000_000n }),
+    ]),
   },
   { redirectUrl: 'myapp://callback' },
 );
@@ -452,8 +479,11 @@ each rank may do:
 
 For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a v2 wallet a
 Delegate **throws without a `policy`** (on chain: 3033), and a policy on any other rank is
-refused (3035). On a **v1** wallet, pass `unrestricted: true` and no policy: v1 never
-checked rank at `Execute`, so any key you add can spend the whole vault.
+refused (3035). A policy names what may leave the wallet, as a session's actions do, and
+must fit in the same 244 bytes; see
+[What a policy bounds](/concepts/session-keys#what-a-policy-bounds). On a **v1** wallet,
+pass `unrestricted: true` and no policy: v1 never checked rank at `Execute`, so any key
+you add can spend the whole vault.
 
 <Callout type="warn" title="Changed in 2.3.0: role is required">
   Breaking. In 2.2.1 `role` was optional and defaulted to `ROLE_SPENDER`.
@@ -493,19 +523,92 @@ const authorities = await listAuthorities();
 
 ### `signMessage`
 
-Off-chain passkey signature over an arbitrary string. Ideal for session-less auth.
+Off-chain passkey signature over a string: a sign-in, or any statement your server checks.
 
 ```ts
-const { signature, signedPayload } = await signMessage(
-  'Sign in as user-123',
+const result = await signMessage(
+  'Sign in to example.com\nNonce: 8f2c…',
   { redirectUrl: 'myapp://callback' },
 );
+// { signature, signedPayload, clientDataJsonBase64, authenticatorDataBase64 }, all base64
 ```
 
-Both values are base64 strings. Verify server-side against the on-chain authority pubkey
-(`readAuthorityPubkey`).
+The passkey never signs the message's bytes as its WebAuthn challenge. It signs a challenge
+made from them, with a tag no other kind of passkey challenge carries (format v1, the same
+as `@lazorkit/wallet`'s):
 
-**Returns** `Promise<{ signature: string; signedPayload: string }>`.
+```
+tag       = UTF-8 "LazorKit signed message v1"     (26 bytes)
+challenge = tag || SHA-256(tag || message)        (58 bytes)
+```
+
+The message is signed as its UTF-8 bytes. `signedMessageChallenge(message)` computes the
+challenge and `SIGNED_MESSAGE_DOMAIN` is the tag. A transaction challenge is a 32-byte hash
+and an ownership proof (`connect`) is 59 bytes tagged `LazorKit ownership proof v1`, so no
+challenge of one kind can be another. The portal gets the challenge as `message` and the
+text as `displayMessage`; the adapter checks the redirect, and a reply over any other
+challenge rejects with "The portal did not sign this message: its reply is over another
+challenge."
+
+**Returns** `Promise<SignMessageResult>`:
+
+| Field | What it is |
+| ----- | ---------- |
+| `signature` | The P-256 signature, 64 bytes (r \|\| s, low-S), base64. |
+| `signedPayload` | What the passkey signed: authenticatorData \|\| SHA-256(clientDataJSON), base64. |
+| `clientDataJsonBase64` | The WebAuthn clientDataJSON, base64. Its `challenge` is the base64url of the challenge above. |
+| `authenticatorDataBase64` | The WebAuthn authenticatorData, base64. |
+
+<Callout type="info" title="Changed in 2.3.1">
+  Message signatures can no longer be confused with transaction approvals. In 2.3.0 and
+  earlier the passkey signed the message itself as its challenge (the base64 decoding of
+  the text rather than the text), and the result had only `signature` and
+  `signedPayload`. A signature made by an earlier release does not verify: ask the user to
+  sign again.
+</Callout>
+
+### Verifying a message signature
+
+A message signature proves that a passkey's key signed the message, not which wallet that
+key belongs to. To authenticate a wallet, read the key from the chain, never from the
+client: a server that takes the key from the request accepts anyone's passkey for any
+wallet they name. Send the result to your server with the wallet's address
+(`smartWalletPubkey`) and `wallet.credentialId`, and check it there with
+`verifyWalletMessage`:
+
+```ts
+import { Connection } from '@solana/web3.js';
+import { verifyWalletMessage } from '@lazorkit/wallet-mobile-adapter';
+// or, on a server without React Native: from '@lazorkit/wallet'
+
+const ok = await verifyWalletMessage({
+  connection: new Connection(RPC_URL),
+  cluster: 'devnet',                   // when RPC_URL does not say which cluster
+  wallet: body.wallet,                 // the wallet the client claims: vault or wallet PDA
+  credentialId: body.credentialId,     // the passkey's credential id, base64
+  rpId: 'portal.lazor.sh',             // the passkey's relying party: the provider's rpId
+  message,                             // the message you issued, with your domain and nonce
+  signature: body.signature,
+  clientDataJsonBase64: body.clientDataJsonBase64,
+  authenticatorDataBase64: body.authenticatorDataBase64,
+  signedPayload: body.signedPayload,   // optional
+});
+```
+
+It is `true` only when the signature is over `signedMessageChallenge(message)` (a
+`webauthn.get` with the user present, under `rpId`), verifies against the key stored on
+chain in an **Owner** authority of `wallet` for `credentialId` (v2 or v1), and the wallet
+account still exists. It reads the chain with one `getProgramAccounts` per program, as
+`connect` does, and **rejects** when the chain cannot be read: treat that as not verified.
+Check the domain and the nonce in the message yourself. The parameters are the same as on
+the web: [React SDK › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+
+`verifySignedMessage({ message, publicKey, ...result })` is the offline part of that check,
+with no RPC: `true` only when `publicKey`'s passkey signed
+`signedMessageChallenge(message)`, and `false` for any other challenge, the raw message
+bytes included. It never throws. Use it alone only with a key you read from the claimed
+wallet's authority on chain yourself: `wallet.passkeyPubkey` comes from the client, and
+proves nothing to a server.
 
 ---
 

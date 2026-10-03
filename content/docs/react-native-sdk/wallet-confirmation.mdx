@@ -17,10 +17,11 @@ on" at face value.
 
 ## What `connect` does
 
-1. **Proves the passkey.** The passkey signs a challenge the SDK chose — in the connect
-   reply when the portal supports it, otherwise in one more portal prompt. Only wallets
-   whose stored key verifies that signature count. (Mobile always proves: a deep link can
-   be forged.)
+1. **Proves the passkey.** The passkey signs a challenge the SDK chose — since 2.3.1 a
+   domain-separated ownership proof, `LazorKit ownership proof v1` followed by 32 random
+   bytes — in the connect reply when the portal supports it, otherwise in one more portal
+   prompt. Only wallets whose stored key verifies that signature count. (Mobile always
+   proves: a deep link can be forged.)
 2. **Uses a wallet on its own** only when it is **the one wallet this passkey has signed
    for, and nothing else can spend from it**: no other authority, live session, pending
    transaction or token approval, and a vault that is still a plain system account.
@@ -49,7 +50,8 @@ always one a signature from this `connect` verifies against:
 - otherwise the key **recovered from two of the passkey's signatures** over fresh
   challenges (`resolvePasskeyPublicKey`, `@lazorkit/sdk-legacy` 1.3.0): the step 1 proof
   and the connect reply's signature, or one more portal sign when the reply has none. That
-  is **one extra passkey prompt** (a portal sign over a random challenge, no transaction).
+  is **one extra passkey prompt** (a portal sign over a fresh ownership-proof challenge,
+  no transaction).
 
 Closing that prompt, or calling `disconnect` during it, rejects with
 `PortalCancelledError`. If the signatures do not settle on one key, `connect` throws an
@@ -245,5 +247,9 @@ All are exported from `@lazorkit/wallet-mobile-adapter`.
 
 Using `@lazorkit/sdk-legacy` directly? Do not take the first wallet
 `findWalletsByAuthority(credentialIdHash)` returns — anyone can plant one there. Use
-`LazorKitClient.findOwnPasskeyWallet` with a proof over `createOwnershipChallenge()`; see
+`LazorKitClient.findOwnPasskeyWallet` with a proof over a tagged ownership challenge:
+`createOwnershipChallenge()` from the adapter (2.3.1+), or `createTaggedOwnershipChallenge()`
+from `@lazorkit/sdk-legacy` 1.4.0, both domain-separated and 59 bytes (sdk-legacy's
+`createOwnershipChallenge()` still gives 32 bare random bytes, deprecated as a passkey
+challenge; `verifyOwnershipProof` accepts both); see
 [SDK (web3.js v1) › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).

@@ -59,6 +59,8 @@ const prepared = await client.prepareCreateSession({
   sessionKey: sessionKp.publicKey,
   expiresAt: BigInt(slot) + 432_000n,           // ~2 days
   actions: [
+    // USDC only: no Sol* action, so from the program release that adds error 3037 it
+    // cannot spend SOL, rent for a new account included.
     Actions.tokenLimit({ mint: USDC_MINT, remaining: 1_000_000_000n }),
     Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 100_000_000n }),
   ],
@@ -102,8 +104,22 @@ const { instructions, sessionPda } = await client.createSession({
 
 <Callout type="warn" title="Actions are immutable">
   A session's action list can't be modified after creation. To change limits, revoke and
-  recreate.
+  recreate. The program does not create a second session for a key while the first
+  exists: revoke first, or use a new key.
 </Callout>
+
+**Name every asset the session may spend.** From the v2 program release that adds errors
+3037 and 3038, a session's actions (and a Delegate's policy) name what may leave the
+vault, and nothing else may: with no `Sol*` action the vault's SOL may not fall (3037),
+rent the vault pays for a new account included, and a mint with no `Token*` action may not
+leave the vault's token accounts (3038). Both are net over one Execute, inflows always
+pass, and wSOL is a mint, not SOL. A program whitelist names programs, not assets. For a
+swap, name the mint it sells, and create its output token account in a top-level
+instruction the fee payer funds, before the Execute, or give the session a `solLimit` that
+covers the rent. That release is not deployed yet: until it is, an asset the actions do not
+name is not bounded at all. With a passkey admin, keep the actions within about 244 bytes
+so they fit beside its response. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
 ---
 
@@ -268,7 +284,7 @@ Owner or Admin only.
 
 After a session expires, **anyone** may close it with `CloseExpiredSession` (instruction
 18) and keep the rent; before that the program refuses with `SessionNotExpired` (3036).
-1.3.1 has no public builder for it; `@lazorkit/sdk` exports `createCloseExpiredSessionIx`.
+1.4.0 has no public builder for it; `@lazorkit/sdk` exports `createCloseExpiredSessionIx`.
 
 ---
 
@@ -286,12 +302,15 @@ const { instructions, newAuthorityPda } = await client.addAuthority({
   adminSigner: ed25519(ownerKp.publicKey),
   newAuthority: { type: 'ed25519', publicKey: sessionKp.publicKey },
   role: ROLE_SPENDER,
+  // SOL only: from the program release that adds error 3038, this Delegate cannot lower
+  // the vault's balance of any token. Add a Token* action for each mint it may spend.
   policy: serializeActions([Actions.solLimit(10_000_000_000n), Actions.solMaxPerTx(1_000_000_000n)]),
 });
 ```
 
 A Delegate without a policy is refused (3033), and a policy on an Owner or Admin too
-(3035). See [Ranks & policies](/concepts/rbac).
+(3035). Its policy names what may leave the vault, as a session's actions do (above). See
+[Ranks & policies](/concepts/rbac).
 
 ---
 
@@ -309,7 +328,8 @@ A Delegate without a policy is refused (3033), and a policy on an Owner or Admin
 | `ProgramBlacklist`       | `programId`                                          | `Actions.programBlacklist(programId, expiresAt?)`           |
 
 All SOL/token amounts are **bigint** (lamports for SOL; base units for tokens). Max 16
-actions per session, 2048-byte total buffer.
+actions per session, 2048-byte total buffer; with a passkey admin, about 244 bytes fit
+beside its response ([How many actions fit](/concepts/session-keys#how-many-actions-fit)).
 
 See [Session Keys concept](/concepts/session-keys#actions-reference) for semantics and
 edge cases (expired actions, gross outflow tracking, etc.).

@@ -135,7 +135,7 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### LazorKit program validates on-chain
-    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? Any failing check rejects the transaction.
+    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? From the v2 program release that adds errors 3037 and 3038 (not deployed yet), does it move SOL or a token the session's actions do not name ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds))? Any failing check rejects the transaction.
   </Step>
   <Step>
     ### Protocol fee is collected

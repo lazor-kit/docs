@@ -4,7 +4,8 @@ description: When a send resolves, what isSigning means, how passkey transaction
 ---
 
 Applies to `@lazorkit/wallet` **3.1.0 and later** (deferred window: 3.2.0; 3014
-attribution: 3.2.1; callbacks and 4018: 3.3.0). Earlier releases resolved as soon as the
+attribution: 3.2.1; callbacks and 4018: 3.3.0; 3037 / 3038 and kept-key checks before
+each attempt: 3.4.0). Earlier releases resolved as soon as the
 paymaster answered.
 
 ## A send resolves once its transaction is confirmed
@@ -102,7 +103,8 @@ rejects with.
   reported as failed, `onFail` is not called for it, and a throwing `onFail` does not
   replace the error.
 - `disconnect` leaves `isSigning` to an action still running, which goes on to its end and
-  its callbacks; until then a new action is refused with "Already signing".
+  its callbacks; until then a new action is refused with "Already signing". A session or
+  authority send among them neither signs nor sends after the disconnect (3.4.0).
 
 ```tsx
 import { useWallet } from '@lazorkit/wallet';
@@ -134,7 +136,7 @@ contract.
 
 ## Transaction options
 
-| `transactionOptions` field | On web (3.3.0) |
+| `transactionOptions` field | On web (3.4.0) |
 | -------------------------- | -------------- |
 | `addressLookupTableAccounts` | Used. Forces the v0 wire format. |
 | `txVersion` | `'v0'` (default) or `'legacy'`. Legacy with lookup tables throws. |
@@ -228,11 +230,16 @@ deserialized payload; see [Session keys › Deferred execution](/web3js-v1/sessi
   (1 s, then 2 s apart), so the transaction can land at most once. That includes a lost
   answer (no answer within 90 s, a network error, HTTP 5xx or 408): if a later attempt
   gets an answer, the call goes on as usual.
-- Not resent: LazorKit's 3006 and 3014 (unless an earlier attempt may have been sent), a
-  4018 (`RetiredDeployment`), a failure that names the transaction's signature (that
+- Not resent: LazorKit's 3006 and 3014, and a 3037 or 3038 (3.4.0; a session or Delegate
+  moving an asset its policy does not name), unless an earlier attempt may have been sent;
+  a 4018 (`RetiredDeployment`), a failure that names the transaction's signature (that
   signature is followed instead), and bytes the paymaster reports as already processed.
   A 4018 fails on the first answer, with `V1WalletRetiredError` for a retired v1 wallet;
   see [Errors › v1 and v2](/errors#v1-and-v2).
+- A session or authority send checks its kept key right before each attempt, retries
+  included (3.4.0): after a disconnect nothing more is sent, and the call rejects with
+  `KeyWalletMismatchError`, or with `TransactionOutcomeUnknownError` when an earlier
+  attempt may have landed.
 - If every attempt fails and one of them may have been sent, or the bytes were already
   processed, the call rejects with `TransactionOutcomeUnknownError`. The React Native SDK
   does not resend at all.

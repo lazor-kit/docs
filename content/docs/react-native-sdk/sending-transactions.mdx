@@ -4,7 +4,8 @@ description: When a send resolves, what isSigning means, callbacks, how passkey 
 ---
 
 Applies to `@lazorkit/wallet-mobile-adapter` **2.1.0 and later** (callback timing and the
-deferred window: 2.2.0; 3014 attribution: 2.2.1; `connect` / `disconnect` callbacks: 2.3.0).
+deferred window: 2.2.0; 3014 attribution: 2.2.1; `connect` / `disconnect` callbacks: 2.3.0;
+3037 / 3038 errors: 2.4.0).
 
 ## A send resolves once its transaction is confirmed
 
@@ -68,7 +69,7 @@ Each action's promise settles, and its `onSuccess` or `onFail` runs, only **once
   still resolves, a connect that succeeded still resolves, and `onFail` is not called.
 
 This holds for every action, on the hook and on the store, `connect` and `disconnect`
-included. `@lazorkit/wallet` 3.3.0 keeps the same contract.
+included. `@lazorkit/wallet` 3.3.0 and later keep the same contract.
 
 <Callout type="info" title="Changed in 2.3.0">
   In 2.2.1 a throwing `onSuccess` on `connect` or `disconnect` made the call reject, the
@@ -116,7 +117,7 @@ its own: ask the user to approve again.
 
 ## Transaction options
 
-| `transactionOptions` field | On mobile (2.3.0) |
+| `transactionOptions` field | On mobile (2.4.0) |
 | -------------------------- | ----------------- |
 | `addressLookupTableAccounts` | Used for the transaction, and for the portal preview when the preview would be over 1232 bytes without them. |
 | `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). |
@@ -171,5 +172,6 @@ authorized. See [Session keys › Deferred execution](/web3js-v1/session-keys#de
 - The adapter sends each transaction to the paymaster once and never resends it (the web
   SDK makes up to 3 attempts with the same bytes). A lost answer (no answer, a network
   error, HTTP 5xx or 408) rejects at once with `TransactionOutcomeUnknownError`, and a
-  refusal, 3006 and 3014 included, rejects at once too.
+  refusal, 3006 and 3014 included, rejects at once too. A session send's 3037 or 3038
+  rejects as `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` (2.4.0).
 - v1 wallets go to `v1ConfigPaymaster`. See [Migrating from v1](/v1-to-v2).

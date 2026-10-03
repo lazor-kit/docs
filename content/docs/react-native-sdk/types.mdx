@@ -308,7 +308,8 @@ interface TransferSolPayload {
 interface CreateSessionPayload {
   sessionKey: PublicKey;                  // fresh Ed25519 public key; you keep the secret key
   expiresAtSlot: bigint;                  // absolute slot, at most 6,480,000 slots ahead
-  actions?: SessionAction[];              // required unless unrestricted
+  actions?: SessionAction[];              // required unless unrestricted. Name every asset it
+                                          // may spend; at most 16, within 244 bytes (not checked)
   unrestricted?: boolean;                 // a session with no limits, explicitly (2.0.0+)
 }
 
@@ -324,7 +325,8 @@ interface RevokeSessionPayload {
 interface AddAuthorityPayload {
   newEd25519Pubkey: PublicKey;
   role: number;                           // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
-  policy?: Uint8Array;                    // required for ROLE_SPENDER on v2: serializeActions([...])
+  policy?: Uint8Array;                    // required for ROLE_SPENDER on v2: serializeActions([...]).
+                                          // Names every asset the key may spend; within 244 bytes
   unrestricted?: boolean;                 // required to add a key to a v1 wallet
 }
 
@@ -352,11 +354,75 @@ type ListAuthoritiesResult = AuthorityEntry[];
 
 ---
 
+## Signed messages
+
+Exported from 2.3.1, the same as `@lazorkit/wallet`'s. How they are used:
+[useWallet › Messages](/react-native-sdk/use-wallet#messages).
+
+```ts
+const SIGNED_MESSAGE_DOMAIN = 'LazorKit signed message v1';  // the challenge's tag
+const OWNERSHIP_PROOF_DOMAIN = 'LazorKit ownership proof v1'; // connect's proofs
+
+type SignedMessageInput = string | Uint8Array;  // a string is signed as its UTF-8 bytes
+
+// What signMessage resolves with: the passkey's assertion over signedMessageChallenge(message).
+interface SignMessageResult {
+  readonly signature: string;               // P-256, 64 bytes (r || s, low-S), base64
+  readonly signedPayload: string;           // authenticatorData || SHA-256(clientDataJSON), base64
+  readonly clientDataJsonBase64: string;    // its challenge is base64url(signedMessageChallenge(message))
+  readonly authenticatorDataBase64: string;
+}
+
+interface VerifySignedMessageParams {
+  readonly message: SignedMessageInput;
+  readonly signature: string | Uint8Array;  // 64 bytes, or their base64
+  readonly clientDataJsonBase64: string;
+  readonly authenticatorDataBase64: string;
+  readonly signedPayload?: string;          // checked when given
+  readonly publicKey: string | Uint8Array | ArrayLike<number>; // P-256: 33, 65 or 64 bytes, or base64. Read it from chain.
+  readonly rpId?: string;
+  readonly origin?: string;
+}
+
+interface VerifyWalletMessageParams extends Omit<VerifySignedMessageParams, 'publicKey' | 'rpId'> {
+  readonly connection: Connection;
+  readonly wallet: string | PublicKey;      // the claimed wallet: vault or wallet PDA
+  readonly credentialId: string;            // base64
+  readonly rpId: string;                    // the passkey's relying party (the provider's rpId)
+  readonly cluster?: 'mainnet' | 'devnet';
+}
+
+function signedMessageChallenge(message: SignedMessageInput): Uint8Array; // 58 bytes
+function verifySignedMessage(params: VerifySignedMessageParams): boolean;  // offline; never throws
+function verifyWalletMessage(params: VerifyWalletMessageParams): Promise<boolean>; // key read from chain
+function createOwnershipChallenge(): Uint8Array; // OWNERSHIP_PROOF_DOMAIN || 32 random bytes, 59 bytes
+```
+
+`LazorWalletHook.signMessage` and the store's resolve with `SignMessageResult` (2.3.1; it
+was `{ signature, signedPayload }`).
+
+---
+
 ## Session actions
 
 Actions are **immutable policies** attached to a session at creation — or, serialized with
 `serializeActions`, to a Delegate authority. The on-chain program enforces them on every
-`Execute` signed by that key.
+`Execute` signed by that key. From the v2 program release that adds errors 3037 and 3038,
+an asset no action names cannot leave the wallet: SOL needs a `sol*` action (rent the vault
+pays counts) and each token a `token*` action for its mint. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+| Action | Bytes |
+| ------ | ----- |
+| `solLimit`, `solMaxPerTx` | 19 |
+| `solRecurringLimit` | 43 |
+| `tokenLimit`, `tokenMaxPerTx` | 51 |
+| `tokenRecurringLimit` | 75 |
+| `programWhitelist`, `programBlacklist` | 43 |
+
+Keep a session's actions, or a policy, within 244 bytes (`serializeActions(actions).length`):
+that is what fits in the transaction beside the passkey's response. The adapter does not
+check it before the portal opens.
 
 ### Builder — `Actions`
 
@@ -473,6 +539,20 @@ interface DeferredFailureContext { deferredExecPda?: PublicKey; authorizeSignatu
 class V1WalletRetiredError extends Error { readonly code: 4018 }
 class V1WalletMigratedError extends Error {}
 
+// A session send moving an asset its actions do not name (2.4.0+), from the v2 program
+// release that adds errors 3037 and 3038. Nothing in it ran.
+type PolicySigner = 'session' | 'authority';  // always 'session' from this adapter
+class UnlistedSolOutflowError extends Error {   // "This session is not allowed to spend SOL"
+  readonly code: 3037;
+  readonly signer: PolicySigner;
+  readonly cause?: unknown;                     // the failure as it came
+}
+class UnlistedTokenOutflowError extends Error { // "This session is not allowed to spend this token"
+  readonly code: 3038;
+  readonly signer: PolicySigner;
+  readonly cause?: unknown;
+}
+
 // Re-exported from @lazorkit/sdk-legacy
 class MinContextSlotNotReachedError extends Error {}
 ```
@@ -480,9 +560,13 @@ class MinContextSlotNotReachedError extends Error {}
 Also exported: `isDeferredExpiredError`, `isSignatureReusedError` and
 `isRetiredDeploymentError`, each true for its class from any copy of the package, also
 wrapped in `cause` or a wallet-adapter `WalletError` (since 2.3.0; in 2.2.1 the last two
-read only the error's text and missed the adapter's own errors), `SIGNATURE_REUSED_CODE`, `DEFERRED_EXPIRED_CODE`,
-`RETIRED_DEPLOYMENT_CODE`, `MIN_DEFERRED_EXPIRY_SLOTS` (10) and
-`MAX_DEFERRED_EXPIRY_SLOTS` (9000).
+read only the error's text and missed the adapter's own errors); since 2.4.0
+`isUnlistedSolOutflowError` and `isUnlistedTokenOutflowError`, which also recognise a raw
+3037 / 3038 (`0xbdd`, `0xbde`) unless its logs name another program; `SIGNATURE_REUSED_CODE`,
+`DEFERRED_EXPIRED_CODE`, `RETIRED_DEPLOYMENT_CODE`, `UNLISTED_SOL_OUTFLOW_CODE` (3037),
+`UNLISTED_TOKEN_OUTFLOW_CODE` (3038), `MIN_DEFERRED_EXPIRY_SLOTS` (10) and
+`MAX_DEFERRED_EXPIRY_SLOTS` (9000). `ERROR_NAMES` and `errorFromCode` name 3036–3038 and
+4018 since 2.4.0.
 
 On-chain program errors appear inside error messages and logs as hex codes —
 `0xbd0`, `0xbd1`, etc. See [Errors › Program error codes](/errors#program-error-codes).

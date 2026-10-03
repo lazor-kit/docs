@@ -3,7 +3,7 @@ title: Types
 description: TypeScript interfaces, constants, error classes, and the SpendingLimits wrapper of @lazorkit/wallet.
 ---
 
-The public types of `@lazorkit/wallet` 3.3.0, grouped by what you're doing. Each block says
+The public types of `@lazorkit/wallet` 3.4.0, grouped by what you're doing. Each block says
 whether the type is **exported** (`import type { … } from '@lazorkit/wallet'`) or a
 **shape only**: the SDK uses it internally without exporting it, so derive it from an
 exported type when you need it in your code:
@@ -223,11 +223,28 @@ class KeyWalletMismatchError extends Error {
   readonly keyWallet: string | undefined;       // the wallet PDA the key signs for; undefined when unbound
   readonly connectedWallet: string | undefined; // the connected wallet's PDA; undefined when none
 }
-type KeyWalletMismatchReason = 'no-wallet' | 'other-wallet' | 'unbound'; // exported type
+// Exported type. 'disconnected' (3.4.0): the key's wallet is connected again, but a
+// disconnect ran during this send, which is not finished. Send again.
+type KeyWalletMismatchReason = 'no-wallet' | 'other-wallet' | 'unbound' | 'disconnected';
+
+// A session or Delegate send moving an asset its policy does not name (3.4.0+), from the
+// v2 program release that adds errors 3037 and 3038. Nothing in it ran.
+type PolicySigner = 'session' | 'authority';           // exported type
+class UnlistedSolOutflowError extends Error {          // "This session is not allowed to spend SOL"
+  readonly code: 3037;                                 // ActionUnlistedSolOutflow
+  readonly signer: PolicySigner;                       // 'authority': a Delegate ("This key …")
+  readonly cause?: unknown;                            // the failure as it came
+}
+class UnlistedTokenOutflowError extends Error {        // "This session is not allowed to spend this token"
+  readonly code: 3038;                                 // ActionUnlistedTokenOutflow
+  readonly signer: PolicySigner;
+  readonly cause?: unknown;
+}
 ```
 
-Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`
-and `isKeyWalletMismatchError`. Each is true for its class from any copy of the package,
+Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`,
+`isKeyWalletMismatchError`, and since 3.4.0 `isUnlistedSolOutflowError` and
+`isUnlistedTokenOutflowError`. Each is true for its class from any copy of the package,
 also wrapped in `cause` or in a wallet-adapter `WalletError`
 ([Errors › Telling errors apart](/errors#telling-errors-apart)). Since 3.3.0: in 3.2.1
 `isSignatureReusedError` and `isRetiredDeploymentError` read only the error's text and
@@ -292,8 +309,69 @@ interface RemoveAuthorityOptions {
   readonly onFail?: (error: Error) => void;
 }
 
-type SignMessageOptions = ActionCallbacks<{ signature: string; signedPayload: string }>;
+type SignMessageOptions = ActionCallbacks<SignMessageResult>;
 ```
+
+### `LazorkitAdapterDisconnectOptions`
+
+Exported from `@lazorkit/wallet` (3.3.1+). `LazorkitWalletAdapter.disconnect`'s argument;
+wallet-adapter UIs call `disconnect()` without it, which deletes the session key the SDK
+keeps. Since 3.4.0 the adapter's `disconnect()` also disconnects the store, with or without
+it: `keepSessionKeys` decides only whether the session key is deleted.
+
+```ts
+type LazorkitAdapterDisconnectOptions = Pick<DisconnectOptions, 'keepSessionKeys'>;
+```
+
+---
+
+## Signed messages
+
+Exported from `@lazorkit/wallet` (3.3.1+). How they are used:
+[useWallet › Messages](/react-sdk/use-wallet#messages).
+
+```ts
+const SIGNED_MESSAGE_DOMAIN = 'LazorKit signed message v1';  // the challenge's tag
+const OWNERSHIP_PROOF_DOMAIN = 'LazorKit ownership proof v1'; // connect's proofs
+
+type SignedMessageInput = string | Uint8Array;  // a string is signed as its UTF-8 bytes
+
+// What signMessage resolves with: the passkey's assertion over signedMessageChallenge(message).
+interface SignMessageResult {
+  readonly signature: string;               // P-256, 64 bytes (r || s, low-S), base64
+  readonly signedPayload: string;           // authenticatorData || SHA-256(clientDataJSON), base64
+  readonly clientDataJsonBase64: string;    // its challenge is base64url(signedMessageChallenge(message))
+  readonly authenticatorDataBase64: string;
+}
+
+interface VerifySignedMessageParams {
+  readonly message: SignedMessageInput;     // the same string, or the same bytes
+  readonly signature: string | Uint8Array;  // 64 bytes, or their base64
+  readonly clientDataJsonBase64: string;
+  readonly authenticatorDataBase64: string;
+  readonly signedPayload?: string;          // checked when given
+  readonly publicKey: string | Uint8Array | ArrayLike<number>; // P-256: 33, 65 or 64 bytes, or base64. Read it from chain.
+  readonly rpId?: string;                   // the authenticatorData's rpIdHash must be its SHA-256
+  readonly origin?: string;                 // clientDataJSON's origin must equal it
+}
+
+interface VerifyWalletMessageParams extends Omit<VerifySignedMessageParams, 'publicKey' | 'rpId'> {
+  readonly connection: Connection;          // the cluster the wallet lives on
+  readonly wallet: string | PublicKey;      // the claimed wallet: vault or wallet PDA
+  readonly credentialId: string;            // the passkey's credential id, base64
+  readonly rpId: string;                    // the passkey's relying party, e.g. 'portal.lazor.sh'
+  readonly cluster?: 'mainnet' | 'devnet';  // for an RPC URL that does not say
+}
+
+function signedMessageChallenge(message: SignedMessageInput): Uint8Array; // tag || SHA-256(tag || message), 58 bytes
+function verifySignedMessage(params: VerifySignedMessageParams): boolean;  // offline; never throws
+function verifyWalletMessage(params: VerifyWalletMessageParams): Promise<boolean>; // key read from chain
+function createOwnershipChallenge(): Uint8Array; // OWNERSHIP_PROOF_DOMAIN || 32 random bytes, 59 bytes
+```
+
+`verifySignatureBrowser` (and `useWallet().verifyMessage`, which calls it) is deprecated
+since 3.3.1: it checks only that `signature` is over `signedPayload`, not which message was
+signed. Never use it to authenticate.
 
 ---
 
@@ -338,9 +416,12 @@ Shape only: not exported.
 ```ts
 interface CreateSessionPayload {
   expiresInSlots?: bigint;          // default 50,000 slots
-  spendingLimits?: SpendingLimits;  // required unless unrestricted
+  spendingLimits?: SpendingLimits;  // required unless unrestricted; checked before the prompt
   unrestricted?: boolean;           // a session with no limits, explicitly
-  sessionKey?: PublicKey | string;  // register an external key; nothing generated or stored
+  sessionKey?: PublicKey | string;  // register an external key; nothing generated or stored.
+                                    // One that already has a session: resolves with that
+                                    // session as it was made, whatever the limits (3.4.0:
+                                    // still checked first). Revoke it to change them.
 }
 
 interface RevokeSessionPayload {
@@ -353,8 +434,8 @@ interface RevokeSessionPayload {
 Exported from `@lazorkit/wallet`.
 
 High-level wrapper around the on-chain action catalogue. The SDK translates
-`SpendingLimits` into `SessionAction[]` before submission. At least one field is required
-unless you pass `unrestricted: true`.
+`SpendingLimits` into `SessionAction[]` before submission (`spendingLimitsToActions`). At
+least one limit is required unless you pass `unrestricted: true`.
 
 ```ts
 interface SpendingLimits {
@@ -369,11 +450,43 @@ interface SpendingLimits {
     limit: bigint;
     windowSlots: bigint;
   };
+
+  /** The tokens the session may spend, one entry per mint (3.4.0+). */
+  tokens?: readonly TokenSpendingLimit[];
+}
+
+/** Exported (3.4.0+). The limits on one token, in the mint's base units; at least one. */
+interface TokenSpendingLimit {
+  mint: PublicKey | string;         // the token's mint
+  lifetimeCap?: bigint;             // exhausted for this token once spent
+  perTxMax?: bigint;                // max per single execute
+  recurring?: {                     // cap that resets every windowSlots slots
+    limit: bigint;
+    windowSlots: bigint;
+  };
 }
 ```
 
-<Callout type="info" title="Need token or program limits?">
-  `SpendingLimits` covers SOL. For token caps, program whitelisting, or per-action expiries,
+An asset the limits do not name cannot leave the wallet, from the v2 program release that
+adds errors 3037 and 3038 (not deployed yet; until then it is not bounded at all): with no
+SOL limit the session spends no SOL, rent the vault pays for a new account included, and
+it spends a token only with a `tokens` entry for its mint. wSOL is a mint of its own. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+`createSession` checks the limits before anything is read or the passkey is asked, and
+throws on a `tokens` entry with no limit, a mint named twice, an amount outside a u64, a
+window of 0 slots, more than 16 actions, or more than 244 bytes of actions. A SOL limit
+takes 19 bytes (`solRecurring` 43), a token's `lifetimeCap` or `perTxMax` 51 and its
+`recurring` 75.
+
+```ts
+// The actions a SpendingLimits stands for, checked the same way (3.4.0+). Also a
+// Delegate's policy: serializeActions(spendingLimitsToActions(limits)).
+function spendingLimitsToActions(limits: SpendingLimits | undefined): SessionAction[];
+```
+
+<Callout type="info" title="Need program limits?">
+  `SpendingLimits` covers SOL and tokens. For program whitelisting or per-action expiries,
   use the raw [`SessionAction`](#low-level-sessionaction) catalogue with
   `LazorKitClient.createSession`.
 </Callout>
@@ -399,7 +512,8 @@ Shape only: not exported.
 ```ts
 interface AddAuthorityPayload {
   role: number;            // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
-  policy?: Uint8Array;     // required for ROLE_SPENDER on v2: serializeActions([...])
+  policy?: Uint8Array;     // required for ROLE_SPENDER on v2: serializeActions([...]).
+                           // Names every asset the key may spend; within 244 bytes (not checked)
   unrestricted?: boolean;  // required to add a key to a v1 wallet
 }
 ```
@@ -482,15 +596,27 @@ for the object forms).
 | `SIGNATURE_REUSED_CODE` | `3006` |
 | `DEFERRED_EXPIRED_CODE` | `3014` |
 | `RETIRED_DEPLOYMENT_CODE` | `4018` |
+| `UNLISTED_SOL_OUTFLOW_CODE` / `UNLISTED_TOKEN_OUTFLOW_CODE` | `3037` / `3038` (3.4.0+) |
 | `PROGRAM_ID` / `PROGRAM_ADDRESS` | the v2 **mainnet** id |
 | `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET`, `PROGRAM_ID_MAINNET_V1`, `PROGRAM_ID_DEVNET_V1` | see [Networks & versions](/networks) |
+| `SIGNED_MESSAGE_DOMAIN` | `'LazorKit signed message v1'` (3.3.1+) |
+| `OWNERSHIP_PROOF_DOMAIN` | `'LazorKit ownership proof v1'` (3.3.1+) |
 
 Other exported helpers: `forgetStoredKeys()` (deletes the session and authority keys the SDK
 keeps; 3.3.0+), `registerCluster(rpcUrl, cluster)` (what the `cluster` prop does),
-`getCredentialHash(credentialIdBase64)`, `createOwnershipChallenge`,
-`verifyOwnershipProof`, `pickOwnWallet`, `selectWalletByAddress`, `readAuthorityCounter`,
-`readAuthorityPubkey`, `extractErrorCode`, `errorFromCode`, `ERROR_NAMES`, and the account
-readers `AuthorityAccount` / `SessionAccount`.
+`getCredentialHash(credentialIdBase64)`, `signedMessageChallenge`, `verifySignedMessage`
+and `verifyWalletMessage` ([above](#signed-messages)), `createOwnershipChallenge` (since
+3.3.1 the domain-separated 59-byte challenge: the bytes of `@lazorkit/sdk-legacy` 1.4.0's
+`createTaggedOwnershipChallenge`, not of its `createOwnershipChallenge`, which stays 32 bare
+random bytes), `verifyOwnershipProof`, `pickOwnWallet`, `selectWalletByAddress`,
+`readAuthorityCounter`, `readAuthorityPubkey`, `extractErrorCode`, `errorFromCode`,
+`ERROR_NAMES` (3036–3038 and 4018 named since 3.4.0), `spendingLimitsToActions`
+([above](#spendinglimits)), and the account readers `AuthorityAccount` / `SessionAccount`.
+
+`Paymaster` (exported) takes `{ protocolVersion?, beforeAttempt? }` as its second argument.
+`beforeAttempt` (3.4.0) runs right before each attempt to send, retries included, of every
+send that paymaster makes, and what it throws stops the send. The SDK uses it to check a
+kept key before each attempt.
 
 ---
 
@@ -515,7 +641,8 @@ interface WalletHookInterface {
   connect: (options?: ConnectHookOptions) => Promise<WalletInfo>;
   disconnect: (options?: DisconnectOptions) => Promise<void>;
   signAndSendTransaction: (payload: SendTxPayload & ActionCallbacks<string>) => Promise<string>;
-  signMessage: (message: string, options?: SignMessageOptions) => Promise<{ signature: string; signedPayload: string }>;
+  signMessage: (message: string, options?: SignMessageOptions) => Promise<SignMessageResult>;
+  /** @deprecated Never use it to authenticate: use verifyWalletMessage. */
   verifyMessage: (args: {
     signedPayload: Uint8Array;
     signature: Uint8Array;

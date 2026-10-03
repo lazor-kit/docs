@@ -19,8 +19,8 @@ see [Sending transactions](/react-sdk/sending-transactions).
 | `connect`                  | first time       | Authenticate; returns the stored wallet without a prompt     |
 | `disconnect`               | no               | Clear the stored wallet and the kept session key             |
 | `signAndSendTransaction`   | yes              | Single-tx Execute via paymaster                              |
-| `signMessage`              | yes              | Off-chain signature                                          |
-| `verifyMessage`            | no               | Browser-side signature verification via `crypto.subtle`      |
+| `signMessage`              | yes              | Off-chain signature; check it with `verifyWalletMessage`     |
+| `verifyMessage`            | no               | **Deprecated.** Never use it to authenticate                 |
 | `createSession`            | yes              | Mint a scoped Ed25519 session (`SpendingLimits`)             |
 | `signAndSendWithSession`   | **no**           | Send using the kept session key                              |
 | `revokeSession`            | yes              | Close a session, refund rent                                 |
@@ -34,7 +34,7 @@ see [Sending transactions](/react-sdk/sending-transactions).
 All send-tx methods take `{ instructions, transactionOptions? }`. `transactionOptions`
 accepts `addressLookupTableAccounts`, `txVersion: 'legacy' | 'v0'` (default `'v0'`) and
 `clusterSimulation`; `feeToken` and `computeUnitLimit` are in the types but **ignored** by
-the web SDK (3.3.0).
+the web SDK (3.4.0).
 
 Every method except `verifyMessage` also takes `onSuccess` / `onFail` (in the payload;
 `connect`, `disconnect`, `signMessage` and `removeAuthority` in their options). One of them
@@ -110,8 +110,9 @@ await disconnect({ keepSessionKeys: true }); // keep the session key for the nex
 
 Clears the stored wallet. The on-chain wallet is untouched. A `connect` still running
 rejects with `PortalCancelledError` and saves nothing. An action still running is not
-abandoned: it keeps `isSigning` until it ends, but a session or authority send no longer
-signs.
+abandoned: it keeps `isSigning` until it ends, but a session or authority send among them
+neither signs nor sends after the disconnect, even if the same wallet is connected again
+by then (3.4.0; it rejects with `KeyWalletMismatchError`).
 
 It also deletes the session key the SDK keeps (from IndexedDB, the page's memory and any
 plaintext an earlier release left), whichever wallet it belongs to, and a `createSession`
@@ -119,12 +120,25 @@ still waiting for its transaction keeps no key once it lands. The authority key 
 and signs only once the same wallet is connected again; `removeAuthority` and
 `forgetStoredKeys()` delete it. `disconnect` acts in its own tab: another tab of the app
 stays connected. See [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
+Since 3.3.1 a sign-out through wallet-adapter (`LazorkitWalletAdapter.disconnect()`) or
+the Wallet Standard (`standard:disconnect`) deletes the session key the same way. Since
+3.4.0 it also disconnects this store, as `disconnect()` does: `useWallet()` shows no
+wallet, a `connect` the store is running rejects with `PortalCancelledError`, `error` is
+cleared, and a kept key signs only once its wallet is connected again. See
+[Wallet Standard › Disconnecting](/wallet-standard#disconnecting).
 
 | Option            | Type                     | Notes |
 | ----------------- | ------------------------ | ----- |
 | `keepSessionKeys` | `boolean`                | Keep the session key (default `false`: it is deleted). |
 | `onSuccess`       | `() => void`             | Runs once the disconnect is over. |
 | `onFail`          | `(error: Error) => void` | Runs with the error the promise rejects with. |
+
+<Callout type="info" title="Changed in 3.4.0">
+  In 3.3.1 a wallet-adapter or Wallet Standard disconnect left `useWallet()` connected, so
+  the authority key (and a session key kept with `keepSessionKeys`) went on signing for
+  the wallet, and a send that had loaded its key could still sign and send after such a
+  disconnect. The store's own `disconnect()` stopped such a send only at signing.
+</Callout>
 
 <Callout type="info" title="Changed in 3.3.0">
   In 3.2.1 `disconnect` took no options, cleared `isSigning` while an action ran, and left
@@ -239,31 +253,139 @@ thrown as it came, not as `DeferredExpiredError`, and every TX2 error carries
 
 ### `signMessage`
 
-Off-chain passkey signature over an arbitrary string.
+Off-chain passkey signature over a string: a sign-in, or any statement your server checks.
 
 ```ts
-const { signature, signedPayload } = await signMessage('Sign in as user-123');
+const result = await signMessage('Sign in to example.com\nNonce: 8f2c…');
+// { signature, signedPayload, clientDataJsonBase64, authenticatorDataBase64 }, all base64
 ```
 
-Both values are base64. Returns `Promise<{ signature: string; signedPayload: string }>`.
+The passkey never signs the message's bytes as its WebAuthn challenge. It signs a challenge
+made from them, with a tag no other kind of passkey challenge carries (format v1):
 
-### `verifyMessage`
+```
+tag       = UTF-8 "LazorKit signed message v1"     (26 bytes)
+challenge = tag || SHA-256(tag || message)        (58 bytes)
+```
 
-Verify a `signMessage` result in the browser — no RPC call.
+The message is signed as its UTF-8 bytes. `signedMessageChallenge(message)` computes the
+challenge and `SIGNED_MESSAGE_DOMAIN` is the tag; both are exported. Every challenge the
+SDK asks a passkey for has a shape of its own, so none can be read as another:
+
+| Challenge | Shape |
+| --------- | ----- |
+| Transaction (what the programs verify) | a 32-byte hash |
+| Message | 58 bytes, starting with `LazorKit signed message v1` |
+| Ownership proof (`connect`) | 59 bytes: `LazorKit ownership proof v1`, then 32 random bytes (`createOwnershipChallenge()`) |
+
+The portal gets the challenge as `message` and the text to show the user as
+`displayMessage`. The SDK checks the portal's reply: one over any other challenge rejects
+with "The portal did not sign this message: its reply is over another challenge."
+
+| Option      | Type                                  | Notes |
+| ----------- | ------------------------------------- | ----- |
+| `onSuccess` | `(result: SignMessageResult) => void` | Runs once `isSigning` is `false`. |
+| `onFail`    | `(error: Error) => void`              | Runs with the error the promise rejects with. |
+
+**Returns** `Promise<SignMessageResult>`:
+
+| Field | What it is |
+| ----- | ---------- |
+| `signature` | The P-256 signature, 64 bytes (r \|\| s, low-S), base64. |
+| `signedPayload` | What the passkey signed: authenticatorData \|\| SHA-256(clientDataJSON), base64. |
+| `clientDataJsonBase64` | The WebAuthn clientDataJSON, base64. Its `challenge` is the base64url of the challenge above. |
+| `authenticatorDataBase64` | The WebAuthn authenticatorData, base64. |
+
+<Callout type="info" title="Changed in 3.3.1">
+  Message signatures can no longer be confused with transaction approvals. In 3.3.0 and
+  earlier the passkey signed the message itself as its challenge (on the hook, the base64
+  decoding of the text rather than the text), and the result had only `signature` and
+  `signedPayload`. A signature made by an earlier release does not verify with
+  `verifyWalletMessage` or `verifySignedMessage`: ask the user to sign again. See
+  [Upgrading to 3.3.1](/react-sdk/upgrading#upgrading-to-331).
+</Callout>
+
+### Verifying a message signature
+
+A message signature proves that a passkey's key signed the message, not which wallet that
+key belongs to. To authenticate a wallet, read the key from the chain, never from the
+client: a server that takes the key from the request accepts anyone's passkey for any
+wallet they name. `verifyWalletMessage`, a package export, does the lookup:
 
 ```ts
-const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-
-const { signature, signedPayload } = await signMessage('Sign in as user-123');
-const ok = await verifyMessage({
-  signedPayload: fromBase64(signedPayload),
-  signature: fromBase64(signature),
-  publicKey: new Uint8Array(wallet!.passkeyPubkey), // 33-byte compressed secp256r1 key
+// In the app: sign a message your server issued, and send the result with the wallet.
+const { wallet, signMessage } = useWallet();
+const result = await signMessage(message);
+await fetch('/api/sign-in', {
+  method: 'POST',
+  body: JSON.stringify({ wallet: wallet!.vaultPda, credentialId: wallet!.credentialId, ...result }),
 });
 ```
 
-**Returns** `Promise<boolean>`. For a server-side check, verify with the same inputs
-against the passkey key stored on chain (`readAuthorityPubkey`).
+```ts
+// On the server
+import { Connection } from '@solana/web3.js';
+import { verifyWalletMessage } from '@lazorkit/wallet';
+
+const ok = await verifyWalletMessage({
+  connection: new Connection(RPC_URL),
+  cluster: 'devnet',                   // when RPC_URL does not say which cluster
+  wallet: body.wallet,                 // the wallet the client claims: vault or wallet PDA
+  credentialId: body.credentialId,     // the passkey's credential id, base64
+  rpId: 'portal.lazor.sh',             // the passkey's relying party: the portal's hostname
+  message,                             // the message you issued, with your domain and nonce
+  signature: body.signature,
+  clientDataJsonBase64: body.clientDataJsonBase64,
+  authenticatorDataBase64: body.authenticatorDataBase64,
+  signedPayload: body.signedPayload,   // optional
+  origin: 'https://portal.lazor.sh',   // optional: the page that ran the passkey
+});
+```
+
+It is `true` only when the signature is over `signedMessageChallenge(message)` (a
+`webauthn.get` with the user present, under `rpId`), verifies against the key stored on
+chain in an **Owner** authority of `wallet` for `credentialId` (v2 or v1), and the wallet
+account still exists. A key the client sends is never used. It reads the chain with one
+`getProgramAccounts` per program, as `connect` does, so use an RPC endpoint that allows
+it. It **rejects** when the chain cannot be read: treat that as not verified. Malformed
+input is `false`. Check the domain and the nonce in the message yourself, as with any
+sign-in message.
+
+| Param | Type | Notes |
+| ----- | ---- | ----- |
+| `connection` | `Connection` | A connection to the cluster the wallet lives on. |
+| `wallet` | `string \| PublicKey` | The wallet the signer claims: its vault or its wallet PDA. |
+| `credentialId` | `string` | The passkey's credential id, base64 (`wallet.credentialId`). |
+| `rpId` | `string` | The relying party the passkey was created under: the portal's hostname. |
+| `cluster` | `'mainnet' \| 'devnet'` | Optional, for an RPC URL that does not say. Otherwise picked as the SDK picks it: a cluster pinned with `registerCluster`, else the URL, else mainnet. |
+| `message` | `string \| Uint8Array` | The message that was signed: the same string, or the same bytes. |
+| `signature`, `clientDataJsonBase64`, `authenticatorDataBase64` | `string` | From the `SignMessageResult`. |
+| `signedPayload` | `string` | Optional; checked when given. |
+| `origin` | `string` | Optional: clientDataJSON's `origin` must equal it. |
+
+**Returns** `Promise<boolean>`.
+
+**Offline: `verifySignedMessage`.** `verifySignedMessage({ message, publicKey, ...result })`
+is the part of that check that needs no RPC: `true` only when `publicKey`'s passkey signed
+`signedMessageChallenge(message)` with the user present, and `false` for any other
+challenge, the raw message bytes included. It never throws. It proves that a key signed
+the message and nothing about which wallet holds that key, so use it alone only with a key
+you read from the claimed wallet's authority on chain yourself. `publicKey` is the P-256
+key: 33 bytes (compressed), 65 or 64, as bytes, a number array or base64. `rpId` and
+`origin` are optional checks. Returns `boolean`.
+
+### `verifyMessage` (deprecated)
+
+<Callout type="error" title="Never use it to authenticate">
+  `useWallet().verifyMessage` and the exported `verifySignatureBrowser` are deprecated since
+  3.3.1. They check only that `signature` is over `signedPayload`, not which message was
+  signed, so any assertion the passkey ever made passes, and they trust the public key the
+  caller passes. Use `verifyWalletMessage`, or `verifySignedMessage` with a key read from
+  chain.
+</Callout>
+
+Both remain for compatibility: `verifyMessage({ signedPayload, signature, publicKey })`
+takes the three as bytes and resolves with a `boolean`.
 
 ---
 
@@ -274,15 +396,18 @@ against the passkey key stored on chain (`readAuthorityPubkey`).
 Mint an Ed25519 session key and register it on the wallet.
 
 ```ts
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
 const { sessionPda, sessionPublicKey } = await createSession({
   expiresInSlots: 216_000n,             // ~24h at 400 ms; default 50,000 slots
   spendingLimits: {
-    solLifetimeCap: 5_000_000_000n,     // 5 SOL total
-    solPerTxMax:    500_000_000n,       // 0.5 SOL per tx
+    solPerTxMax:    500_000_000n,       // 0.5 SOL per tx, rent the vault pays included
     solRecurring:   {
       limit: 1_000_000_000n,            // 1 SOL per window
       windowSlots: 216_000n,            // 24h window
     },
+    // Each token the session may spend, by mint (3.4.0+). Amounts in base units.
+    tokens: [{ mint: USDC, perTxMax: 5_000_000n, lifetimeCap: 100_000_000n }],
   },
 });
 ```
@@ -290,9 +415,31 @@ const { sessionPda, sessionPublicKey } = await createSession({
 | Field              | Type                    | Notes |
 | ------------------ | ----------------------- | ----- |
 | `expiresInSlots`   | `bigint`                | Default 50,000 slots. The program allows at most 6,480,000. |
-| `spendingLimits`   | `SpendingLimits`        | SOL limits. Required unless `unrestricted: true`. |
+| `spendingLimits`   | `SpendingLimits`        | SOL limits and, since 3.4.0, `tokens`: one entry per mint the session may spend. Required unless `unrestricted: true`. Checked before anything is read or the passkey is asked. |
 | `unrestricted`     | `boolean`               | Mint a session with **no limits**: it can spend the whole vault through any program until it expires. Without limits and without this, `createSession` throws. |
-| `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). The SDK generates nothing and stores nothing. If a session for this key already exists, it is returned without a prompt. |
+| `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). The SDK generates nothing and stores nothing. If this key already has a session, `createSession` resolves with that session as it was made, without a prompt, whatever `spendingLimits` you pass. |
+
+**What the limits bound.** Name every asset the session may spend: a SOL limit for SOL
+(rent the vault pays for a new account counts), and a `tokens` entry for each mint, with at
+least one of `lifetimeCap`, `perTxMax` and `recurring: { limit, windowSlots }`. wSOL is a
+mint of its own. From the v2 program release that adds errors 3037 and 3038, an asset the
+limits do not name cannot leave the wallet: SOL limits alone let the session spend no
+token, and token limits alone no SOL. That release is not deployed yet; until it is, an
+asset the limits do not name is not bounded at all. See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+**Checked before the prompt** (3.4.0): a `tokens` entry with no limit, a mint named twice,
+an amount outside a u64, a window of 0 slots, more than 16 actions, or more than 244 bytes
+of actions (what fits in the transaction beside the passkey's response) throws. A SOL limit
+takes 19 bytes (`solRecurring` 43), a token's `lifetimeCap` or `perTxMax` 51, its
+`recurring` 75: `solPerTxMax` with `perTxMax` and `lifetimeCap` fits for 2 mints, or with
+`perTxMax` alone for 4. Nothing is added that you did not ask for.
+
+**A `sessionKey` that already has a session.** Since 3.4.0 the limits are checked first, so
+a call with no `spendingLimits` (and not `unrestricted`), or invalid ones, throws where
+3.3.1 resolved with the existing session. With valid limits it still resolves with the
+session as it was made: to change an external key's limits, revoke its session
+(`revokeSession({ sessionPda })`) or register a new key.
 
 Without `sessionKey`, the SDK generates the key and keeps it for `signAndSendWithSession`,
 as a non-extractable WebCrypto key in IndexedDB (see `keyStorage`), bound to the connected
@@ -300,9 +447,11 @@ wallet. There is one slot: a new session replaces it. See
 [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 
 <Callout type="warn" title="Limits are immutable">
-  Session actions can't be changed once created. To adjust, revoke and recreate. Token
-  caps and program filters are not in `SpendingLimits`; for those use `LazorKitClient`
-  with the `Actions` catalogue.
+  Session actions can't be changed once created. To adjust, revoke and recreate. Every
+  session made with `SpendingLimits` before 3.4.0 names SOL only, so from the program
+  release that adds errors 3037 and 3038 it moves no token: create a new one with
+  `tokens`. Program filters and per-action expiries are not in `SpendingLimits`; for those
+  use `LazorKitClient` with the `Actions` catalogue.
 </Callout>
 
 **Returns** `Promise<{ sessionPda: string; sessionPublicKey: string }>`.
@@ -316,23 +465,45 @@ const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are hit —
-see [Errors](/errors#spending-limits-and-policies-30203036).
+see [Errors](/errors#spending-limits-and-policies-30203038). From the program release that
+adds errors 3037 and 3038, a transaction that would move SOL, or a token, that the
+session's limits do not name rejects with `UnlistedSolOutflowError` or
+`UnlistedTokenOutflowError` (3.4.0): nothing in it ran, and it is not resent. See
+[Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
 
 The key signs only for the wallet that created the session: with no wallet connected, or
 another one, `signAndSendWithSession` rejects with `KeyWalletMismatchError` before
-anything is signed or sent. A key whose session has expired is deleted when it is next
-read, and the call rejects. See
+anything is signed or sent. A send still running when the wallet is disconnected, by
+`disconnect()`, wallet-adapter or the Wallet Standard, neither signs nor sends after it
+(3.4.0): it rejects with `KeyWalletMismatchError`, `reason` `'disconnected'` when the same
+wallet is connected again by then (send again). A key whose session has expired is deleted
+when it is next read, and the call rejects. See
 [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
 
 ```ts
-import { isKeyWalletMismatchError } from '@lazorkit/wallet';
+import { isKeyWalletMismatchError, type KeyWalletMismatchError } from '@lazorkit/wallet';
+
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 try {
   await signAndSendWithSession({ instructions: [ix] });
 } catch (e) {
   if (!isKeyWalletMismatchError(e)) throw e;
-  // Not the connected wallet's session: create one for it.
-  await createSession({ spendingLimits: { solPerTxMax: 100_000_000n } });
+  const { reason } = e as KeyWalletMismatchError;
+  if (reason === 'disconnected') {
+    // Its wallet is connected again, but a disconnect ran during this send: send again.
+    await signAndSendWithSession({ instructions: [ix] });
+  } else if (reason === 'no-wallet') {
+    throw e; // connect, then send again
+  } else {
+    // 'other-wallet' or 'unbound': create a session for the connected wallet.
+    await createSession({
+      spendingLimits: {
+        solPerTxMax: 100_000_000n,
+        tokens: [{ mint: USDC, perTxMax: 5_000_000n }],
+      },
+    });
+  }
 }
 ```
 
@@ -364,12 +535,18 @@ Adds a fresh Ed25519 authority on the wallet. The SDK generates the key and keep
 wallet it was added to is connected.
 
 ```ts
-import { Actions, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '@lazorkit/wallet';
+import { Actions, PublicKey, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '@lazorkit/wallet';
+
+const USDC = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 
 // A Delegate: spends only within its policy, which a v2 wallet requires.
+// Up to 0.1 SOL and 5 USDC a transaction; no other token can leave.
 const { authorityPda, authorityPublicKey } = await addAuthority({
   role: ROLE_SPENDER,
-  policy: serializeActions([Actions.solLimit(1_000_000_000n), Actions.solMaxPerTx(100_000_000n)]),
+  policy: serializeActions([
+    Actions.solMaxPerTx(100_000_000n),
+    Actions.tokenMaxPerTx({ mint: USDC, max: 5_000_000n }),
+  ]),
 });
 
 // An Admin: manages Delegates and spends without limit.
@@ -391,11 +568,15 @@ For a key your app holds, use `ROLE_SPENDER` with a `policy`.
 | Field          | Type         | Notes |
 | -------------- | ------------ | ----- |
 | `role`         | `number`     | Required. `ROLE_SPENDER` (Delegate), `ROLE_ADMIN`, or `ROLE_OWNER` on a v1 wallet only. |
-| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. |
+| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. It names what may leave the wallet ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Keep it within 244 bytes: `addAuthority` does not check its size, and a policy that does not fit fails after the user approved. |
 | `unrestricted` | `boolean`    | Required to add a key to a **v1** wallet, where any added key can spend the whole vault. Ignored on v2. |
 
 **Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
 [Ranks & policies](/concepts/rbac).
+
+`spendingLimitsToActions(limits)` (3.4.0) gives the actions a `SpendingLimits` stands for,
+checked as `createSession` checks them, so a Delegate can carry the same limits as a
+session: `policy: serializeActions(spendingLimitsToActions(limits))`.
 
 <Callout type="warn" title="Changed in 3.3.0: role is required">
   Breaking. In 3.2.1 `role` was optional and defaulted to `ROLE_ADMIN`, which made the new
@@ -411,7 +592,11 @@ const sig = await signAndSendWithAuthority({ instructions: [ix] });
 ```
 
 Only while the wallet the authority was added to is connected: otherwise it rejects with
-`KeyWalletMismatchError`, and nothing is signed or sent.
+`KeyWalletMismatchError`, and nothing is sent. As with a session, a send still running when
+the wallet is disconnected neither signs nor sends after it (3.4.0). A Delegate's send that
+would move an asset its policy does not name rejects with `UnlistedSolOutflowError` or
+`UnlistedTokenOutflowError` ("This key is not allowed to spend …"), from the program
+release that adds errors 3037 and 3038.
 
 ### `removeAuthority`
 

@@ -1,11 +1,11 @@
 ---
 title: Errors
-description: Every error class the LazorKit SDKs throw, when each is thrown and what to do, and the program's error codes 3001–3036 and 4001–4018.
+description: Every error class the LazorKit SDKs throw, when each is thrown and what to do, and the program's error codes 3001–3038 and 4001–4018.
 ---
 
-One reference for the React SDK (`@lazorkit/wallet` 3.3.0), the React Native SDK
-(`@lazorkit/wallet-mobile-adapter` 2.3.0) and the contract SDKs (`@lazorkit/sdk-legacy`
-1.3.1, `@lazorkit/sdk` 1.0.0-rc.5). Symptom-first help is in
+One reference for the React SDK (`@lazorkit/wallet` 3.4.0), the React Native SDK
+(`@lazorkit/wallet-mobile-adapter` 2.4.0) and the contract SDKs (`@lazorkit/sdk-legacy`
+1.4.0, `@lazorkit/sdk` 1.0.0-rc.6). Symptom-first help is in
 [Troubleshooting](/troubleshooting).
 
 ## Telling errors apart
@@ -38,6 +38,7 @@ LazorKit error in its `error` field. The predicates cover both cases:
 | `isDeferredExpiredError(e)` | `DeferredExpiredError`, and a raw 3014 whose logs name LazorKit as the first program to fail |
 | `isRetiredDeploymentError(e, version?)` | `V1WalletRetiredError`, and a raw 4018 whose logs name the v1 program, or any 4018 when `version` is `1` |
 | `isKeyWalletMismatchError(e)` (web) | `KeyWalletMismatchError`: see [Kept session and authority keys](#kept-session-and-authority-keys-web) |
+| `isUnlistedSolOutflowError(e)`, `isUnlistedTokenOutflowError(e)` (3.4.0 / 2.4.0) | `UnlistedSolOutflowError` / `UnlistedTokenOutflowError`, and a raw 3037 / 3038 unless its logs name another program as the first to fail (one with no logs counts as LazorKit's): see [Assets a policy does not name](#assets-a-policy-does-not-name) |
 
 Each matches its class from any copy of the package (by `name` and `code`), anywhere in
 the error's `cause` chain or inside a wallet-adapter `WalletError`. For a raw program
@@ -83,6 +84,29 @@ How sends are confirmed and sequenced:
 [React › Sending transactions](/react-sdk/sending-transactions) and
 [React Native › Sending transactions](/react-native-sdk/sending-transactions).
 
+## Assets a policy does not name
+
+From the v2 program release that adds errors 3037 and 3038, a session's actions and a
+Delegate's policy name what may leave the wallet, and nothing else may. That release is not
+deployed yet ([Networks & versions](/networks)); see
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). Exported
+by both UI packages since `@lazorkit/wallet` 3.4.0 / `@lazorkit/wallet-mobile-adapter`
+2.4.0:
+
+| Error | Thrown by | Thrown when | What to do |
+| ----- | --------- | ----------- | ---------- |
+| `UnlistedSolOutflowError` (`code: 3037`) | `signAndSendWithSession`; on web also `signAndSendWithAuthority` | The transaction would have lowered the wallet's SOL balance, rent for a new account included, and the session's limits (a Delegate's policy) name no SOL: `ActionUnlistedSolOutflow`. Nothing in it ran. Message: "This session is not allowed to spend SOL" ("This key …" for a Delegate). | Limits cannot be changed: revoke the session (remove the Delegate) and register one with a SOL limit. Or have the fee payer create the account the vault would have paid rent for. |
+| `UnlistedTokenOutflowError` (`code: 3038`) | the same | A token would have left whose mint the limits do not name: `ActionUnlistedTokenOutflow`. wSOL is a mint of its own. Message: "This session is not allowed to spend this token". | Register a session (Delegate) whose limits name the mint: `spendingLimits.tokens` on web, an `Actions.token*` action otherwise. |
+
+Both carry `signer` (`'session'`, or `'authority'` for a Delegate's send on web) and the
+failure as it came as `cause`. A send whose outcome is unknown stays
+`TransactionOutcomeUnknownError`: a refusal from a later attempt does not show that an
+earlier one did not land. On web, an Admin key has no policy, so its 3037 or 3038 is
+reported as one of these only when the logs name LazorKit. The web paymaster does not
+resend a 3037 or 3038 (the same bytes move the same assets), unless an earlier attempt's
+answer was lost. `UNLISTED_SOL_OUTFLOW_CODE` (3037) and `UNLISTED_TOKEN_OUTFLOW_CODE` (3038)
+are exported too.
+
 ## Connecting and the portal
 
 | Error | Package | Thrown when | What to do |
@@ -115,21 +139,46 @@ running call; "No wallet connected" also sets `error`. (Web since 3.3.0; on mobi
 Calls through `LazorkitWalletAdapter` and the Wallet Standard wallet are not refused:
 they queue behind the passkey's running transaction.
 
+## Signing a message
+
+| Error | Package | Thrown when | What to do |
+| ----- | ------- | ----------- | ---------- |
+| `Error('The portal did not sign this message: its reply is over another challenge.')` | both (3.3.1 / 2.3.1) | The portal's reply to `signMessage` is not a `webauthn.get` over `signedMessageChallenge(message)`. The SDK does not hand such a reply to the app. | Ask the user to sign again; if it repeats, check that `portalUrl` is the LazorKit portal. |
+| `PortalCancelledError` | both | The user closed the portal before it answered. | Treat as a cancel. |
+
+`verifyWalletMessage` resolves `false` for a signature that does not check out, and
+**rejects** when it cannot read the chain (an RPC that refuses `getProgramAccounts`, a
+network error): treat a rejection as not verified, never as verified. A signature made
+before 3.3.1 / 2.3.1 is over another challenge and is always `false`. See
+[useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+
 ## Kept session and authority keys (web)
 
 `@lazorkit/wallet` keeps each key `createSession` and `addAuthority` generate with the
 wallet it was registered for, and uses it only while that wallet is connected. Otherwise
-the call rejects before anything is signed or sent:
+the call rejects, and what the key signed is not sent:
 
 | Error | Thrown by | Carries | What to do |
 | ----- | --------- | ------- | ---------- |
-| `KeyWalletMismatchError` (`code: 'KEY_WALLET_MISMATCH'`) | `signAndSendWithSession`, `signAndSendWithAuthority`, and `revokeSession()` without `sessionPda`, when the kept key's wallet is not the connected one. The key checks again when it signs, so a disconnect or a switch while a send is being built stops it too. `onFail` runs once `isSigning` is `false`. | `slot` (`'session'` or `'authority'`), `reason`, `keyWallet` (the key's wallet PDA), `connectedWallet` (the connected one, `undefined` when none) | `'no-wallet'` or `'other-wallet'`: connect `keyWallet`, or create a session (add an authority) for the connected wallet. `'unbound'`: a key whose wallet could not be confirmed (one 3.2 left, or a stored record whose PDA does not derive from the wallet it names). It is never used: create the session (add the authority) again, which replaces it. `forgetStoredKeys()` would delete the other kept key too. |
+| `KeyWalletMismatchError` (`code: 'KEY_WALLET_MISMATCH'`) | `signAndSendWithSession`, `signAndSendWithAuthority`, and `revokeSession()` without `sessionPda`, when the kept key's wallet is not the connected one. The key checks again when it signs, and (3.4.0) right before each attempt to send what it signed, so a disconnect or a switch while a send is being built stops it too. A send that loaded its key before any disconnect — `disconnect()`, `LazorkitWalletAdapter.disconnect()` or `standard:disconnect` — neither signs nor sends after it (3.4.0). `onFail` runs once `isSigning` is `false`. | `slot` (`'session'` or `'authority'`), `reason`, `keyWallet` (the key's wallet PDA), `connectedWallet` (the connected one, `undefined` when none) | `'no-wallet'` or `'other-wallet'`: connect `keyWallet`, or create a session (add an authority) for the connected wallet. `'disconnected'` (3.4.0): the key's wallet is connected again, but a disconnect ran during this send: send again. `'unbound'`: a key whose wallet could not be confirmed (one 3.2 left, or a stored record whose PDA does not derive from the wallet it names). It is never used: create the session (add the authority) again, which replaces it. `forgetStoredKeys()` would delete the other kept key too. |
+
+A refusal before the key signed says "Nothing was signed or sent."; one after it says "The
+transaction it had signed was not sent." If an earlier attempt to send it got no answer
+from the paymaster, that attempt may still land: the send rejects with
+`TransactionOutcomeUnknownError` instead, and is not sent again.
 
 Match it with `isKeyWalletMismatchError(e)`. A kept session key whose session has
 expired is deleted when it is next read, and the call rejects with "No session key found:
 the stored session … expired after slot …": create a new session. Where the keys are
 kept and when they are deleted:
 [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
+
+<Callout type="info" title="Changed in 3.4.0">
+  In 3.3.1, `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` left the store's
+  wallet connected, so a send that had already loaded its key went on to sign and send
+  after them; the store's own `disconnect()` stopped such a send only at signing. See
+  [Upgrading to 3.4.0](/react-sdk/upgrading#upgrading-to-340).
+</Callout>
 
 <Callout type="info" title="Changed in 3.3.0">
   In 3.2.1, `signAndSendWithSession` and `signAndSendWithAuthority` signed with the
@@ -160,6 +209,7 @@ a v1 wallet's 4018 as `V1WalletRetiredError`, with the original error as its `ca
 | Thrown by | Error | Cause |
 | --------- | ----- | ----- |
 | `createSession` (all SDKs) | `Error` | No limits and no `unrestricted: true`. A session without actions can spend the whole vault. |
+| `createSession` (web, 3.4.0+) | `Error`, `TypeError`, `RangeError` | `spendingLimits` it cannot register: a `tokens` entry with no limit, or whose `mint` is not an address; a mint named twice; an amount outside a u64; a window of 0 slots; more than 16 actions; more than 244 bytes of actions, which would not fit in the transaction beside the passkey's response. Checked before anything is read, also for a `sessionKey` that already has a session. |
 | `addAuthority` / `addAuthorityEd25519` | `Error` | No `role`, or one that is not `ROLE_OWNER` (0), `ROLE_ADMIN` (1) or `ROLE_SPENDER` (2); `ROLE_OWNER` on a v2 wallet, where neither method adds an Owner (on v1 they do). The message says what each rank may do. Checked before anything is read. |
 | `addAuthority` / `addAuthorityEd25519` | `Error` | `ROLE_SPENDER` (Delegate) on a v2 wallet without a `policy`; a `policy` on a v1 wallet; a v1 wallet without `unrestricted: true`. |
 | `authorizeAndExecute` / `authorizeDeferred` | `RangeError` | `expiryOffset` outside 10–9000 slots. |
@@ -228,7 +278,7 @@ The program returns these as `custom program error: 0x…` (hex) or
 | 3018 | `0xbca` | `DeferredAuthorizationNotExpired` | Reclaim attempted before the window ended. |
 | 3019 | `0xbcb` | `InvalidSessionAccount` | The session account does not match the session key or wallet. |
 
-### Spending limits and policies (3020–3036)
+### Spending limits and policies (3020–3038)
 
 These apply to session keys and to Delegate authorities, which run the same action engine.
 
@@ -246,11 +296,13 @@ These apply to session keys and to Delegate authorities, which run the same acti
 | 3029 | `0xbd5` | `ActionTokenMaxPerTxExceeded` | Token outflow in one execute exceeds `TokenMaxPerTx`. |
 | 3030 | `0xbd6` | `SessionVaultOwnerChanged` | An inner instruction tried to reassign the vault (`System::Assign`). |
 | 3031 | `0xbd7` | `SessionVaultDataLenChanged` | An inner instruction changed the vault's data length. |
-| 3032 | `0xbd8` | `SessionTokenAuthorityChanged` | An inner instruction changed a vault token account's owner, delegate or close authority. |
+| 3032 | `0xbd8` | `SessionTokenAuthorityChanged` | An inner instruction changed a vault token account's owner, delegate or close authority. From the program release that adds 3037 and 3038: anything about a vault token account passed writable but its balance, or a delegate or close authority on a token account that became the vault's during the transaction. |
 | 3033 | `0xbd9` | `DelegateRequiresPolicy` | A Delegate (`ROLE_SPENDER`) was added without a policy. |
 | 3034 | `0xbda` | `PolicyBearingAuthorityCannotDelegate` | An authority with a policy tried to add an authority. |
 | 3035 | `0xbdb` | `PolicyRankMismatch` | A policy was attached to an Owner or Admin. Only Delegates carry one. |
 | 3036 | `0xbdc` | `SessionNotExpired` | `CloseExpiredSession` on a session that is still live. |
+| 3037 | `0xbdd` | `ActionUnlistedSolOutflow` | The vault's SOL would fall, rent for a new account included, and the policy has no `Sol*` action. From the v2 program release that adds it, not deployed yet. See `UnlistedSolOutflowError`. |
+| 3038 | `0xbde` | `ActionUnlistedTokenOutflow` | The vault's balance of a mint would fall, and no `Token*` action names that mint (wSOL is a mint). From the same release. See `UnlistedTokenOutflowError`. |
 
 ### Protocol and deployment (4001–4018)
 
@@ -296,6 +348,8 @@ console.log(code, name, Object.keys(ERROR_NAMES).length);
 ```
 
 `extractErrorCode` reads the error's text only: it returns `null` for a
-`{ InstructionError: … }` object. In `@lazorkit/sdk-legacy` 1.3.1, `ERROR_NAMES` has no
-entry for 3036 or 4018, so `errorFromCode` returns `undefined` for them; use the tables
-above.
+`{ InstructionError: … }` object. `ERROR_NAMES` and `errorFromCode` name 3036
+(`SessionNotExpired`), 3037, 3038 and 4018 (`RetiredDeployment`) in `@lazorkit/sdk-legacy`
+1.4.0, `@lazorkit/wallet` 3.4.0 and `@lazorkit/wallet-mobile-adapter` 2.4.0. In earlier
+releases they have no entry for these codes, and `errorFromCode` returns `undefined`; use
+the tables above.

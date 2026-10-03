@@ -1,6 +1,6 @@
 ---
 title: Session Keys
-description: Scoped, time-bound delegation keys — action types, spending limits, deferred execution, and revocation.
+description: Scoped, time-bound delegation keys — action types, spending limits, what a policy bounds, deferred execution, and revocation.
 ---
 
 A session key is an ephemeral Ed25519 keypair with an expiry slot and a list of action
@@ -27,7 +27,7 @@ prompt per transaction**.
 1. Owner/Admin creates a Session PDA with a fresh Ed25519 public key + action list
 2. The session's secret key is kept by whoever will sign with it (see below)
 3. The holder signs Execute with the session key — no passkey prompt
-4. The program enforces the action list on every inner instruction
+4. The program enforces the action list on every Execute the key signs
 5. At the expiry slot the session stops signing; its account can then be closed
 ```
 
@@ -39,10 +39,13 @@ prompt per transaction**.
   `keyStorage="memory"`). The key is bound to the wallet that created the session: it
   signs only while that wallet is connected, and `KeyWalletMismatchError` is thrown
   otherwise. `disconnect()` deletes it (also one whose session lands after it) unless you
-  pass `disconnect({ keepSessionKeys: true })`, a key whose session has expired is deleted
-  when it is next read, and `forgetStoredKeys()` deletes every key the SDK keeps. Pass
-  `sessionKey` (a public key) to register a key your backend holds instead; it is never
-  stored. See [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
+  pass `disconnect({ keepSessionKeys: true })`, and so, since 3.3.1, do the wallet
+  adapter's `disconnect()` and the Wallet Standard's, which since 3.4.0 disconnect the
+  store too. A send still running when the wallet is disconnected, whichever way, neither
+  signs nor sends after it (3.4.0). A key whose session has expired is deleted when it is
+  next read, and `forgetStoredKeys()` deletes every key the SDK keeps. Pass `sessionKey`
+  (a public key) to register a key your backend holds instead; it is never stored. See
+  [What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
 - **React Native SDK and the contract SDKs:** you generate the keypair and keep the secret
   key yourself, in secure storage (`expo-secure-store`, a KMS, a backend vault). Keep the
   wallet it belongs to with it, use it only while that wallet is connected, and delete it
@@ -68,6 +71,10 @@ Every SDK refuses to create a session with **no actions** unless you pass
 it expires. (Since `@lazorkit/wallet` 3.0.0, `@lazorkit/wallet-mobile-adapter` 2.0.0 and
 `@lazorkit/sdk-legacy` 1.0.0.)
 
+Name every asset the session may spend: SOL with a `Sol*` action, and each token by its
+mint. From the v2 program release that adds errors 3037 and 3038, an asset the actions do
+not name cannot leave the wallet; see [What a policy bounds](#what-a-policy-bounds).
+
 ### From the React Native hook
 
 The RN SDK takes the raw `SessionAction[]` catalogue:
@@ -86,6 +93,7 @@ const { sessionPda } = await createSession(
     actions: [
       Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
       Actions.solMaxPerTx(500_000_000n),
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 50_000_000n }), // 50 USDC a transaction
       Actions.programWhitelist(JUPITER_PROGRAM_ID),
     ],
   },
@@ -93,30 +101,39 @@ const { sessionPda } = await createSession(
 );
 ```
 
-Persist `sessionKp.secretKey` in secure storage along with `sessionPda`.
+Persist `sessionKp.secretKey` in secure storage along with `sessionPda`. The adapter does
+not check the actions' size before the portal opens: keep them within
+[244 bytes](#how-many-actions-fit).
 
 ### From the React hook
 
-The React SDK takes a higher-level `SpendingLimits` wrapper for SOL limits:
+The React SDK takes a higher-level `SpendingLimits` wrapper: SOL limits, and since 3.4.0
+`tokens`, one entry per mint the session may spend.
 
 ```ts
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
 const { sessionPda, sessionPublicKey } = await createSession({
   expiresInSlots: 216_000n,                 // ~24h; default 50,000 slots
   spendingLimits: {
-    solLifetimeCap: 5_000_000_000n,         // 5 SOL total
-    solPerTxMax: 500_000_000n,              // 0.5 SOL per tx
+    solPerTxMax: 500_000_000n,              // 0.5 SOL per tx, rent the vault pays included
     solRecurring: {
       limit: 1_000_000_000n,                // 1 SOL per window
       windowSlots: 216_000n,                // 24h window
     },
+    // 5 USDC per tx, 100 USDC in all. Amounts in the mint's base units.
+    tokens: [{ mint: USDC, perTxMax: 5_000_000n, lifetimeCap: 100_000_000n }],
   },
 });
 ```
 
-The React hook covers SOL limits only. For token caps or program filters, build the
-session with `LazorKitClient` from `@lazorkit/sdk-legacy` and the `Actions` catalogue
-(below): with an Ed25519 admin key, or with `prepareCreateSession` and a passkey
-assertion you collect yourself.
+`createSession` checks the limits before anything is read or the passkey is asked: a
+`tokens` entry with no limit, a mint named twice, an amount outside a u64, a window of 0
+slots, more than 16 actions or more than [244 bytes](#how-many-actions-fit) of actions
+throws. Nothing is added that you did not ask for. Program filters and per-action
+expiries are not in `SpendingLimits`: for those, build the session with `LazorKitClient`
+from `@lazorkit/sdk-legacy` and the `Actions` catalogue (below), with an Ed25519 admin key
+or with `prepareCreateSession` and a passkey assertion you collect yourself.
 
 ### From the low-level SDK
 
@@ -145,7 +162,11 @@ see [web3.js v1 › Session Keys](/web3js-v1/session-keys).
 
 <Callout type="warn" title="Actions are immutable">
   Once a session is created, its action list can't be modified. To change limits, revoke
-  the session and create a new one.
+  the session and create a new one. For a key you hold (`sessionKey` on web, every key on
+  mobile), revoke the old session before you register the key again, or use a new key:
+  the program does not create a second session for a key while the first exists, and
+  `@lazorkit/wallet` resolves with that existing session, as it was made, whatever limits
+  you pass.
 </Callout>
 
 ---
@@ -154,7 +175,8 @@ see [web3.js v1 › Session Keys](/web3js-v1/session-keys).
 
 Actions constrain what a session key — or a Delegate authority, whose policy is the same
 kind of list — can do. The program checks them around every inner instruction during
-`Execute`. **Max 16 actions**, up to 2048 bytes.
+`Execute`. **Max 16 actions**, up to 2048 bytes; a policy a passkey approves must also fit
+in [244 bytes](#how-many-actions-fit).
 
 | Action                   | Enforces                                                                    |
 | ------------------------ | --------------------------------------------------------------------------- |
@@ -172,11 +194,14 @@ kind of list — can do. The program checks them around every inner instruction 
   (swap out + swap back) can't bypass the cap by ending at the same balance.
 </Callout>
 
-<Callout type="warn" title="A list bounds only what it names">
-  A whitelist with no `SolLimit` leaves SOL uncapped; a SOL cap leaves tokens uncapped.
-  Write a value cap for every asset the key can reach. Whatever the actions, the program
-  also refuses an inner instruction that reassigns the vault or changes a vault token
-  account's owner, delegate or close authority (3030–3032).
+<Callout type="warn" title="Name every asset the key may spend">
+  On the v2 program deployed today, a list bounds only what it names: a whitelist with no
+  `SolLimit` leaves SOL uncapped, and a SOL cap leaves tokens uncapped. From the v2
+  program release that adds errors 3037 and 3038, an asset the list does not name cannot
+  leave at all ([below](#what-a-policy-bounds)). Either way, give every asset the key
+  should spend a limit, and nothing else. Whatever the actions, the program also refuses
+  an inner instruction that reassigns the vault or changes a vault token account's owner,
+  delegate or close authority (3030–3032).
 </Callout>
 
 ### Builder helpers
@@ -214,6 +239,86 @@ Actions have their own `expiresAt` independent of session expiry.
 
 ---
 
+## What a policy bounds
+
+A session's actions, and a Delegate's policy, name what may leave the wallet. From the
+**v2 program release that adds errors 3037 and 3038**, nothing they do not name may.
+
+<Callout type="warn" title="Not deployed yet">
+  That program release is not deployed on devnet or mainnet yet
+  ([Networks & versions](/networks)). Until it is, an asset the actions do not name is not
+  bounded at all: a session with token limits only can spend all the wallet's SOL, and one
+  with SOL limits only any token. Write the limits you want now. That release also
+  tightens how named token limits are measured, so until it is deployed, treat the token
+  limits of a session or Delegate as weaker than this page describes.
+</Callout>
+
+From that release, for an `Execute` signed by a session with actions or by a Delegate:
+
+- **SOL** leaves the vault only when a `Sol*` action (`SolLimit`, `SolRecurringLimit`,
+  `SolMaxPerTx`) names it. Without one, a transaction that lowers the vault's SOL balance
+  fails with `ActionUnlistedSolOutflow` (3037), rent the vault pays for a new account
+  included (a recipient's token account, say). The network fee is the fee payer's, not the
+  vault's.
+- **A token** leaves only when a `Token*` action names its mint. Any other mint fails with
+  `ActionUnlistedTokenOutflow` (3038). wSOL is a mint of its own: a SOL action does not
+  name it, and a wSOL action does not name SOL.
+- **Net per asset, over one transaction**, and what comes in always passes. A swap needs
+  an action for the mint it sells, and a SOL action when the vault pays the rent of its
+  output token account (or create that account first, in an instruction the fee payer
+  funds). A program whitelist names programs, not assets.
+- **The vault's token accounts** that a transaction passes writable may change only their
+  balance: owner, delegate, close authority and state stay as they were
+  (`SessionTokenAuthorityChanged`, 3032).
+- **No opt-out.** No action lifts the rule. A key that must move any asset is an unbounded
+  one: an Owner, an Admin, or a session created with `unrestricted: true`, which has no
+  policy and none of these bounds.
+
+Value the vault controls in other ways than its own SOL and the token accounts it owns
+(stake or nonce accounts it is the authority of, positions in other programs, authorities
+it holds over mints or programs) is bounded only by the program whitelist. Value such an
+account releases into the vault during a transaction can leave again in that same
+transaction, whatever the actions name. Keep the whitelist narrow for a key on such a
+wallet. The full rule set is in
+[`docs/Architecture.md` › What a policy bounds](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/Architecture.md#what-a-policy-bounds).
+
+The wallet SDKs report the two refusals as `UnlistedSolOutflowError` and
+`UnlistedTokenOutflowError` (`@lazorkit/wallet` 3.4.0, `@lazorkit/wallet-mobile-adapter`
+2.4.0); see [Errors](/errors#assets-a-policy-does-not-name).
+
+### Sessions and Delegates made before that release
+
+A session or Delegate whose actions name SOL only can move no token once the release is
+deployed. That includes every session `@lazorkit/wallet`'s `SpendingLimits` made before
+3.4.0, which had no `tokens`. Actions cannot be changed: revoke the session (remove the
+Delegate) and register one that names each mint it spends. A session key the React SDK
+generates is new each time. For a key you hold, revoke its session first or register a new
+key: the program does not create a second session for a key while the first exists.
+
+### How many actions fit
+
+A policy holds at most 16 actions, and at most one of each kind per mint. When a passkey
+approves the transaction that registers it (`CreateSession`, or `AddAuthority` for a
+Delegate), the actions share that 1232-byte transaction with the passkey's response, whose
+`clientDataJSON` the browser writes (up to about 300 bytes). Keep them within **244
+bytes**:
+
+| Action | Bytes |
+| ------ | ----- |
+| `SolLimit`, `SolMaxPerTx` | 19 |
+| `SolRecurringLimit` | 43 |
+| `TokenLimit`, `TokenMaxPerTx` | 51 |
+| `TokenRecurringLimit` | 75 |
+| `ProgramWhitelist`, `ProgramBlacklist` | 43 |
+
+So `SolMaxPerTx` with `TokenMaxPerTx` and `TokenLimit` for 2 mints (223 bytes), or
+`SolMaxPerTx` with `TokenMaxPerTx` for 4 mints (223). `@lazorkit/wallet`'s `createSession`
+refuses a `SpendingLimits` over 244 bytes before the passkey is asked (3.4.0). Its
+`addAuthority`, the React Native SDK and the contract SDKs do not check: actions that do not
+fit fail after the user approved.
+
+---
+
 ## Common session patterns
 
 ### Unrestricted session (no limits)
@@ -242,12 +347,16 @@ await createSession(
     actions: [
       Actions.programWhitelist(JUPITER_V6_PROGRAM_ID),
       Actions.programWhitelist(TOKEN_PROGRAM_ID),  // SPL transfers for ATAs
-      Actions.solMaxPerTx(1_000_000_000n),
+      Actions.solMaxPerTx(1_000_000_000n),         // SOL it sells, and rent for output accounts
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 100_000_000n }), // the token it sells
     ],
   },
   { redirectUrl: 'myapp://cb' },
 );
 ```
+
+Name each mint the swapper sells; from the program release that adds error 3038, a swap
+that sells any other token fails.
 
 ### Usage-capped session (1 SOL per day)
 
@@ -257,6 +366,7 @@ await createSession(
     sessionKey: sessionKp.publicKey,
     expiresAtSlot: currentSlot + 1_512_000n, // ~7 days at 400 ms a slot
     actions: [
+      // SOL only: from the program release that adds error 3038, it moves no token.
       Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
     ],
   },
@@ -275,7 +385,8 @@ await createSession(
       Actions.tokenLimit({ mint: USDC_MINT, remaining: 100_000_000n }),     // 100 USDC
       Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 10_000_000n }),         // 10 USDC per tx
       Actions.programBlacklist(SUSPICIOUS_PROGRAM_ID),
-      // SOL and other tokens are not capped by this list: add caps for them too.
+      // No SOL action: from the program release that adds error 3037, no SOL can leave,
+      // rent included, and no other token (3038). Until then neither is capped.
     ],
   },
   { redirectUrl: 'myapp://cb' },
@@ -310,9 +421,11 @@ const sig = await signAndSendWithSession({ instructions: [ix] });
 The SDK signs with the session key it kept during `createSession`, only while the wallet
 that created the session is connected. There is one slot: a new `createSession` replaces
 the kept key, and `revokeSession()` and `disconnect()` delete it (unless
-`disconnect({ keepSessionKeys: true })`). The session itself stays on chain, within its
-limits, until it expires or is revoked: on a shared device, revoke sessions when the user
-signs out.
+`disconnect({ keepSessionKeys: true })`). A send still running when the wallet is
+disconnected neither signs nor sends after it, even if the wallet is connected again by
+then (3.4.0): it rejects with `KeyWalletMismatchError`. The session itself stays on chain,
+within its limits, until it expires or is revoked: on a shared device, revoke sessions
+when the user signs out.
 
 ### Low-level
 
@@ -445,7 +558,7 @@ After expiry, **anyone** may close the session with `CloseExpiredSession` (instr
 18, protocol v2) and keep the rent: the account authorises nothing any more. A session is
 closable only once the slot is strictly past its expiry; before that the program refuses
 with `SessionNotExpired` (3036). `@lazorkit/sdk` exports `createCloseExpiredSessionIx`;
-`@lazorkit/sdk-legacy` 1.3.1 has no public builder for it.
+`@lazorkit/sdk-legacy` 1.4.0 has no public builder for it.
 
 ---
 
@@ -474,5 +587,7 @@ whoever calls `CloseExpiredSession` first.
 | `0xbcd ActionProgramNotWhitelisted`     | The call targets a program outside the whitelist — add it or drop the filter. |
 | `0xbd6`–`0xbd8` (3030–3032)             | An inner instruction tried to reassign the vault or a vault token account's authority. |
 | `0xbdc SessionNotExpired`               | `CloseExpiredSession` on a live session.                                    |
+| `0xbdd ActionUnlistedSolOutflow`        | The vault's SOL would fall (rent included) and no `Sol*` action names SOL. From the program release that adds it. `UnlistedSolOutflowError` in the wallet SDKs. |
+| `0xbde ActionUnlistedTokenOutflow`      | A token would leave whose mint no `Token*` action names. From the same release. `UnlistedTokenOutflowError`. |
 
 Full map in [Errors](/errors#program-error-codes).

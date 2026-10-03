@@ -10,7 +10,7 @@ types (`Address`, `Instruction`, `Rpc`) and tree-shakable module functions, and 
 the same transactions.
 
 <Callout type="warn" title="Release candidate, protocol v2 only">
-  - Current release **1.0.0-rc.5**, on both the `latest` and `next` npm tags. Its surface is
+  - Current release **1.0.0-rc.6**, on both the `latest` and `next` npm tags. Its surface is
     complete for protocol v2 and covered by unit tests and a local-validator suite; three
     public paths are not covered by tests yet (`revokeSession`, the one-shot
     `transferOwnership`, `signWithSecp256r1`).
@@ -72,16 +72,26 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
 - Passkey signing with `prepare*` / `finalize*`, and the challenge-read options
   `minContextSlot` (a `Slot`, i.e. `bigint`, here) and `commitment` — see
   [Passkey signing](/web3js-v1/passkey-signing).
-- Finding a returning user's wallet: `findOwnPasskeyWallet`, `createOwnershipChallenge`,
+- Finding a returning user's wallet: `findOwnPasskeyWallet`,
+  `createTaggedOwnershipChallenge` (rc.6+; with `OWNERSHIP_PROOF_DOMAIN`),
   `verifyOwnershipProof`, `pickOwnWallet`, `resolvePasskeyPublicKey`.
+  `createOwnershipChallenge()` is unchanged (32 random bytes) and deprecated as a passkey
+  challenge; proofs over either form verify.
+- The message challenge (rc.6+): `signedMessageChallenge`, `SIGNED_MESSAGE_DOMAIN`,
+  `SignedMessageInput`, the same bytes as sdk-legacy 1.4.0 and the wallet packages. See
+  [Passkey signing › Messages and ownership proofs](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge).
 - Sessions (no actions throws without `unrestricted: true`), Delegate policies, deferred
-  execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`.
+  execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`. A
+  policy names what may leave the vault: from the v2 program release that adds errors 3037
+  and 3038 (not deployed yet), nothing it does not name may
+  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)).
 - `MinContextSlotNotReachedError` and the error codes on [Errors](/errors).
 
 ## What is different
 
 - **Smaller surface:** no `parseActions`, `findAuthoritiesByWallet` or
-  `getRecoveryStatus` yet — use `@lazorkit/sdk-legacy` for those.
+  `getRecoveryStatus` yet, and no `ERROR_NAMES` table — use `@lazorkit/sdk-legacy` for
+  those.
 - **More low-level builders are exported**, including `createCloseExpiredSessionIx` (close
   an expired session and keep its rent) and `createMigrateWalletIx`.
 - **Account decoders:** `decodeWalletAccount`, `decodeAuthorityAccount`,

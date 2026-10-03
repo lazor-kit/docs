@@ -3,21 +3,21 @@ title: Upgrading to 3.x
 description: What changes when you move @lazorkit/wallet from 2.x to 3.x, release by release, and what to change in your app.
 ---
 
-`@lazorkit/wallet` 3.0.0 is the release that speaks protocol v2. 3.3.0 is the current
+`@lazorkit/wallet` 3.0.0 is the release that speaks protocol v2. 3.4.0 is the current
 release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md)
 and the [Changelog](/changelog) here.
 
 ```bash
-npm install @lazorkit/wallet@^3.3.0 @solana/web3.js@^1.99.0
+npm install @lazorkit/wallet@^3.4.0 @solana/web3.js@^1.99.0
 ```
 
 `@solana/web3.js` must be **1.99 or later** (3.0.1): `@solana/wallet-adapter-base`
 0.9.28 requires it, and an app pinned to 1.98.x gets `npm ERESOLVE`. The package also
 declares `react`, `react-dom`, `zustand`, `@solana/wallet-adapter-base`,
-`@solana/wallet-standard-features` and `@wallet-standard/*` as peers. It declares
-`@solana/kit`, `@solana/kora` and `@solana-program/token` too, but the bundle never loads
-them.
+`@solana/wallet-standard-features` and `@wallet-standard/*` as peers. Since 3.3.1 it no
+longer declares `@solana/kit`, `@solana/kora` or `@solana-program/token`, which it never
+loaded: it installs next to `@solana/kit` 6, 7 or 8 without `--legacy-peer-deps`.
 
 ## Checklist
 
@@ -56,6 +56,12 @@ them.
    the `assert*` / `validate*` utilities and others) were already dropped in 2.1.0.
 10. **`PROGRAM_ID` / `PROGRAM_ADDRESS` are the v2 mainnet id.** Use the `PROGRAM_ID_*`
     constants ([Networks & versions](/networks)) when you need a specific one.
+11. **Check message signatures with `verifyWalletMessage`** (3.3.1), never with the
+    deprecated `verifyMessage`. See [below](#upgrading-to-331).
+12. **Name every mint a session or Delegate spends** (3.4.0): `spendingLimits.tokens`, or
+    a `Token*` action in a policy. From the v2 program release that adds errors 3037 and
+    3038, an asset the limits do not name cannot leave the wallet. See
+    [below](#upgrading-to-340).
 
 ## Release by release
 
@@ -68,20 +74,134 @@ them.
 | **3.2.0** (2026-09-30) | Deferred window: `expiryOffset` 10–9000 slots, default 1500 (was 300). `DeferredExpiredError`, `isDeferredExpiredError`, `MIN_/MAX_DEFERRED_EXPIRY_SLOTS`, `DEFERRED_EXPIRED_CODE`. |
 | **3.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext` on TX2 errors. |
 | **3.3.0** (2026-10-02) | **Breaking:** `addAuthority` needs a `role`. Session and authority keys kept as non-extractable WebCrypto keys in IndexedDB, not plaintext `localStorage`: `keyStorage`, `forgetStoredKeys()`. A kept key signs only for its own wallet: `KeyWalletMismatchError`, `isKeyWalletMismatchError`. `disconnect` deletes the session key unless `keepSessionKeys`; expired session keys are deleted. Callbacks run once the action is over, one per call. The `is*Error` predicates recognise the SDK's own errors through wrappers. A 4018 is not resent. See [below](#upgrading-to-330). |
+| **3.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`; `verifyMessage` and `verifySignatureBrowser` deprecated. Ownership-proof challenges are domain-separated too. `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` delete the session key. The sign dialog sends the stored credentials to the portal's origin only. Peers `@solana/kit`, `@solana/kora`, `@solana-program/token` dropped. See [below](#upgrading-to-331). |
+| **3.4.0** (2026-10-03) | **Security:** a session or authority send running when the wallet is disconnected, whichever way, neither signs nor sends after it (`KeyWalletMismatchReason` `'disconnected'`), and `LazorkitWalletAdapter.disconnect()` / `standard:disconnect` disconnect the store too. `SpendingLimits.tokens`, checked before the prompt (at most 244 bytes of actions); `spendingLimitsToActions`; `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for 3037 / 3038, not resent. **Changed:** `createSession` with a `sessionKey` that already has a session checks the limits first. `Paymaster` option `beforeAttempt`. See [below](#upgrading-to-340). |
 
 ## Keys the SDK keeps in the browser
 
 `createSession` (without `sessionKey`) and `addAuthority` generate an Ed25519 key and keep
 it, so that `signAndSendWithSession` / `signAndSendWithAuthority` sign without a prompt.
 Since 3.3.0 each key is a non-extractable WebCrypto key in IndexedDB, signs only while the
-wallet it was registered for is connected, and the session key is deleted at `disconnect`:
-see [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser). A
+wallet it was registered for is connected, and the session key is deleted at `disconnect`
+(also through wallet-adapter and the Wallet Standard, since 3.3.1, which since 3.4.0
+disconnect the store too). Since 3.4.0 a send that loaded its key before any disconnect
+neither signs nor sends after it. See
+[What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser). A
 `sessionKey` you pass is never stored.
 
 3.2.1 and earlier kept the secret key in `localStorage` as plain text, under
 `lazorkit-session` and `lazorkit-authority`, where any script on your origin could read
 it, and `disconnect` did not remove it. 3.3.0 moves such a key to IndexedDB (item 5
 below).
+
+## Upgrading to 3.4.0
+
+From 3.3.1. Nothing was removed. Items 1 and 2 change what a disconnect stops; items 3 to
+6 how a session or Delegate names what it may spend, and item 4 has a behaviour change for
+a `sessionKey` of your own. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md#340).
+
+1. **A wallet-adapter or Wallet Standard sign-out disconnects the store.**
+   `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` now disconnect it as
+   `useWallet().disconnect()` does: `useWallet()` shows no wallet (also after a reload), a
+   `connect` the store is running rejects with `PortalCancelledError`, `error` is cleared,
+   and `isSigning` is left to the action running. A kept key signs only once its wallet is
+   connected again. In 3.3.1 they deleted the session key but left the store connected, so
+   the authority key, and a session key kept with `keepSessionKeys`, went on signing for
+   the wallet with no reconnect. If your app reads `useWallet()` next to a wallet-adapter
+   UI, expect it to disconnect with the adapter. `keepSessionKeys` still decides only
+   whether the session key is deleted.
+2. **A send running at a disconnect is not finished.** A `signAndSendWithSession` or
+   `signAndSendWithAuthority` that loaded its kept key before any disconnect (the store's,
+   the adapter's, the Wallet Standard's) is refused right before the key signs, and again
+   right before each attempt to send, retries included. It rejects with
+   `KeyWalletMismatchError`: `reason` `'no-wallet'`, or the new `'disconnected'` when the
+   same wallet is connected again by then. Handle `'disconnected'` by sending again. A
+   refusal after the key signed says "The transaction it had signed was not sent." If an
+   earlier attempt got no answer from the paymaster, that attempt may still land: the send
+   rejects with `TransactionOutcomeUnknownError`, as before, and is not sent again. A
+   `switch` on `KeyWalletMismatchReason` gains a case.
+3. **Name every mint a session spends.** `SpendingLimits` takes `tokens`: one entry per
+   mint, `{ mint, lifetimeCap?, perTxMax?, recurring?: { limit, windowSlots } }`, amounts
+   in the mint's base units. wSOL is a mint of its own. From the v2 program release that
+   adds errors 3037 and 3038, a session moves SOL only with a SOL limit (rent the vault
+   pays for a new account included) and a token only with a `tokens` entry for its mint;
+   that release is not deployed yet, and until it is an asset the limits do not name is
+   not bounded at all. A session made with SOL limits only, as every session made with
+   `SpendingLimits` before 3.4.0, will move no token once the program release is
+   deployed: create a new one that names the mints it spends. See
+   [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+4. **`createSession` checks the limits before anything is read or the passkey is asked**,
+   and throws on a `tokens` entry with no limit, a mint named twice, an amount outside a
+   u64, a window of 0 slots (which the program refuses), more than 16 actions, or more
+   than 244 bytes of actions: what fits in the transaction beside the passkey's response.
+   A SOL limit takes 19 bytes (`solRecurring` 43), a token's `lifetimeCap` or `perTxMax`
+   51, its `recurring` 75. **Behaviour change** for a `sessionKey` of your own that already
+   has a session: the limits are checked before the SDK looks for that session, so a call
+   with no `spendingLimits` (and not `unrestricted`), or invalid ones, now throws where
+   3.3.1 resolved with the existing session. With valid limits it still resolves with the
+   session as it was made, whatever limits you pass: to change an external key's limits,
+   revoke its session (`revokeSession({ sessionPda })`) or register a new key.
+5. **Delegate policies.** A `policy` for `addAuthority` names what may leave the wallet in
+   the same way: name SOL with a `Sol*` action and each mint with a `Token*` action, or
+   build it with `serializeActions(spendingLimitsToActions(limits))` (new). Keep it within
+   244 bytes: `addAuthority` does not check its size, and a policy that does not fit fails
+   after the user approved.
+6. **New errors** for the program's refusals, which `signAndSendWithSession` and
+   `signAndSendWithAuthority` reject with: `UnlistedSolOutflowError` (3037, "This session is
+   not allowed to spend SOL") and `UnlistedTokenOutflowError` (3038, "This session is not
+   allowed to spend this token"; "This key …" for a Delegate), with `signer` and the
+   original error as `cause`. Match them with `isUnlistedSolOutflowError` /
+   `isUnlistedTokenOutflowError`, which also recognise a raw 3037 / 3038 through wrappers.
+   A send whose outcome is unknown stays `TransactionOutcomeUnknownError`. The paymaster
+   does not resend a 3037 or 3038, unless an earlier attempt's answer was lost. See
+   [Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
+7. **`ERROR_NAMES` / `errorFromCode`** name 3036 (`SessionNotExpired`), 3037, 3038 and
+   4018 (`RetiredDeployment`).
+8. **A `Paymaster` you construct** takes `beforeAttempt` in its options: it runs right
+   before each attempt to send, retries included, and what it throws stops the send.
+
+## Upgrading to 3.3.1
+
+From 3.3.0. Nothing was removed, and no call changes shape; items 1 to 3 change what your
+server checks, and item 4 what a sign-out deletes. Full notes: the package
+[CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md#331).
+
+1. **Verify message signatures with `verifyWalletMessage`.** `signMessage` (the hook, the
+   store, `LazorkitWalletAdapter.signMessage` and the Wallet Standard `solana:signMessage`)
+   signs `signedMessageChallenge(message)`, a 58-byte challenge tagged
+   `LazorKit signed message v1`, never the message's bytes, so a message signature can no
+   longer be confused with a transaction approval. It resolves with a `SignMessageResult`:
+   `signature` and `signedPayload` as before, plus `clientDataJsonBase64` and
+   `authenticatorDataBase64`. Send all four to your server with the wallet and its
+   `credentialId`, and check them with `verifyWalletMessage`, which reads the passkey's key
+   from chain. A signature made by 3.3.0 or earlier does not verify: ask the user to sign
+   again. See [useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+2. **Stop authenticating with `verifyMessage` or `verifySignatureBrowser`.** Both are
+   deprecated. They check only that `signature` is over `signedPayload`, not which message
+   was signed, so any assertion the passkey ever made passes.
+3. **Adapter and Wallet Standard signatures** are still the UTF-8 bytes of a JSON object,
+   now with the four `SignMessageResult` fields: pass
+   `JSON.parse(new TextDecoder().decode(signature))` to `verifyWalletMessage`. They are not
+   a 64-byte Ed25519 signature: a LazorKit address is a program account, with no key to
+   sign with.
+4. **A wallet-adapter or Wallet Standard sign-out deletes the session key.**
+   `LazorkitWalletAdapter.disconnect()` (what a wallet-adapter UI's Disconnect calls) and
+   `standard:disconnect` delete the session key the SDK keeps, as `useWallet().disconnect()`
+   has since 3.3.0. To keep it, call `adapter.disconnect({ keepSessionKeys: true })` (new
+   type `LazorkitAdapterDisconnectOptions`); `standard:disconnect` takes no options, so it
+   always deletes it. The authority key is kept on both paths; `forgetStoredKeys()`
+   deletes it.
+5. **Ownership proofs.** `createOwnershipChallenge()` from `@lazorkit/wallet` returns
+   `LazorKit ownership proof v1` followed by 32 random bytes (59 bytes), and `connect` signs
+   that. `verifyOwnershipProof` accepts it unchanged.
+6. **Install.** The unused peers `@solana/kit` ^5, `@solana/kora` and
+   `@solana-program/token` are gone, so the wallet installs next to `@solana/kit` 8. Drop
+   `--legacy-peer-deps` if you added it for them.
+7. **The portal's origin.** The sign dialog posts the stored credential id, passkey public
+   key and wallet address only to the origin of `portalUrl`, never to whatever page its
+   iframe shows. A portal that stays on its own origin sees no change. Keep `portalUrl` an
+   absolute URL: with one that has no origin to address, nothing is posted.
 
 ## Upgrading to 3.3.0
 

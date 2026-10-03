@@ -5,7 +5,9 @@ description: The prepare / finalize flow, turning a WebAuthn assertion into a We
 
 Everything here is `@lazorkit/sdk-legacy` **1.x** (protocol v2): install it with
 `npm install @lazorkit/sdk-legacy@next`. The challenge-read options and key recovery are
-in **1.3.0** and later. `@lazorkit/sdk` (kit) has the same API with kit types.
+in **1.3.0** and later, the tagged message and ownership challenges in **1.4.0**.
+`@lazorkit/sdk` (kit) has the same API with kit types (the tagged challenges since
+1.0.0-rc.6).
 
 ## The three phases
 
@@ -200,7 +202,7 @@ few candidate keys (almost always two); a second signature over another challeng
 one. `resolvePasskeyPublicKey` (1.3.0) does that:
 
 ```ts
-import { createOwnershipChallenge, resolvePasskeyPublicKey, type OwnershipProof } from '@lazorkit/sdk-legacy';
+import { createTaggedOwnershipChallenge, resolvePasskeyPublicKey, type OwnershipProof } from '@lazorkit/sdk-legacy';
 
 async function assertion(challenge: Uint8Array, rpId: string, allow?: ArrayBuffer) {
   const credential = (await navigator.credentials.get({
@@ -221,8 +223,8 @@ async function assertion(challenge: Uint8Array, rpId: string, allow?: ArrayBuffe
   return { credential, proof };
 }
 
-const first = await assertion(createOwnershipChallenge(), rpId);
-const second = await assertion(createOwnershipChallenge(), rpId, first.credential.rawId); // same passkey
+const first = await assertion(createTaggedOwnershipChallenge(), rpId);
+const second = await assertion(createTaggedOwnershipChallenge(), rpId, first.credential.rawId); // same passkey
 const publicKey = resolvePasskeyPublicKey([first.proof, second.proof], rpId);
 if (!publicKey) throw new Error("Could not read this passkey's key: ask again, never guess");
 // publicKey: the 33-byte compressed key to pass to createWallet as compressedPubkey
@@ -240,7 +242,61 @@ if (!publicKey) throw new Error("Could not read this passkey's key: ask again, n
   `publicKey` is the stored key the assertion was just verified against.
 
 The React and React Native SDKs do this inside `connect` (one extra prompt) since
-`@lazorkit/wallet` 3.1.0 / `@lazorkit/wallet-mobile-adapter` 2.1.0.
+`@lazorkit/wallet` 3.1.0 / `@lazorkit/wallet-mobile-adapter` 2.1.0. On 1.3.x, which has no
+`createTaggedOwnershipChallenge`, use `createOwnershipChallenge()`: the recovery takes a
+challenge of either form.
+
+## Messages and ownership proofs: never a transaction challenge
+
+The program approves a transaction by the challenge in a passkey signature, and a passkey
+signs whatever challenge it is handed. So each kind of challenge has its own shape, and no
+challenge of one kind can be another. Since 1.4.0 (`@lazorkit/sdk` 1.0.0-rc.6) this SDK
+gives the same bytes as `@lazorkit/wallet` 3.3.1+ and `@lazorkit/wallet-mobile-adapter`
+2.3.1+:
+
+| Kind | Challenge | Length |
+| ---- | --------- | ------ |
+| Transaction (every `prepare*`, `Secp256r1Signer.sign`) | SHA-256 of the instruction's inputs | 32 |
+| Message | `signedMessageChallenge(message)`: `tag ‖ SHA-256(tag ‖ message)`, tag = UTF-8 `LazorKit signed message v1` (`SIGNED_MESSAGE_DOMAIN`) | 58 |
+| Ownership proof | `createTaggedOwnershipChallenge()`: `tag ‖ 32 random bytes`, tag = UTF-8 `LazorKit ownership proof v1` (`OWNERSHIP_PROOF_DOMAIN`) | 59 |
+
+- **A `Secp256r1Signer` and the `prepare*` challenges are for transactions only.** The SDK
+  calls `sign` only with the 32-byte challenge it computed for an instruction. Never hand a
+  passkey other bytes as its challenge: a message, a nonce from a server, a challenge from
+  a URL. To the program, a 32-byte value is an approval of whatever transaction hashes to
+  it.
+- **To have a passkey sign a message**, pass `signedMessageChallenge(message)` to
+  `navigator.credentials.get`. A string is signed as its UTF-8 bytes, a typed array as its
+  bytes; anything else throws a `TypeError`. Neither contract SDK asks a passkey to sign a
+  message itself.
+- **To check a message signature**, read the key from the claimed wallet on chain, never
+  from the client. `verifyWalletMessage` in the wallet packages does
+  ([useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature));
+  it takes the signature as their `signMessage` returns it, 64-byte r‖s, not the DER
+  `navigator.credentials.get` returns. With this SDK, which takes DER or r‖s:
+
+```ts
+import { signedMessageChallenge, verifyOwnershipProof } from '@lazorkit/sdk-legacy';
+
+// The passkey's Owner authorities under this rpId, on the wallet the signer claims.
+const candidates = (await client.findPasskeyWalletCandidates({ credentialIdHash, rpId }))
+  .filter((c) => c.walletPda.equals(claimed) || c.vaultPda.equals(claimed));
+const [signer] = verifyOwnershipProof(candidates, {
+  challenge: signedMessageChallenge(message),
+  signature, authenticatorData, clientDataJson, // from the assertion
+}, rpId);
+// A migrated v1 wallet leaves its authorities behind: the wallet must still exist.
+const wallet = signer && (await connection.getAccountInfo(signer.walletPda));
+const verified = !!signer && !!wallet && wallet.owner.equals(signer.programId);
+```
+
+`createOwnershipChallenge()` still returns 32 bare random bytes, as in every earlier
+release: the wallet packages read it as a source of random bytes where `globalThis.crypto`
+is missing, and need exactly 32. It is deprecated as a passkey challenge, since those bytes
+look exactly like a transaction challenge. Use `createTaggedOwnershipChallenge()` for every
+new proof. `verifyOwnershipProof`, `recoverPasskeyPublicKeys`, `resolvePasskeyPublicKey`
+and `findOwnPasskeyWallet` check a proof over exactly the challenge it carries, of any
+length from 16 bytes, so proofs over either form verify.
 
 ## Deferred execution: `executor` and `feePayer`
 

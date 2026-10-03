@@ -18,8 +18,9 @@ and a concrete fix. Every error class and program code is listed on [Errors](/er
 | ------------------------------ | --------------------------------------------------------------------- |
 | [Setup](#setup)                | `Cannot resolve module`, `ERESOLVE`, `Buffer is not defined`, SSR crashes |
 | [Wallet address](#wallet-address) | Funds sent to the wrong address, balance stuck at 0                 |
-| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed |
+| [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed, a message signature that does not verify |
 | [Sending transactions](#sending-transactions) | 3006, outcome unknown, "Already signing", deferred expiry |
+| [Sessions and kept keys](#sessions-and-kept-keys) | 3037 / 3038, `KeyWalletMismatchError`, `createSession` refusing its limits, a sign-out through wallet-adapter |
 | [Network / relay](#network--relay)      | `Network request failed`, paymaster errors, RPC refusals       |
 | [Deep linking](#deep-linking-react-native-only) | Portal never returns, redirect drops signature          |
 | [v1 and v2](#v1-and-v2)        | 4018, 4008, 3005, migrated wallets, cluster detection                 |
@@ -46,6 +47,15 @@ Then restart your bundler / Metro to clear module caches.
 
 ```bash
 npm install @solana/web3.js@^1.99.0
+```
+
+`peer @solana/kit@"^5.0" from @solana-program/token@0.9.0` in an app on `@solana/kit` 6, 7
+or 8: 3.3.0 and earlier declared `@solana/kit` ^5, `@solana/kora` and
+`@solana-program/token` as peers, though nothing in the wallet loads them. 3.3.1 dropped
+them; install it instead of using `--legacy-peer-deps`:
+
+```bash
+npm install @lazorkit/wallet@^3.3.1
 ```
 
 ### `Buffer is not defined`
@@ -219,6 +229,26 @@ The built-in chooser is a React Native `Modal` and iOS shows one modal at a time
 `<WalletChooser />` inside your own modal, or close it before connecting. See
 [Wallet Confirmation › iOS](/react-native-sdk/wallet-confirmation#ios-shows-one-modal-at-a-time).
 
+### A message signature does not verify
+
+`verifyWalletMessage` resolves `false` when any of these differ from what the passkey
+signed, and `verifySignedMessage` likewise:
+
+- The signature was made by `@lazorkit/wallet` 3.3.0 / adapter 2.3.0 or earlier, over the
+  message's own bytes. Since 3.3.1 / 2.3.1 the passkey signs
+  `signedMessageChallenge(message)`; ask the user to sign again.
+- `message` is not the exact string (or bytes) that was signed.
+- `rpId` is not the portal the passkey was created under (`portal.lazor.sh` by default), or
+  `origin`, when you pass it, is not the portal's origin.
+- `wallet` or `credentialId` names another wallet or passkey, or the passkey is not an
+  Owner of that wallet.
+- An adapter or Wallet Standard signature was passed as it came: it is UTF-8 JSON; pass
+  `JSON.parse(new TextDecoder().decode(signature))`.
+
+It rejects, rather than resolving `false`, when it cannot read the chain: use an RPC
+endpoint that allows `getProgramAccounts`. Never fall back to the deprecated
+`verifyMessage` / `verifySignatureBrowser`: they do not check which message was signed.
+
 ### `rpId` mismatch / "credentials don't match"
 
 <Callout type="warn" title="rpId is baked into every passkey — and into the wallet">
@@ -299,6 +329,80 @@ report it as it came.
 The challenge's slot is more than 150 slots old by the time the transaction runs — the
 user took too long to approve, or (with `commitment: 'finalized'`) the slot was already old
 when the prompt opened. Prepare again.
+
+---
+
+## Sessions and kept keys
+
+### `UnlistedSolOutflowError` / `0xbdd` (3037)
+
+"This session is not allowed to spend SOL" ("This key …" for a Delegate). The transaction
+would have lowered the wallet's SOL balance, and the session's limits (the Delegate's
+policy) name no SOL. Only the v2 program release that adds errors 3037 and 3038 returns it;
+that release is not deployed yet ([Networks & versions](/networks)). Nothing in the
+transaction ran, and the SDK does not resend it. Causes:
+
+- **No SOL limit, and the transaction moves SOL.** A session made with token limits only
+  spends no SOL.
+- **Rent.** Creating an account the vault pays for (a recipient's token account, a swap's
+  output account) lowers the vault's SOL. Give the session a SOL limit that covers the
+  rent, or create the account first in an instruction the fee payer funds.
+- **Wrapping SOL.** Wrapping spends SOL; wSOL is a mint of its own.
+
+Limits cannot be changed: revoke the session (remove the Delegate) and register one with a
+SOL limit (`solPerTxMax`, `solLifetimeCap` or `solRecurring` on web; an `Actions.sol*`
+action otherwise). See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+
+### `UnlistedTokenOutflowError` / `0xbde` (3038)
+
+"This session is not allowed to spend this token". A token would have left the wallet whose
+mint no limit names, from the same program release. A session made with SOL limits only,
+as every `SpendingLimits` session before `@lazorkit/wallet` 3.4.0, spends no token; wSOL
+counts as a token. Register a session whose limits name each mint it spends:
+`spendingLimits.tokens` on web, an `Actions.token*` action on mobile and in the contract
+SDKs.
+
+A raw 3037 or 3038 whose logs name another program as the first to fail is that program's,
+not LazorKit's; `isUnlistedSolOutflowError` / `isUnlistedTokenOutflowError` tell them apart.
+
+### `createSession` throws before the prompt (web)
+
+Since 3.4.0 `createSession` checks `spendingLimits` before anything is read or the passkey
+is asked. It throws on a `tokens` entry with no limit, or with a `mint` that is not an
+address; a mint named twice; an amount outside a u64; a window of 0 slots; more than 16
+actions; or "spendingLimits makes N bytes of actions; at most 244 fit in the transaction
+beside the passkey's response". A SOL limit takes 19 bytes (`solRecurring` 43), a token's
+`lifetimeCap` or `perTxMax` 51, its `recurring` 75: drop a limit, or a mint. The same
+budget applies to a Delegate `policy` and to a React Native session's `actions`, but there
+nothing checks it before the prompt, and a policy that does not fit fails after the user
+approved.
+
+### `createSession` returns the session my `sessionKey` already had (web)
+
+For a `sessionKey` of your own that already has a session, `createSession` resolves with
+that session as it was made, whatever limits you pass: the program does not create a
+second session for the same key. To change its limits, revoke it
+(`revokeSession({ sessionPda })`) and register it again, or register a new key. Since 3.4.0
+the limits are checked first, so a call without valid `spendingLimits` (and not
+`unrestricted`) throws instead of resolving.
+
+### `KeyWalletMismatchError` with `reason: 'disconnected'` (web)
+
+The wallet was disconnected while this `signAndSendWithSession` or
+`signAndSendWithAuthority` was running, by `disconnect()`, wallet-adapter or the Wallet
+Standard, and the same wallet is connected again by now. A send started before a sign-out
+is not finished after it (3.4.0). Nothing was sent: the message ends "Nothing was signed or
+sent." or, when the key had already signed, "The transaction it had signed was not sent."
+Send again. `reason: 'no-wallet'` is the same refusal with no wallet connected. When an
+earlier attempt of the same send may have reached the chain, the send rejects with
+`TransactionOutcomeUnknownError` instead: check before sending again.
+
+### `useWallet()` shows no wallet after a wallet-adapter Disconnect
+
+Since 3.4.0 `LazorkitWalletAdapter.disconnect()` and `standard:disconnect` disconnect the
+React SDK's store too, as its own `disconnect()` does: the stored wallet is shared. Connect
+again. See [Wallet Standard › Disconnecting](/wallet-standard#disconnecting).
 
 ---
 
@@ -466,7 +570,7 @@ comparing them against the on-chain authority usually pinpoints the desync in se
 ## Program errors (0xbd0, 0xbd1, …)
 
 Custom program errors come back from Solana as hex codes inside error messages and logs
-(`custom program error: 0xbd0`), or as `{ "Custom": 3024 }`. The full table — 3001–3036
+(`custom program error: 0xbd0`), or as `{ "Custom": 3024 }`. The full table — 3001–3038
 and 4001–4018, with what each means — is on
 [Errors › Program error codes](/errors#program-error-codes). The ones you will meet most:
 
@@ -479,6 +583,8 @@ and 4001–4018, with what each means — is on
 | `0xbbe` | 3006 | `SignatureReused` | See [above](#signaturereusederror--0xbbe-3006). |
 | `0xbc6` | 3014 | `DeferredAuthorizationExpired` | See [above](#deferredexpirederror--0xbc6-3014). |
 | `0xbd9` | 3033 | `DelegateRequiresPolicy` | Pass a `policy` when adding `ROLE_SPENDER`. |
+| `0xbdd` | 3037 | `ActionUnlistedSolOutflow` | See [above](#unlistedsoloutflowerror--0xbdd-3037). |
+| `0xbde` | 3038 | `ActionUnlistedTokenOutflow` | See [above](#unlistedtokenoutflowerror--0xbde-3038). |
 | `0xfb2` | 4018 | `RetiredDeployment` | See [v1 and v2](#v1-and-v2). |
 
 <Callout type="warn" title="Check which program failed">
