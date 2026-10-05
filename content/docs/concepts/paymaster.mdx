@@ -161,8 +161,11 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
   `{ transaction, signer_key }`, where `signer_key` is the fee payer the transaction names.
 - **`apiKey`** is sent as the `x-api-key` header. It ships inside your web bundle or app,
   so anyone can read it: it identifies a client, it does not protect the relayer. Protect
-  the relayer with what Kora enforces server-side (reCAPTCHA, usage limits, a lamport cap,
-  `require_one_of_programs`).
+  the relayer with what Kora enforces server-side (a lamport cap,
+  `require_one_of_programs`). Two of Kora's controls need something neither SDK sends yet,
+  so leave them off for now: reCAPTCHA on the signing methods needs an `x-recaptcha-token`
+  header, and on Kora 2.2.0-beta.8 with free pricing, usage limits need a `user_id` on
+  every signing request. Turned on, either one refuses every SDK transaction.
 - **Confirmation.** The wallet waits for each transaction to confirm, whatever the relayer
   answers. Kora confirms before it answers by default, so this costs one status read; a
   relayer configured to answer early (`respond_after` "sent") makes the wallet poll.
