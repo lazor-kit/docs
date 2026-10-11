@@ -85,7 +85,7 @@ import type { PublicKey } from '@solana/web3.js';
 await createSession(
   {
     sessionKey: sessionKp.publicKey,
-    expiresAtSlot: currentSlot + 9_000n,
+    expiresInSeconds: 3_600,            // 3.0; with 2.4: expiresAtSlot (refused on devnet's v2)
     actions: [Actions.solMaxPerTx(100_000_000n)],
   },
   {

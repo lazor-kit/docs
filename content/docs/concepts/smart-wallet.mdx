@@ -133,12 +133,14 @@ tx-level duplicate detection handles replay.
 | Rank     | Value | May add                | May remove                              | Spends |
 | -------- | ----- | ---------------------- | --------------------------------------- | ------ |
 | Owner    | 0     | Owner, Admin, Delegate | Owner (not the last, not itself), Admin, Delegate | without limits |
-| Admin    | 1     | Delegate               | Delegate                                | without limits |
+| Admin    | 1     | Delegate               | Delegate                                | without limits; cannot reassign the vault or its token accounts |
 | Delegate | 2     | nothing                | nothing                                 | only within its required policy |
 
 Owners and Admins also create and revoke sessions; only a passkey Owner or Admin may
 `Authorize` a deferred execution. A wallet may have **several Owners** — one passkey per
-device, so a surviving device can remove a lost one.
+device, so a surviving device can remove a lost one. Only an Owner may change who controls
+the vault or its token accounts: every other signer, sessions included, is refused with
+3030–3032 ([Who controls the vault](/concepts/session-keys#who-controls-the-vault)).
 
 In v1, `Execute` never checked rank: a v1 "Spender" could spend the whole vault. See
 [Ranks & policies](/concepts/rbac) for the full rules.
@@ -258,8 +260,10 @@ hand ownership to a key that does not exist yet.
 
 ### Sessions
 
-An Owner or Admin creates sessions; see [Session Keys](/concepts/session-keys). After a
-session expires, **anyone** may close it with `CloseExpiredSession` and keep its rent.
+An Owner or Admin creates sessions, which expire at a Unix time by the cluster clock, at
+most 30 days ahead (a v1 session at a slot); see [Session Keys](/concepts/session-keys).
+After a session expires, **anyone** may close it with `CloseExpiredSession` and keep its
+rent.
 
 ### Move from v1
 

@@ -83,8 +83,23 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
   `'auto'` uses IndexedDB when it can, `'memory'` keeps nothing at rest (the key is gone
   on reload). See [below](#keys-the-sdk-generates).
 
-The props are typed as `LazorkitProviderProps` internally; the type is not exported, use
-`React.ComponentProps<typeof LazorkitProvider>`.
+The props are typed as `LazorkitProviderProps` internally; 3.x does not export the type,
+so use `React.ComponentProps<typeof LazorkitProvider>` (4.0 exports it).
+
+### In 4.0: `mode`
+
+`@lazorkit/wallet` 4.0 (pre-release on `next`) adds a required `mode` prop, with no default:
+
+| Prop | Type | Notes |
+| ---- | ---- | ----- |
+| `mode` | `'portal' \| 'embedded'` | Required. `'portal'` is everything on this page, as in 3.x: a 3.x app adds `mode="portal"` and keeps its users' wallets. Without it the app does not compile, and from JavaScript it throws `LazorkitConfigError('no-mode')`. |
+| `rpId`, `appName`, `confirm` | | Embedded mode only (where `rpId` and `appName` are required); portal mode does not take them. See [Embedded mode › Provider props](/react-sdk/embedded-mode#provider-props). |
+| `onEvent` | `(event: LazorkitEvent) => void` | Experimental instrumentation, in either mode. |
+
+The stored wallet is read synchronously when the provider first renders, so the first
+render can already be connected, and the props are the config: a config stored by 3.x is
+never read back. A static mistake in the props throws `LazorkitConfigError` while rendering.
+See [Migrating to 4.0](/react-sdk/migrating-to-4).
 
 ## What the SDK stores in the browser
 

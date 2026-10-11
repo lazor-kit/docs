@@ -11,11 +11,20 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   Start with the [Protocol Overview](/protocol) to understand how the system works end-to-end, then pick the SDK that fits your stack.
 </Callout>
 
-<Callout type="warn" title="Where things stand (2026-10-02)">
+<Callout type="warn" title="Upcoming changes for integrators">
+  The LazorKit portal is being updated, and devnet now measures session time in seconds.
+  What changes for your SDK version, and what to do before then:
+  [Upcoming changes for integrators](/upgrade-notice).
+</Callout>
+
+<Callout type="warn" title="Where things stand (2026-10-11)">
   Mainnet runs **protocol v1**. Protocol v2 — what the current SDK releases speak — is
   live on **devnet**; the v2 mainnet program is not deployed yet. Existing v1 wallets keep
-  working through the current React and React Native SDKs. Program ids, package versions
-  and what works where: [Networks & versions](/networks).
+  working through the current React and React Native SDKs. Devnet's v2 now measures
+  session time in seconds: creating a session there needs `@lazorkit/wallet` 4.0 or
+  `@lazorkit/wallet-mobile-adapter` 3.0, pre-releases on the npm `next` tag
+  ([Migrating to 4.0](/react-sdk/migrating-to-4)). Program ids, package versions and what
+  works where: [Networks & versions](/networks).
 </Callout>
 
 ---
@@ -26,7 +35,7 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   <Card
     icon={<Globe />}
     title="React SDK"
-    description="@lazorkit/wallet — hooks and a provider for web apps. Passkeys through the LazorKit portal."
+    description="@lazorkit/wallet — hooks and a provider for web apps. Passkeys through the LazorKit portal, or on your own domain with Embedded mode (4.0 pre-release)."
     href="/react-sdk"
   />
   <Card

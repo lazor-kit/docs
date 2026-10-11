@@ -14,7 +14,8 @@ Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
 ## Prerequisites
 
 - Node.js 18+, or a browser / React Native bundle (no Node polyfills needed)
-- `@lazorkit/sdk-legacy` **1.x** and `@solana/web3.js` installed
+- `@lazorkit/sdk-legacy` **2.x** (2.0.0 on `next`; 1.x sends session expiries as slots,
+  which devnet's v2 refuses) and `@solana/web3.js` installed
 
 ```bash
 npm install @lazorkit/sdk-legacy@next @solana/web3.js
@@ -170,7 +171,7 @@ can fail with `SignatureReused` (3006) — see
 
 <Callout type="warn" title="Version note">
   This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (protocol v2; `next`
-  is 1.4.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
+  is 2.0.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
   below applies to every version.
 </Callout>
 

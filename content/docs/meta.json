@@ -1,6 +1,7 @@
 {
     "pages": [
         "index",
+        "upgrade-notice",
         "protocol",
         "networks",
         "v1-to-v2",

@@ -1,0 +1,78 @@
+---
+title: Upcoming changes for integrators
+description: What changes for apps on each SDK version when the LazorKit portal is updated, what already changed on devnet, what stays the same on mainnet, and a short upgrade checklist.
+---
+
+This page collects the changes that reach apps built on LazorKit in the coming weeks, and
+what to do about each. Details for each SDK are on its own pages, linked below.
+
+## 1. The LazorKit portal is being updated
+
+The LazorKit portal (`portal.lazor.sh`) is being updated on **[DATE]**. What it means
+for your app depends on the SDK version you ship:
+
+| Your SDK | After the portal update | What to do |
+| -------- | ----------------------- | ---------- |
+| `@lazorkit/wallet` **3.3.1 or later**, `@lazorkit/wallet-mobile-adapter` **2.3.1 or later** | Connect, transactions and `signMessage` keep working. Transaction review screens are clearer. | Nothing required. |
+| `@lazorkit/wallet` **2.x to 3.3.0**, `@lazorkit/wallet-mobile-adapter` **1.5.x to 2.3.0** | Connect and transactions keep working. `signMessage` is no longer accepted: the portal signs messages only in the domain-separated format introduced in `@lazorkit/wallet` 3.3.1 / `@lazorkit/wallet-mobile-adapter` 2.3.1. | Upgrade to `@lazorkit/wallet` ≥ 3.3.1 / `@lazorkit/wallet-mobile-adapter` ≥ 2.3.1 (or the 4.0 / 3.0 pre-release) **before the portal update**, and verify message signatures with `verifyWalletMessage` (or `verifySignedMessage` with a key you read from chain). |
+| Every `@lazorkit/wallet` 3.x, every `@lazorkit/wallet-mobile-adapter` 2.x | Creating a session and adding or removing a key show a generic confirmation, "a change LazorKit can't show", which the user must explicitly approve. | To show the user the details, move to `@lazorkit/wallet` 4.0 / `@lazorkit/wallet-mobile-adapter` 3.0 (pre-releases on `next`): see below. |
+
+With `@lazorkit/wallet` **4.0** and `@lazorkit/wallet-mobile-adapter` **3.0**,
+`createSession`, `revokeSession` and `removeAuthority` send the portal the operation
+itself, and the portal shows its full details before the user approves: for a session, its
+spending limits, the tokens it may spend and when it ends ("Let MyApp spend up to 0.002 SOL
+per payment and 5 USDC in total, until about 6:50 PM"). `addAuthority` /
+`addAuthorityEd25519` still open the portal as in 3.x / 2.x. See
+[useWallet › What the user approves](/react-sdk/use-wallet#what-the-user-approves-40).
+
+**App registration.** The portal labels an app "Not registered" until it is registered
+with LazorKit. To request registration for your app: **[CONTACT]**.
+
+How message signing and verification work since 3.3.1 / 2.3.1:
+[React › Upgrading to 3.3.1](/react-sdk/upgrading#upgrading-to-331),
+[React Native › Upgrading to 2.3.1](/react-native-sdk/upgrading#upgrading-to-231) and
+[useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+
+## 2. Devnet
+
+- **Session time is measured in seconds.** Since 2026-10-11 devnet's v2 program
+  (`57bTNW…`) reads a session's expiry, an action's own expiry and a recurring window as
+  Unix seconds of the cluster clock. `@lazorkit/wallet` 3.4.x and
+  `@lazorkit/wallet-mobile-adapter` 2.4.x send a slot, so they can no longer create sessions
+  on devnet (`InvalidSessionDuration`, 3008). Use the pre-releases:
+
+  ```bash
+  npm install @lazorkit/wallet@next                 # 4.0.0-next.0
+  npm install @lazorkit/wallet-mobile-adapter@next  # 3.0.0-next.0
+  ```
+
+  Sessions created on devnet before 2026-10-11 have expired. See
+  [Migrating to 4.0](/react-sdk/migrating-to-4).
+- **The default devnet paymaster is moving.** The SDKs' default devnet paymaster will move
+  to a new relayer that sponsors protocol v2 only: v1 transactions on devnet will no
+  longer be sponsored by it. An app with v1 wallets on devnet needs a relayer of its own
+  that sponsors v1, set as `v1PaymasterConfig` (web) or `v1ConfigPaymaster` (mobile). See
+  [Paymaster › Using a paymaster with the SDKs](/concepts/paymaster#using-a-paymaster-with-the-sdks).
+
+## 3. Mainnet
+
+v1 wallets and the current mainnet relayer are unchanged for now. Protocol v2 on mainnet,
+and the move to `@lazorkit/wallet` 4.0, will be announced separately. What is deployed
+where: [Networks & versions](/networks).
+
+## 4. Checklist
+
+1. **Install a current release.** At least `@lazorkit/wallet` 3.3.1 /
+   `@lazorkit/wallet-mobile-adapter` 2.3.1 before the portal update; the stable releases
+   are 3.4.1 and 2.4.0 (`latest`). For sessions on devnet, and for the portal to show what
+   a session approves, `@lazorkit/wallet@next` (4.0.0-next.0) /
+   `@lazorkit/wallet-mobile-adapter@next` (3.0.0-next.0).
+2. **Verify message signatures on your server** with `verifyWalletMessage`, which reads the
+   passkey's key from chain, never with the deprecated `verifyMessage`. Signatures made by a
+   release before 3.3.1 / 2.3.1 do not verify: ask users to sign again.
+3. **Pass session expiry in seconds** with 4.0 / 3.0: `expiresInSeconds` (at most 30 days)
+   or `expiresAt` (a Unix time), and `windowSeconds` for recurring limits. With 4.0, add
+   `mode="portal"` to `LazorkitProvider`. See
+   [Migrating to 4.0](/react-sdk/migrating-to-4).
+4. **Test on devnet**: connect, a transaction, `signMessage` and its server-side check, and
+   creating, using and revoking a session.

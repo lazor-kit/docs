@@ -4,10 +4,12 @@
         "index",
         "getting-started",
         "provider",
+        "embedded-mode",
         "use-wallet",
         "sending-transactions",
         "wallet-confirmation",
         "types",
+        "migrating-to-4",
         "upgrading"
     ]
 }

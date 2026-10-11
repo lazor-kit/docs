@@ -7,16 +7,21 @@ LazorKit has two protocol versions on chain, each at its own program id. Every S
 release speaks one or both of them. This page is the one place that says what is
 deployed where; the rest of the docs link here instead of repeating it.
 
-<Callout type="warn" title="Status on 2026-10-03">
+<Callout type="warn" title="Status on 2026-10-11">
   - **Mainnet runs protocol v1** (`LazorjRF…`). The v2 mainnet program
     (`LazorFroi…`) is **not deployed yet**: its account does not exist on chain.
   - **Devnet runs both.** v2 (`57bTNW…`) is deployed. Its `ProtocolConfig` is not
     initialised, so no protocol fee is charged there.
-  - **The v2 program release that adds errors 3037 and 3038 is not deployed on any
-    cluster yet.** From that release, a session's or a Delegate's policy names what may
-    leave the wallet, and nothing else may; until then an asset it does not name is not
-    bounded at all. See
-    [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+  - **Devnet's v2 measures session time in Unix seconds** since 2026-10-11 (slot
+    509,609,649): a session's expiry, an action's expiry and a recurring window are read
+    against the cluster clock, not the slot. `@lazorkit/wallet` 3.4.1 and
+    `@lazorkit/wallet-mobile-adapter` 2.4.0 (`latest`) still send slots, so their
+    `createSession` is refused there with 3008; use 4.0 / 3.0 (`next`). Sessions created
+    before the upgrade have expired. See [Migrating to 4.0](/react-sdk/migrating-to-4).
+  - **On devnet, a policy bounds every asset** (errors 3037 and 3038, since 2026-10-03): a
+    session's or a Delegate's policy names what may leave the wallet, and nothing else may.
+    And only an Owner may change who controls the vault or its token accounts (3030–3032).
+    See [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
   - v1 will be retired to a **sunset binary** after v2 is live on mainnet. From then
     on a v1 wallet can only move its funds to v2. See
     [Migrating from v1](/v1-to-v2).
@@ -24,11 +29,11 @@ deployed where; the rest of the docs link here instead of repeating it.
 
 ## Program ids
 
-| Cluster | Protocol | Program id | Constant | On chain (2026-10-03) |
+| Cluster | Protocol | Program id | Constant | On chain (2026-10-11) |
 | ------- | -------- | ---------- | -------- | --------------------- |
 | mainnet | v2 | `LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` | `PROGRAM_ID_MAINNET` | **not deployed** |
 | mainnet | v1 | `LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi` | `PROGRAM_ID_MAINNET_V1` | deployed (full v1) |
-| devnet | v2 | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | `PROGRAM_ID_DEVNET` | deployed, no protocol fee configured; without errors 3037 / 3038 |
+| devnet | v2 | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | `PROGRAM_ID_DEVNET` | deployed, no protocol fee configured; session time in Unix seconds (build `f2779b66…`) |
 | devnet | v1 | `4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS` | `PROGRAM_ID_DEVNET_V1` | deployed |
 
 The constants are exported by `@lazorkit/sdk-legacy` 1.2.0 and later, by
@@ -55,29 +60,33 @@ and its account discriminators are `0x21`–`0x27`.
 
 | Package | Version | npm tag | Protocol | Notes |
 | ------- | ------- | ------- | -------- | ----- |
-| `@lazorkit/wallet` (React) | 3.4.0 | `latest` | v2, and v1 for existing v1 wallets | Routes each action by the wallet's protocol. Creates new wallets on v2 only. |
-| `@lazorkit/wallet-mobile-adapter` (React Native) | 2.4.0 | `latest` | v2, and v1 for existing v1 wallets | Same routing. The `beta` tag still points at the old `2.0.0-beta.4`: do not install `@beta`. |
-| `@lazorkit/sdk-legacy` (web3.js v1) | 1.4.0 | `next` | v2 | `npm install @lazorkit/sdk-legacy@next` |
+| `@lazorkit/wallet` (React) | 3.4.1 | `latest` | v2, and v1 for existing v1 wallets | Routes each action by the wallet's protocol. Creates new wallets on v2 only. Sends session expiry as a slot: cannot create a session on devnet's v2 (3008). |
+| `@lazorkit/wallet` (React) | 4.0.0-next.0 | `next` | the same | Pre-release. Embedded mode, typed approval requests, session time in seconds. `npm install @lazorkit/wallet@next`; see [Migrating to 4.0](/react-sdk/migrating-to-4). |
+| `@lazorkit/wallet-mobile-adapter` (React Native) | 2.4.0 | `latest` | v2, and v1 for existing v1 wallets | Same routing, and the same devnet limit on sessions. The `beta` tag still points at the old `2.0.0-beta.4`: do not install `@beta`. |
+| `@lazorkit/wallet-mobile-adapter` (React Native) | 3.0.0-next.0 | `next` | the same | Pre-release. Typed approval requests, session time in seconds. See [Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release). |
+| `@lazorkit/sdk-legacy` (web3.js v1) | 2.0.0 | `next` | v2 | `npm install @lazorkit/sdk-legacy@next`. Session time in seconds; the `/approval` subpath. |
 | `@lazorkit/sdk-legacy` (web3.js v1) | 0.3.2 | `latest` | v1 | What a plain `npm install @lazorkit/sdk-legacy` installs. |
-| `@lazorkit/sdk` (Solana Kit) | 1.0.0-rc.6 | `latest`, `next` | v2 | Release candidate. |
+| `@lazorkit/sdk` (Solana Kit) | 1.0.0-rc.7 | `latest`, `next` | v2 | Release candidate. Session time in seconds. |
 
 The two `sdk-legacy` lines are not wire-compatible: the same `userSeed` derives a
-different wallet on each. The wallet packages depend on both: `@lazorkit/sdk-legacy`
-^1.3.0 for v2 (a fresh install gets 1.4.0), and 0.3.2 under the alias `lazorkit-sdk-v1`
-for v1 wallets.
+different wallet on each. The wallet packages depend on both: the 3.x / 2.x releases on
+`@lazorkit/sdk-legacy` ^1.3.0 for v2 (a fresh install gets 1.4.0, which sends slots), 4.0 /
+3.0 on ^2.0.0, and every release on 0.3.2 under the alias `lazorkit-sdk-v1` for v1 wallets.
+`@lazorkit/sdk-legacy` 1.4.0 and `@lazorkit/sdk` 1.0.0-rc.6 and earlier send session
+expiries as slots, which devnet's v2 refuses (3008).
 
-`@lazorkit/wallet` 3.4.0, `@lazorkit/wallet-mobile-adapter` 2.4.0 and
-`@lazorkit/sdk-legacy` 1.4.0 already name errors 3037 and 3038, and the wallet packages
-report them as `UnlistedSolOutflowError` / `UnlistedTokenOutflowError`. They work with the
-v2 program deployed today, which never returns those errors.
+Every release listed above names errors 3037 and 3038; the wallet packages report them as
+`UnlistedSolOutflowError` / `UnlistedTokenOutflowError`.
 
 ## What works where today
 
 | You use | Mainnet today | Devnet |
 | ------- | ------------- | ------ |
-| `@lazorkit/wallet` 3.x / adapter 2.x | Existing **v1** wallets keep working, through a relayer that sponsors v1 (`v1PaymasterConfig` / `v1ConfigPaymaster`). A user with no wallet cannot get one yet: new wallets are created on v2, which is not deployed on mainnet. | v2 wallets, plus v1 wallets made earlier on devnet. |
+| `@lazorkit/wallet` 3.x / adapter 2.x | Existing **v1** wallets keep working, through a relayer that sponsors v1 (`v1PaymasterConfig` / `v1ConfigPaymaster`). A user with no wallet cannot get one yet: new wallets are created on v2, which is not deployed on mainnet. | v2 wallets, plus v1 wallets made earlier on devnet. `createSession` on a v2 wallet is refused (3008). |
+| `@lazorkit/wallet` 4.0 / adapter 3.0 (`next`) | As 3.x / 2.x. | v2 wallets, sessions included, plus v1 wallets. |
 | `@lazorkit/sdk-legacy` 0.3.x | v1 | v1 (`4h3Xo…`) |
-| `@lazorkit/sdk-legacy` 1.x, `@lazorkit/sdk` | Nothing until v2 is deployed. | v2 |
+| `@lazorkit/sdk-legacy` 2.x, `@lazorkit/sdk` rc.7 | Nothing until v2 is deployed. | v2 |
+| `@lazorkit/sdk-legacy` 1.x, `@lazorkit/sdk` rc.6 and earlier | Nothing. | v2, except creating a session (3008) |
 
 When v2 is deployed on mainnet, this page is updated first.
 

@@ -1,11 +1,12 @@
 ---
 title: Errors
-description: Every error class the LazorKit SDKs throw, when each is thrown and what to do, and the program's error codes 3001–3038 and 4001–4018.
+description: Every error class the LazorKit SDKs throw, when each is thrown and what to do, the typed-request and Embedded-mode errors of the 4.0 pre-release, and the program's error codes 3001–3038 and 4001–4018.
 ---
 
-One reference for the React SDK (`@lazorkit/wallet` 3.4.0), the React Native SDK
-(`@lazorkit/wallet-mobile-adapter` 2.4.0) and the contract SDKs (`@lazorkit/sdk-legacy`
-1.4.0, `@lazorkit/sdk` 1.0.0-rc.6). Symptom-first help is in
+One reference for the React SDK (`@lazorkit/wallet` 3.4.1, and the 4.0.0-next.0
+pre-release where marked), the React Native SDK (`@lazorkit/wallet-mobile-adapter` 2.4.0,
+and 3.0.0-next.0 where marked) and the contract SDKs (`@lazorkit/sdk-legacy` 2.0.0,
+`@lazorkit/sdk` 1.0.0-rc.7). Symptom-first help is in
 [Troubleshooting](/troubleshooting).
 
 ## Telling errors apart
@@ -87,8 +88,8 @@ How sends are confirmed and sequenced:
 ## Assets a policy does not name
 
 From the v2 program release that adds errors 3037 and 3038, a session's actions and a
-Delegate's policy name what may leave the wallet, and nothing else may. That release is not
-deployed yet ([Networks & versions](/networks)); see
+Delegate's policy name what may leave the wallet, and nothing else may. Devnet's v2 has run
+it since 2026-10-03; mainnet has no v2 program yet ([Networks & versions](/networks)); see
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). Exported
 by both UI packages since `@lazorkit/wallet` 3.4.0 / `@lazorkit/wallet-mobile-adapter`
 2.4.0:
@@ -122,7 +123,49 @@ are exported too.
 A `connect` that creates a wallet for a passkey whose key the portal cannot report asks
 for one more signature to recover the key (since 3.1.0 / 2.1.0). If the signatures do
 not settle on one key, or a portal reply names another passkey, `connect` throws a
-plain `Error` that says so, and nothing is created.
+plain `Error` that says so, and nothing is created. In `@lazorkit/wallet` 4.0 it is a
+`KeyRecoveryError` (`code: 'KEY_RECOVERY'`), with the same message.
+
+## Typed approval requests (4.0)
+
+In `@lazorkit/wallet` 4.0 and `@lazorkit/wallet-mobile-adapter` 3.0 (pre-releases on
+`next`), `createSession`, `revokeSession` and `removeAuthority` on a v2 wallet send the
+portal a typed request: the operation itself, which the portal shows and computes the
+challenge from. The SDK checks the reply before anything is sent. All four errors are
+exported by both packages, and by `@lazorkit/sdk-legacy/approval` except
+`PortalRefusedError`:
+
+| Error | Thrown when | What to do |
+| ----- | ----------- | ---------- |
+| `PortalReplyMismatchError` (`code: 'portal-reply-mismatch'`) | The portal's reply (on mobile, its redirect, a forged deep link included) does not match the request the SDK prepared: another operation, slot, counter or kind. `reason` says what differed. **Nothing was sent.** | Ask the user to approve again. If it repeats, check that `portalUrl` is the LazorKit portal. |
+| `RequestOutOfDateError` (`code: 'stale-counter'`, `retryable: true`) | The portal refused the request: its view of the passkey's counter was behind. The passkey signed nothing. | Offer to try again; a new request may go through. |
+| `PortalRefusedError` | The portal refused the request; the passkey signed nothing. `code`: `request-invalid` (it would fail on chain), `wrong-network`, `challenge-mismatch`, `typed-malformed`, `typed-unsupported` or `chain-unavailable`. | `request-invalid`: fix the request (its limits or expiry). `wrong-network`: the app's cluster is not the portal's. `chain-unavailable`: try again later. |
+| `TypedRequestTooLargeError` (`code: 'typed-request-too-large'`) | The request is over 8,192 characters, or the portal URL carrying it over 16,384. Nothing was opened; it is never truncated. | Use fewer actions. |
+
+The portal waits up to 10 minutes for the user on these three operations (60 seconds for
+other signing), since it picks the slot it signs at when the user taps Approve. Closing it
+still rejects at once with `PortalCancelledError`. On mobile, a typed-request refusal in the
+portal's redirect is `RequestOutOfDateError` or `PortalRefusedError`, and any other portal
+error stays a `LazorKitError` (`code: 'PORTAL_ERROR'`) as before.
+
+## Rejections and configuration (4.0)
+
+`@lazorkit/wallet` 4.0 gives every failure a kind, `errorKind(error)`, and words to show,
+`userMessage(error, 'connect' | 'send')`. A user who says no is not an error: a closed
+portal, sheet or passkey prompt, a cancelled review, "Not now" and "None of these" reject
+the promise and call `onFail`, but never set the store's `error`.
+
+| Error | Thrown when | What to do |
+| ----- | ----------- | ---------- |
+| `UserRejectedError` (`code: 'USER_REJECTED'`) | The user said no, or `disconnect` ran during `connect`. `reason`: `passkey-closed`, `review-cancelled`, `portal-closed`, `not-now`, `wallet-declined` or `abandoned`. `PortalCancelledError` and `WalletConfirmationDeclinedError` are subclasses, with their names and messages unchanged. | Nothing was signed, sent, created or saved. Show nothing on connect. |
+| `KeyRecoveryError` (`code: 'KEY_RECOVERY'`) | A passkey with no wallet, whose public key two of its signatures did not settle. Nothing was created. | Ask the user to try again. |
+| `PasskeyMismatchError` | A prompt pinned to one passkey was answered by another (Embedded mode). | Nothing was created or sent. Try again with the same passkey. |
+| `PasskeyUnavailableError` | Passkeys cannot be used here: no WebAuthn (an in-app browser view), or the browser refused the ceremony (Embedded mode). | Ask the user to open the page in Safari or Chrome. |
+| `LazorkitConfigError` (`problem`) | The configuration or the page cannot work: `no-mode` (no `mode` prop), `no-rp-id`, `no-app-name`, `bad-rp-id`, `ip-rp-id`, `mainnet-paymaster` (Embedded on mainnet without your own relayer), `localhost-mainnet`, `ip-host`, `insecure-context`, `rp-id-refused` (the page's host cannot use `rpId`), `reconfigured` (a second `createLazorkitClient` with another config). | A developer error: the message says how to fix it. |
+| `NetworkError` | The chain could not be read (an RPC failure, a rate limit that outlasted the back-off). Nothing was created. | Try again; never treat it as "no wallet". |
+| `WalletVerificationError` | The wallet the relayer landed is not the one this passkey asked for (Embedded mode). Nothing was saved. | Try again; check your relayer. |
+
+See [Embedded mode › Errors](/react-sdk/embedded-mode#errors) for the full `errorKind` table.
 
 ## Signing while another call runs
 
@@ -169,7 +212,8 @@ from the paymaster, that attempt may still land: the send rejects with
 
 Match it with `isKeyWalletMismatchError(e)`. A kept session key whose session has
 expired is deleted when it is next read, and the call rejects with "No session key found:
-the stored session … expired after slot …": create a new session. Where the keys are
+the stored session … expired after slot …" (in 4.0, for a v2 session, "… expired at …",
+compared with the cluster clock): create a new session. Where the keys are
 kept and when they are deleted:
 [What the SDK stores](/react-sdk/provider#what-the-sdk-stores-in-the-browser).
 
@@ -209,11 +253,14 @@ a v1 wallet's 4018 as `V1WalletRetiredError`, with the original error as its `ca
 | Thrown by | Error | Cause |
 | --------- | ----- | ----- |
 | `createSession` (all SDKs) | `Error` | No limits and no `unrestricted: true`. A session without actions can spend the whole vault. |
-| `createSession` (web, 3.4.0+) | `Error`, `TypeError`, `RangeError` | `spendingLimits` it cannot register: a `tokens` entry with no limit, or whose `mint` is not an address; a mint named twice; an amount outside a u64; a window of 0 slots; more than 16 actions; more than 244 bytes of actions, which would not fit in the transaction beside the passkey's response. Checked before anything is read, also for a `sessionKey` that already has a session. |
+| `createSession` (web, 3.4.0+) | `Error`, `TypeError`, `RangeError` | `spendingLimits` it cannot register: a `tokens` entry with no limit, or whose `mint` is not an address; a mint named twice; an amount outside a u64; a window of 0; more than 16 actions; more than 244 bytes of actions (224 in 4.0), which would not fit in the transaction beside the passkey's response. Checked before anything is read, also for a `sessionKey` that already has a session. |
+| `createSession` (web 4.0, mobile 3.0) | `Error`, `TypeError`, `RangeError` | An expiry the program would refuse: `expiresInSeconds` not above 0 or over 30 days, an `expiresAt` not after the cluster's time or more than 30 days ahead of it, more than one of the expiry options, or a deprecated slot expiry whose slot time cannot be read. On web, a recurring limit with `windowSlots`. On mobile, more than 16 actions or more than 224 bytes of them. |
 | `addAuthority` / `addAuthorityEd25519` | `Error` | No `role`, or one that is not `ROLE_OWNER` (0), `ROLE_ADMIN` (1) or `ROLE_SPENDER` (2); `ROLE_OWNER` on a v2 wallet, where neither method adds an Owner (on v1 they do). The message says what each rank may do. Checked before anything is read. |
 | `addAuthority` / `addAuthorityEd25519` | `Error` | `ROLE_SPENDER` (Delegate) on a v2 wallet without a `policy`; a `policy` on a v1 wallet; a v1 wallet without `unrestricted: true`. |
 | `authorizeAndExecute` / `authorizeDeferred` | `RangeError` | `expiryOffset` outside 10–9000 slots. |
 | `new LazorKitClient(connection)` (sdk-legacy) | `Error` | The RPC URL names no cluster. Pass a program id. |
+| `createSession` / `prepareCreateSession` (sdk-legacy 2.0.0, sdk rc.7) | `Error` | An `expiresAt` below 2020-01-01 in Unix seconds: a slot passed by mistake. |
+| `serializeActions` (sdk-legacy 2.0.0, sdk rc.7) | `Error` | An action `expiresAt` other than 0 that looks like a slot, or a recurring window of 0. Every policy goes through it, a Delegate's included. |
 | `migrateV1Wallet` | `Error` | The client was built at a v1 id, or the destination failed its vet. |
 
 <Callout type="info" title="Changed in 3.3.0 / adapter 2.3.0">
@@ -226,6 +273,8 @@ a v1 wallet's 4018 as `V1WalletRetiredError`, with the original error as its `ca
 | Error | Package | Thrown when |
 | ----- | ------- | ----------- |
 | `MinContextSlotNotReachedError` | `@lazorkit/sdk-legacy` ≥ 1.3.0, `@lazorkit/sdk` ≥ rc.4 (also re-exported by the mobile adapter) | A challenge read with `minContextSlot` found no node at that slot within 10 s (30 s at `finalized`). Carries `minContextSlot`, `waitedMs`, `commitment`. Retry on an RPC that has caught up. See [Passkey signing](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row). |
+| `TransactionTooLargeError` (`code: 'transaction-too-large'`) | `@lazorkit/sdk-legacy` 2.0.0, from `@lazorkit/sdk-legacy/approval` | `prepareCreateSession` with `secp256r1.credentialId`: the signed transaction could not fit 1,232 bytes (more than about 224 bytes of actions). Thrown before any read or passkey prompt. Carries `bytes`, `limit`. |
+| `PortalReplyMismatchError`, `TypedRequestTooLargeError` | `@lazorkit/sdk-legacy/approval` (2.0.0) | `verifyApprovalReply` (or a `finalize*` with a `binding`) found a reply over anything but the request; a request or URL over its cap. See [Passkey signing › Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests). |
 
 The contract SDKs do not wrap program errors: a failed transaction surfaces as web3.js's
 `SendTransactionError` (or kit's equivalent) with the custom program error in its
@@ -265,8 +314,8 @@ The program returns these as `custom program error: 0x…` (hex) or
 | 3005 | `0xbbd` | `InvalidMessageHash` | The signed challenge differs from what the program recomputed: wrong accounts, wrong payload, or a client still building the challenge without the wallet (v2 names the wallet in it). |
 | 3006 | `0xbbe` | `SignatureReused` | The passkey signed a counter that was already used. See `SignatureReusedError` above. |
 | 3007 | `0xbbf` | `InvalidSignatureAge` | The challenge's slot is in the future or 150 or more slots old. Approve and send faster, or read the slot at a lower commitment. |
-| 3008 | `0xbc0` | `InvalidSessionDuration` | Session expiry not in the future, or more than 6,480,000 slots ahead. |
-| 3009 | `0xbc1` | `SessionExpired` | The session's expiry slot has passed. Create a new session. |
+| 3008 | `0xbc0` | `InvalidSessionDuration` | The session's `expires_at` is not after the cluster's Unix time, or is more than 30 days (2,592,000 s) ahead of it. A slot sent by an older SDK (`@lazorkit/wallet` 3.4.1, adapter 2.4.0, sdk-legacy 1.x, sdk rc.6) is refused this way on devnet's v2. A program without time-based expiry read it as a slot: at most 6,480,000 slots ahead. |
+| 3009 | `0xbc1` | `SessionExpired` | The session's expiry has passed: the cluster's Unix time is past `expires_at` (a v1 session: the slot). A session created before devnet's time-based release reads as expired. Create a new session. |
 | 3010 | `0xbc2` | `AuthorityDoesNotSupportSession` | Only an Owner or Admin may create or revoke sessions. |
 | 3011 | `0xbc3` | `InvalidAuthenticationKind` | The authentication type does not match the authority (Ed25519 vs Secp256r1). |
 | 3012 | `0xbc4` | `InvalidMessage` | The signed payload could not be parsed. |
@@ -280,28 +329,31 @@ The program returns these as `custom program error: 0x…` (hex) or
 
 ### Spending limits and policies (3020–3038)
 
-These apply to session keys and to Delegate authorities, which run the same action engine.
+These apply to session keys and to Delegate authorities, which run the same action engine;
+3030–3032 apply to every signer that is not an Owner: sessions with or without actions,
+Admins and Delegates. On devnet's v2 that rule covers Admins and sessions without actions
+too; on an earlier build it covered only a signer with a policy.
 
 | Code | Hex | Name | Meaning |
 | ---- | --- | ---- | ------- |
 | 3020 | `0xbcc` | `ActionBufferInvalid` | The actions buffer is malformed. Build it with `Actions.*` / `serializeActions`. |
 | 3021 | `0xbcd` | `ActionProgramNotWhitelisted` | An inner instruction targets a program outside the whitelist. |
 | 3022 | `0xbce` | `ActionProgramBlacklisted` | An inner instruction targets a blacklisted program. |
-| 3023 | `0xbcf` | `ActionSolMaxPerTxExceeded` | SOL outflow in one execute exceeds `SolMaxPerTx`. |
+| 3023 | `0xbcf` | `ActionSolMaxPerTxExceeded` | SOL outflow in one execute exceeds `SolMaxPerTx`. `@lazorkit/wallet` 4.0 does not resend it. |
 | 3024 | `0xbd0` | `ActionSolLimitExceeded` | The lifetime SOL cap is spent. Limits cannot be changed: revoke and create a new session. |
 | 3025 | `0xbd1` | `ActionSolRecurringLimitExceeded` | The SOL cap for the current window is spent. Wait for the window to reset. |
 | 3026 | `0xbd2` | `ActionTokenLimitExceeded` | The lifetime token cap is spent. |
 | 3027 | `0xbd3` | `ActionTokenRecurringLimitExceeded` | The token cap for the current window is spent. |
 | 3028 | `0xbd4` | `ActionWhitelistBlacklistConflict` | The same program is both whitelisted and blacklisted. |
 | 3029 | `0xbd5` | `ActionTokenMaxPerTxExceeded` | Token outflow in one execute exceeds `TokenMaxPerTx`. |
-| 3030 | `0xbd6` | `SessionVaultOwnerChanged` | An inner instruction tried to reassign the vault (`System::Assign`). |
-| 3031 | `0xbd7` | `SessionVaultDataLenChanged` | An inner instruction changed the vault's data length. |
-| 3032 | `0xbd8` | `SessionTokenAuthorityChanged` | An inner instruction changed a vault token account's owner, delegate or close authority. From the program release that adds 3037 and 3038: anything about a vault token account passed writable but its balance, or a delegate or close authority on a token account that became the vault's during the transaction. |
+| 3030 | `0xbd6` | `SessionVaultOwnerChanged` | The vault's owner changed (`System::Assign`) during an `Execute` signed by anyone but an Owner. |
+| 3031 | `0xbd7` | `SessionVaultDataLenChanged` | The vault's data length changed (`System::Allocate`) during an `Execute` signed by anyone but an Owner. |
+| 3032 | `0xbd8` | `SessionTokenAuthorityChanged` | During an `Execute` signed by anyone but an Owner, a vault token account passed writable changed anything but its balance (`SetAuthority`, `Approve`, `Revoke`, `CloseAccount`, freezing), or a token account that became the vault's carries a delegate or close authority. |
 | 3033 | `0xbd9` | `DelegateRequiresPolicy` | A Delegate (`ROLE_SPENDER`) was added without a policy. |
 | 3034 | `0xbda` | `PolicyBearingAuthorityCannotDelegate` | An authority with a policy tried to add an authority. |
 | 3035 | `0xbdb` | `PolicyRankMismatch` | A policy was attached to an Owner or Admin. Only Delegates carry one. |
 | 3036 | `0xbdc` | `SessionNotExpired` | `CloseExpiredSession` on a session that is still live. |
-| 3037 | `0xbdd` | `ActionUnlistedSolOutflow` | The vault's SOL would fall, rent for a new account included, and the policy has no `Sol*` action. From the v2 program release that adds it, not deployed yet. See `UnlistedSolOutflowError`. |
+| 3037 | `0xbdd` | `ActionUnlistedSolOutflow` | The vault's SOL would fall, rent for a new account included, and the policy has no `Sol*` action. On devnet's v2 since 2026-10-03. See `UnlistedSolOutflowError`. |
 | 3038 | `0xbde` | `ActionUnlistedTokenOutflow` | The vault's balance of a mint would fall, and no `Token*` action names that mint (wSOL is a mint). From the same release. See `UnlistedTokenOutflowError`. |
 
 ### Protocol and deployment (4001–4018)
@@ -350,6 +402,7 @@ console.log(code, name, Object.keys(ERROR_NAMES).length);
 `extractErrorCode` reads the error's text only: it returns `null` for a
 `{ InstructionError: … }` object. `ERROR_NAMES` and `errorFromCode` name 3036
 (`SessionNotExpired`), 3037, 3038 and 4018 (`RetiredDeployment`) in `@lazorkit/sdk-legacy`
-1.4.0, `@lazorkit/wallet` 3.4.0 and `@lazorkit/wallet-mobile-adapter` 2.4.0. In earlier
+1.4.0 and 2.0.0, `@lazorkit/wallet` 3.4.0 and later and `@lazorkit/wallet-mobile-adapter`
+2.4.0 and later. In earlier
 releases they have no entry for these codes, and `errorFromCode` returns `undefined`; use
 the tables above.

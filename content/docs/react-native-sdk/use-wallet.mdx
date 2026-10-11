@@ -14,6 +14,11 @@ opens the portal, signs the challenge with a passkey, relays the resulting trans
 through the paymaster, and resolves once it is **confirmed** — see
 [Sending transactions](/react-native-sdk/sending-transactions).
 
+This page describes 2.4.0 (`latest`); where the 3.0 pre-release (`next`) differs it says
+so: `createSession` takes its expiry in seconds, and `createSession`, `revokeSession` and
+`removeAuthority` send the portal a typed request. See
+[Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
+
 <Callout type="info" title="Every mutation takes options">
   Passkey-signed methods require a trailing `options: SignOptions` argument with your
   `redirectUrl` and optional `onSuccess` / `onFail` callbacks. Session-signed methods
@@ -340,6 +345,58 @@ a passkey, then sign many transactions with a local Ed25519 key.
 
 ### `createSession`
 
+<Callout type="error" title="On devnet, sessions need 3.0">
+  Devnet's v2 program reads a session's expiry as a Unix time since 2026-10-11. Adapter
+  2.4.0 sends `expiresAtSlot`, a slot, so its `createSession` on a v2 wallet is refused
+  there with `InvalidSessionDuration` (3008), after the user approved. Use 3.0 (`@next`) for
+  sessions on devnet. 2.4.0 still creates sessions on v1 wallets, which count in slots. See
+  [Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
+</Callout>
+
+<Tabs items={['3.0 (next)', '2.4 (latest)']}>
+<Tab value="3.0 (next)">
+
+```ts
+import { Actions } from '@lazorkit/wallet-mobile-adapter';
+import { Keypair } from '@solana/web3.js';
+
+const sessionKp = Keypair.generate();
+
+const { signature, sessionPda } = await createSession(
+  {
+    sessionKey: sessionKp.publicKey,
+    expiresInSeconds: 86_400,                 // a day, by the cluster clock; default 5 hours
+    actions: [
+      Actions.solRecurringLimit({ limit: 1_000_000_000n, windowSeconds: 86_400n }), // 1 SOL a day
+      Actions.solMaxPerTx(500_000_000n),      // rent the vault pays counts as SOL
+      Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 50_000_000n }), // each mint it may spend
+      Actions.programWhitelist(JUPITER_PROGRAM_ID),
+    ],
+  },
+  { redirectUrl: 'myapp://callback' },
+);
+```
+
+| Field              | Type                 | Notes |
+| ------------------ | -------------------- | ----- |
+| `sessionKey`       | `PublicKey`          | The session's Ed25519 public key; you keep the secret key. |
+| `expiresInSeconds` | `number \| bigint`   | How long it lasts, counted from the cluster's time when `createSession` reads it: more than 0, at most 30 days (`MAX_SESSION_SECONDS`). Default `DEFAULTS.SESSION_EXPIRY_SECONDS`, 5 hours. |
+| `expiresAt`        | `number \| bigint`   | When it ends instead, as a Unix time in seconds: after the cluster's time, at most 30 days ahead of it. |
+| `expiresAtSlot`    | `bigint`             | **Deprecated**, no longer required. On a v2 wallet the slots left until it are converted to seconds with the cluster's measured slot time, with a warning; it throws when the slot time cannot be read. Give at most one of the three. |
+| `actions`          | `SessionAction[]`    | Required unless `unrestricted: true`. Recurring limits take `windowSeconds`; an action's own `expiresAt` is a Unix time. More than 16 actions, or more than 224 bytes of them, throws a `RangeError` before the portal opens. |
+| `unrestricted`     | `boolean`            | A session with no limits, explicitly. |
+
+The expiry is checked against the cluster clock before the portal opens. On a v2 wallet the
+portal shows what the session may spend and until when before the user approves, and the
+adapter checks the redirect against the request it prepared:
+[What the user approves](#what-the-user-approves-30). On a v1 wallet the session still
+counts in slots: with no expiry it ends `DEFAULTS.SESSION_EXPIRY_SLOTS` (50,000) slots
+ahead, `expiresAtSlot` is used as given, and `expiresInSeconds`, `expiresAt` and a
+`windowSeconds` are converted to slots with the measured slot time.
+
+</Tab>
+<Tab value="2.4 (latest)">
+
 ```ts
 import { Actions } from '@lazorkit/wallet-mobile-adapter';
 import { Keypair } from '@solana/web3.js';
@@ -362,6 +419,14 @@ const { signature, sessionPda } = await createSession(
 );
 ```
 
+`expiresAtSlot` is required: an absolute slot. A v2 program without time-based expiry
+allowed at most 6,480,000 slots ahead; devnet's v2 now refuses any slot (3008). The
+recurring builders take `window`, in slots. Nothing checks the actions' size before the
+portal opens: keep them within 244 bytes, or they fail after the user approved.
+
+</Tab>
+</Tabs>
+
 Persist `sessionKp.secretKey` securely (e.g. `expo-secure-store`) along with `sessionPda`
 and the wallet it belongs to; use it only while that wallet is connected, and delete it at
 disconnect and once the session is revoked or expired. The adapter never stores it. The
@@ -371,28 +436,28 @@ section has a worked example.
 
 `actions` is required: without it `createSession` throws, unless you pass
 `unrestricted: true` for a session that can spend the whole vault through any program until
-it expires. The program allows at most 6,480,000 slots of expiry.
+it expires.
 
-**Name every asset the session may spend.** From the v2 program release that adds errors
-3037 and 3038, SOL leaves the wallet only with an `Actions.sol*` action (`solMaxPerTx`,
-`solLimit`, `solRecurringLimit`), rent the vault pays for a new account included, and a
-token only with an `Actions.token*` action (`tokenMaxPerTx`, `tokenLimit`,
-`tokenRecurringLimit`) for its mint. wSOL is a mint of its own. That release is not
-deployed yet; until it is, an asset the actions do not name is not bounded at all. See
+**Name every asset the session may spend.** Where errors 3037 and 3038 apply (devnet's v2
+since 2026-10-03; mainnet once v2 is deployed there), SOL leaves the wallet only with an
+`Actions.sol*` action (`solMaxPerTx`, `solLimit`, `solRecurringLimit`), rent the vault pays
+for a new account included, and a token only with an `Actions.token*` action
+(`tokenMaxPerTx`, `tokenLimit`, `tokenRecurringLimit`) for its mint. wSOL is a mint of its
+own. No session can change who controls the vault or its token accounts (3030–3032). See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
-**Keep the actions within 244 bytes**, at most 16 of them and one of each kind per mint:
+**Keep the actions within 224 bytes**, at most 16 of them and one of each kind per mint:
 they share the transaction that registers them with the passkey's response. A `sol*`
 action takes 19 bytes (`solRecurringLimit` 43), `tokenMaxPerTx` and `tokenLimit` 51,
 `tokenRecurringLimit` 75: `solMaxPerTx` with `tokenMaxPerTx` and `tokenLimit` for 2 mints,
-or with `tokenMaxPerTx` for 4. Nothing checks this before the portal opens: actions that do
-not fit fail after the user approved.
+or with `tokenMaxPerTx` for 4. Adapter 3.0 checks this before the portal opens; 2.4.0 does
+not check it.
 
 <Callout type="warn" title="Actions are immutable">
   Once a session is created, its action list can't be modified. To change limits, revoke
   the session and create a new one. The program does not create a second session for a
   key while the first exists: revoke first, or use a new key. A session whose actions name
-  SOL only moves no token once the program release above is deployed.
+  SOL only moves no token where error 3038 applies.
 </Callout>
 
 **Returns** `Promise<{ signature: string; sessionPda: PublicKey }>`.
@@ -411,8 +476,8 @@ const sig = await signAndSendWithSession({
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) or related action errors once limits are hit.
-See [Troubleshooting](/troubleshooting). From the program release that adds errors 3037
-and 3038, a transaction that would move SOL, or a token, that the session's actions do not
+See [Troubleshooting](/troubleshooting). Where errors 3037 and 3038 apply (devnet's v2
+today), a transaction that would move SOL, or a token, that the session's actions do not
 name rejects with `UnlistedSolOutflowError` ("This session is not allowed to spend SOL") or
 `UnlistedTokenOutflowError` ("This session is not allowed to spend this token") (2.4.0),
 with the original error as `cause`; nothing in it ran. See
@@ -431,7 +496,29 @@ const signature = await revokeSession(
 ```
 
 After a session expires, anyone may close it with `CloseExpiredSession` and keep the
-rent; revoke it yourself if you want the rent back.
+rent; revoke it yourself if you want the rent back. To check a kept key's session is still
+live, compare its `expiresAt` with the cluster's time
+(`new LazorKitClient(connection).getClusterTime()`); a session made by 2.4.0 stores a slot.
+
+### What the user approves (3.0)
+
+In 3.0, `createSession`, `revokeSession` and `removeAuthority` on a v2 wallet send the
+portal the operation itself, a *typed request* in the URL fragment (`#/?lk1=…`). The portal
+shows exactly what the passkey approves ("Let MyApp spend up to 0.002 SOL per payment and 5
+USDC in total, until about 6:50 PM"), recomputes the challenge from it, and picks the slot
+it signs at when the user taps Approve. Other passkey actions, and wallets made before
+LazorKit v2, open the portal as in 2.x.
+
+Before anything is sent, the adapter checks the redirect against the request it prepared:
+the passkey must have signed this operation, at the slot and counter the portal names
+(`typedV`, `typedKind`, `typedSlot`, `typedCounter`, `typedSysvarIx`), or at the prepared ones
+when the portal names none. A redirect that does not match, a forged deep link included,
+rejects with `PortalReplyMismatchError`, and nothing is sent. The portal's refusals
+(`type=error&code=…`) mean the passkey signed nothing: `RequestOutOfDateError`
+(`stale-counter`; `retryable: true`) or `PortalRefusedError` with the portal's `code`. A
+request whose URL would be over 16,384 characters is refused with
+`TypedRequestTooLargeError` before the browser opens. See
+[Errors › Typed approval requests](/errors#typed-approval-requests-40).
 
 ---
 
@@ -480,7 +567,7 @@ each rank may do:
 For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a v2 wallet a
 Delegate **throws without a `policy`** (on chain: 3033), and a policy on any other rank is
 refused (3035). A policy names what may leave the wallet, as a session's actions do, and
-must fit in the same 244 bytes; see
+must fit in the same 224 bytes (nothing checks it before the portal opens); see
 [What a policy bounds](/concepts/session-keys#what-a-policy-bounds). On a **v1** wallet,
 pass `unrestricted: true` and no policy: v1 never checked rank at `Execute`, so any key
 you add can spend the whole vault.
@@ -504,6 +591,9 @@ await removeAuthority(
   only Delegates. `transferOwnership` isn't exposed through the hook — use
   `LazorKitClient` directly.
 </Callout>
+
+In 3.0 the portal shows the removal as a typed request before the user approves:
+[What the user approves](#what-the-user-approves-30).
 
 ### `listAuthorities`
 

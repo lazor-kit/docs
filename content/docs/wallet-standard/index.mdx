@@ -22,10 +22,12 @@ npm install @lazorkit/wallet @solana/web3.js@^1.99.0 \
   @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
 ```
 
-This page describes `@lazorkit/wallet` 3.x (current: 3.4.0). The adapter speaks protocol
+This page describes `@lazorkit/wallet` 3.x (current: 3.4.1). The adapter speaks protocol
 v2, and v1 for wallets made before it; mainnet runs v1 today — see
 [Networks & versions](/networks). Since 3.3.1 the wallet declares no `@solana/kit` peer,
-so it installs in an app on `@solana/kit` 6, 7 or 8.
+so it installs in an app on `@solana/kit` 6, 7 or 8. In the 4.0 pre-release the adapter
+and the Wallet Standard wallet are unchanged and stay portal-only (Embedded mode for them
+is not in 4.0), and their disconnect still disconnects the page's store, in either mode.
 
 ## Setup
 

@@ -19,6 +19,14 @@ the same `useWallet` hook.
   deployed. See [Networks & versions](/networks).
 </Callout>
 
+<Callout type="info" title="This page: 3.4.1 (latest)">
+  The steps below install `@lazorkit/wallet` 3.4.1. The 4.0 pre-release
+  (`npm install @lazorkit/wallet@next`) needs `mode="portal"` on `LazorkitProvider` for the
+  same setup, or `mode="embedded"` for passkeys on your own domain
+  ([Embedded mode](/react-sdk/embedded-mode)). Creating a session on devnet needs 4.0:
+  [Migrating to 4.0](/react-sdk/migrating-to-4).
+</Callout>
+
 ## Prerequisites
 
 - React 18.3+ or 19
@@ -116,7 +124,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-That's the minimum. Override defaults via props:
+That's the minimum. With 4.0 it is `<LazorkitProvider mode="portal">`: `mode` is required
+there, with no default. Override defaults via props:
 
 ```tsx
 <LazorkitProvider

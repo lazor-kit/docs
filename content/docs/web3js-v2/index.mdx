@@ -10,7 +10,7 @@ types (`Address`, `Instruction`, `Rpc`) and tree-shakable module functions, and 
 the same transactions.
 
 <Callout type="warn" title="Release candidate, protocol v2 only">
-  - Current release **1.0.0-rc.6**, on both the `latest` and `next` npm tags. Its surface is
+  - Current release **1.0.0-rc.7**, on both the `latest` and `next` npm tags. Its surface is
     complete for protocol v2 and covered by unit tests and a local-validator suite; three
     public paths are not covered by tests yet (`revokeSession`, the one-shot
     `transferOwnership`, `signWithSecp256r1`).
@@ -65,6 +65,40 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
 `rpc` must support `getAccountInfo`, `getMultipleAccounts`, `getProgramAccounts`,
 `getSlot` and `getTokenAccountsByOwner`; `createSolanaRpc(url)` does.
 
+## Session time is Unix seconds (rc.7)
+
+rc.7 measures a session's `expiresAt`, an action's own `expiresAt` and a recurring limit's
+`windowSeconds` in Unix seconds of the cluster clock, as devnet's v2 program does since
+2026-10-11. rc.6 and earlier send slots, which devnet's v2 refuses for a session (3008).
+
+Continuing the quick start:
+
+```ts
+import { Actions, MAX_SESSION_SECONDS } from '@lazorkit/sdk';
+
+const sessionKey = await generateKeyPairSigner();      // the key the session signs with
+const { unixTimestamp } = await lk.getClusterTime();   // the Clock sysvar the program reads
+const { instructions, sessionPda } = await lk.createSession({
+  payer: payer.address,
+  walletPda,
+  adminSigner: ed25519(owner.address),
+  sessionKey: sessionKey.address,
+  expiresAt: unixTimestamp + 86_400n,                    // a day; at most MAX_SESSION_SECONDS
+  actions: [Actions.solRecurringLimit({ limit: 1_000_000_000n, windowSeconds: 86_400n })],
+});
+console.log(MAX_SESSION_SECONDS, sessionPda, instructions.length);
+```
+
+- `createSession` / `prepareCreateSession` throw before any read or prompt on an `expiresAt`
+  that looks like a slot (below 2020-01-01), and `serializeActions` on an action expiry that
+  does, so a Delegate policy is checked too. The program refuses an expiry not after the
+  cluster's time, or more than 30 days (`MAX_SESSION_SECONDS`) ahead of it (3008).
+- `Actions.solRecurringLimit` / `tokenRecurringLimit` take `windowSeconds` (`86_400n` is a
+  day) instead of `window`, so code written for slots fails to compile.
+- `WalletFacts` gains `unixTimestamp`, and `liveSessions[].expiresAt` replaces
+  `expiresAtSlot`.
+- A deferred execution's `expiryOffset` is still a slot count.
+
 ## What is the same as `@lazorkit/sdk-legacy` 1.x
 
 - Every instruction, PDA seed (`lk2:`) and account layout; a parity suite checks both SDKs
@@ -83,15 +117,18 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
 - Sessions (no actions throws without `unrestricted: true`), Delegate policies, deferred
   execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`. A
   policy names what may leave the vault: from the v2 program release that adds errors 3037
-  and 3038 (not deployed yet), nothing it does not name may
-  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)).
+  and 3038 (on devnet since 2026-10-03), nothing it does not name may
+  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Only an Owner may
+  change who controls the vault or its token accounts: every other signer, any session,
+  an Admin or a Delegate, is refused with 3030–3032, policy or not.
+- Time in Unix seconds (rc.7 / sdk-legacy 2.0.0), as above.
 - `MinContextSlotNotReachedError` and the error codes on [Errors](/errors).
 
 ## What is different
 
 - **Smaller surface:** no `parseActions`, `findAuthoritiesByWallet` or
-  `getRecoveryStatus` yet, and no `ERROR_NAMES` table — use `@lazorkit/sdk-legacy` for
-  those.
+  `getRecoveryStatus` yet, no `ERROR_NAMES` table, and no typed approval requests (the
+  `@lazorkit/sdk-legacy/approval` subpath) — use `@lazorkit/sdk-legacy` for those.
 - **More low-level builders are exported**, including `createCloseExpiredSessionIx` (close
   an expired session and keep its rent) and `createMigrateWalletIx`.
 - **Account decoders:** `decodeWalletAccount`, `decodeAuthorityAccount`,
