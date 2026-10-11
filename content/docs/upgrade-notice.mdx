@@ -4,12 +4,16 @@ description: What changes for apps on each SDK version when the LazorKit portal 
 ---
 
 This page collects the changes that reach apps built on LazorKit in the coming weeks, and
-what to do about each. Details for each SDK are on its own pages, linked below.
+what to do about each. Details for each SDK are on its own pages, linked below. What is
+deployed where, and which SDK versions work with which program:
+[Versions & compatibility](/versions). How long releases are supported and how much notice
+changes get: [Support policy](/support-policy).
 
 ## 1. The LazorKit portal is being updated
 
-The LazorKit portal (`portal.lazor.sh`) is being updated on **[DATE]**. What it means
-for your app depends on the SDK version you ship:
+The LazorKit portal (`portal.lazor.sh`) is being updated on **[DATE]**. The date is
+announced at least 2 weeks ahead. What it means for your app depends on the SDK version
+you ship:
 
 | Your SDK | After the portal update | What to do |
 | -------- | ----------------------- | ---------- |
@@ -46,8 +50,12 @@ How message signing and verification work since 3.3.1 / 2.3.1:
   npm install @lazorkit/wallet-mobile-adapter@next  # 3.0.0-next.0
   ```
 
-  Sessions created on devnet before 2026-10-11 have expired. See
-  [Migrating to 4.0](/react-sdk/migrating-to-4).
+  With 3.4.1 and earlier, the user approves with their passkey and only then is the
+  session refused. The coming `@lazorkit/wallet` 3.4.2 refuses `createSession` on a v2
+  wallet with a clear error before the passkey prompt; creating the session still needs
+  4.0. Sessions created on devnet before 2026-10-11 have expired. See
+  [Migrating to 4.0](/react-sdk/migrating-to-4) and the tested combinations in
+  [Versions & compatibility](/versions#compatibility).
 - **The default devnet paymaster is moving.** The SDKs' default devnet paymaster will move
   to a new relayer that sponsors protocol v2 only: v1 transactions on devnet will no
   longer be sponsored by it. An app with v1 wallets on devnet needs a relayer of its own
@@ -58,7 +66,10 @@ How message signing and verification work since 3.3.1 / 2.3.1:
 
 v1 wallets and the current mainnet relayer are unchanged for now. Protocol v2 on mainnet,
 and the move to `@lazorkit/wallet` 4.0, will be announced separately. What is deployed
-where: [Networks & versions](/networks).
+where: [Networks & versions](/networks) and, with build hashes and upgrade authorities,
+[Versions & compatibility](/versions). Retiring v1 on mainnet is announced at least 90 days
+ahead, and v1 is never closed: it moves to a sunset build that only allows withdrawing and
+migrating to v2 ([Support policy](/support-policy#notice-before-changes)).
 
 ## 4. Checklist
 

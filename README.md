@@ -34,6 +34,9 @@ Open [http://localhost:3000](http://localhost:3000).
 content/docs/
   index.mdx               Landing page
   protocol.mdx            Protocol overview (for investors and builders)
+  upgrade-notice.mdx      Upcoming changes for integrators
+  versions.mdx            Programs (status, build hashes, upgrade authority, audit), retired programs, compatibility
+  support-policy.mdx      Supported versions, notice periods, security reports
   networks.mdx            Program ids, package versions, what is deployed where
   v1-to-v2.mdx            Protocol v1 and v2 side by side, the v1 sunset, MigrateWallet
 
