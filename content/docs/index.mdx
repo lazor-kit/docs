@@ -29,6 +29,19 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
 
 ---
 
+## Which package do I use?
+
+| You are building | Package | Install | Version |
+| ---------------- | ------- | ------- | ------- |
+| A **React** web app | [`@lazorkit/wallet`](/react-sdk) | `npm i @lazorkit/wallet` | 3.4.1 (`latest`). 4.0.0-next.0 on `@next`, which creating a session on devnet needs |
+| A **React Native** or Expo app | [`@lazorkit/wallet-mobile-adapter`](/react-native-sdk) | `npm i @lazorkit/wallet-mobile-adapter` | 2.4.0 (`latest`). 3.0.0-next.0 on `@next`, which creating a session on devnet needs |
+| Program-level code on **`@solana/web3.js` v1**: your own UI, a backend, a relayer, an agent | [`@lazorkit/sdk-legacy`](/web3js-v1) | `npm i @lazorkit/sdk-legacy@next` | 2.0.0, protocol v2. Without `@next` you get `latest`, 0.3.2, the protocol v1 line |
+| The same on **`@solana/kit`** (web3.js v2) | [`@lazorkit/sdk`](/web3js-v2) | `npm i @lazorkit/sdk @solana/kit` | 1.0.0-rc.7, release candidate, protocol v2 only |
+
+The two UI SDKs handle the portal, the paymaster and confirmation for you, and install
+`@lazorkit/sdk-legacy` themselves. Peer dependencies are in each Getting Started. Which
+network each version works on: [Networks & versions](/networks).
+
 ## SDKs
 
 <Cards>

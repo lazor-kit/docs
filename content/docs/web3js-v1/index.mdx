@@ -20,6 +20,15 @@ For application code, reach for the [React SDK](/react-sdk) or
 [React Native SDK](/react-native-sdk) — both build on this SDK and handle the portal,
 paymaster, confirmation and sequencing for you.
 
+## Which package do I use?
+
+| You are building | Package | Install | Version |
+| ---------------- | ------- | ------- | ------- |
+| A **React** web app | [`@lazorkit/wallet`](/react-sdk) | `npm i @lazorkit/wallet` | 3.4.1 (`latest`). 4.0.0-next.0 on `@next`, which creating a session on devnet needs |
+| A **React Native** or Expo app | [`@lazorkit/wallet-mobile-adapter`](/react-native-sdk) | `npm i @lazorkit/wallet-mobile-adapter` | 2.4.0 (`latest`). 3.0.0-next.0 on `@next`, which creating a session on devnet needs |
+| Program-level code on **`@solana/web3.js` v1**: your own UI, a backend, a relayer, an agent | [`@lazorkit/sdk-legacy`](/web3js-v1) | `npm i @lazorkit/sdk-legacy@next` | 2.0.0, protocol v2. Without `@next` you get `latest`, 0.3.2, the protocol v1 line |
+| The same on **`@solana/kit`** (web3.js v2) | [`@lazorkit/sdk`](/web3js-v2) | `npm i @lazorkit/sdk @solana/kit` | 1.0.0-rc.7, release candidate, protocol v2 only |
+
 ## Install
 
 Two lines of this package are published, one per protocol version:
