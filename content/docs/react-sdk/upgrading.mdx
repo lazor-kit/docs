@@ -182,8 +182,9 @@ server checks, and item 4 what a sign-out deletes. Full notes: the package
    `signature` and `signedPayload` as before, plus `clientDataJsonBase64` and
    `authenticatorDataBase64`. Send all four to your server with the wallet and its
    `credentialId`, and check them with `verifyWalletMessage`, which reads the passkey's key
-   from chain. A signature made by 3.3.0 or earlier does not verify: ask the user to sign
-   again. See [useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+   from chain (on a 4.0 server, import it from `@lazorkit/wallet/core`). A signature made by
+   3.3.0 or earlier does not verify: ask the user to sign again. See
+   [useWallet › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
 2. **Stop authenticating with `verifyMessage` or `verifySignatureBrowser`.** Both are
    deprecated. They check only that `signature` is over `signedPayload`, not which message
    was signed, so any assertion the passkey ever made passes.

@@ -79,8 +79,10 @@ migrating to v2 ([Support policy](/support-policy#notice-before-changes)).
    a session approves, `@lazorkit/wallet@next` (4.0.0-next.0) /
    `@lazorkit/wallet-mobile-adapter@next` (3.0.0-next.0).
 2. **Verify message signatures on your server** with `verifyWalletMessage`, which reads the
-   passkey's key from chain, never with the deprecated `verifyMessage`. Signatures made by a
-   release before 3.3.1 / 2.3.1 do not verify: ask users to sign again.
+   passkey's key from chain, never with the deprecated `verifyMessage`. With 4.0, import it
+   from `@lazorkit/wallet/core` on the server: the package root is a client module.
+   Signatures made by a release before 3.3.1 / 2.3.1 do not verify: ask users to sign
+   again.
 3. **Pass session expiry in seconds** with 4.0 / 3.0: `expiresInSeconds` (at most 30 days)
    or `expiresAt` (a Unix time), and `windowSeconds` for recurring limits. With 4.0, add
    `mode="portal"` to `LazorkitProvider`. See

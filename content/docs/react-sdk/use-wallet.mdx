@@ -322,7 +322,12 @@ with "The portal did not sign this message: its reply is over another challenge.
 A message signature proves that a passkey's key signed the message, not which wallet that
 key belongs to. To authenticate a wallet, read the key from the chain, never from the
 client: a server that takes the key from the request accepts anyone's passkey for any
-wallet they name. `verifyWalletMessage`, a package export, does the lookup:
+wallet they name. `verifyWalletMessage`, a package export, does the lookup.
+
+On a server, import it from **`@lazorkit/wallet/core`** in 4.0: the package root and
+`/hooks` are client modules (`'use client'`) and import React, so a Next.js route handler or
+a Node server must not load them. `/core` has no React. 3.x has no `/core`: import from
+`@lazorkit/wallet`.
 
 ```ts
 // In the app: sign a message your server issued, and send the result with the wallet.
@@ -337,7 +342,7 @@ await fetch('/api/sign-in', {
 ```ts
 // On the server
 import { Connection } from '@solana/web3.js';
-import { verifyWalletMessage } from '@lazorkit/wallet';
+import { verifyWalletMessage } from '@lazorkit/wallet/core'; // 3.x: from '@lazorkit/wallet'
 
 const ok = await verifyWalletMessage({
   connection: new Connection(RPC_URL),
@@ -378,8 +383,9 @@ sign-in message.
 **Returns** `Promise<boolean>`.
 
 **Offline: `verifySignedMessage`.** `verifySignedMessage({ message, publicKey, ...result })`
-is the part of that check that needs no RPC: `true` only when `publicKey`'s passkey signed
-`signedMessageChallenge(message)` with the user present, and `false` for any other
+(also from `@lazorkit/wallet/core` in 4.0) is the part of that check that needs no RPC:
+`true` only when `publicKey`'s passkey signed `signedMessageChallenge(message)` with the
+user present, and `false` for any other
 challenge, the raw message bytes included. It never throws. It proves that a key signed
 the message and nothing about which wallet holds that key, so use it alone only with a key
 you read from the claimed wallet's authority on chain yourself. `publicKey` is the P-256

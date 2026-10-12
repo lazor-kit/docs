@@ -664,12 +664,15 @@ key belongs to. To authenticate a wallet, read the key from the chain, never fro
 client: a server that takes the key from the request accepts anyone's passkey for any
 wallet they name. Send the result to your server with the wallet's address
 (`smartWalletPubkey`) and `wallet.credentialId`, and check it there with
-`verifyWalletMessage`:
+`verifyWalletMessage`. The adapter exports it too, but the adapter loads React Native and
+Expo modules, so a server imports it from the web package's React-free entry,
+**`@lazorkit/wallet/core`** (4.0; with `@lazorkit/wallet` 3.x, from the root). Both check
+the same signature: the portal signs `signedMessageChallenge(message)` for either SDK.
 
 ```ts
+// On the server
 import { Connection } from '@solana/web3.js';
-import { verifyWalletMessage } from '@lazorkit/wallet-mobile-adapter';
-// or, on a server without React Native: from '@lazorkit/wallet'
+import { verifyWalletMessage } from '@lazorkit/wallet/core'; // @lazorkit/wallet 3.x: from '@lazorkit/wallet'
 
 const ok = await verifyWalletMessage({
   connection: new Connection(RPC_URL),

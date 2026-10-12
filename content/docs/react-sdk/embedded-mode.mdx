@@ -183,8 +183,8 @@ The passkey signs it in the page, and the signature is checked against the reque
 anything is sent. These three have no review sheet in 4.0.0-next.0. Session and authority
 keys work as in portal mode: `spendingLimits` are checked before the passkey is asked, and a
 send that loaded its key before a disconnect neither signs nor sends after it.
-`signMessage` signs the same challenge as in portal mode; check it with
-`verifyWalletMessage`, with your `rpId` as `rpId`.
+`signMessage` signs the same challenge as in portal mode; check it on your server with
+`verifyWalletMessage` from `@lazorkit/wallet/core`, with your `rpId` as `rpId`.
 
 ## Status
 

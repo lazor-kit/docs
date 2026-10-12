@@ -267,7 +267,8 @@ export function SignIn({ message }: { message: string }) {
 
 **Check it on your server with `verifyWalletMessage`**, which reads the passkey's key from
 chain: `verifyWalletMessage({ connection, wallet, credentialId, rpId: 'portal.lazor.sh',
-message, ...result })`. It is `true` only when the signature is over this message and
+message, ...result })`. On a server, import it from `@lazorkit/wallet/core` in 4.0 (the
+package root is a client module); 3.x has only the root. It is `true` only when the signature is over this message and
 verifies against the key stored on chain in an Owner authority of `wallet` for
 `credentialId`; a credential id that names another passkey simply fails. The Wallet
 Standard account does not carry the credential id, so read it from the stored wallet as
