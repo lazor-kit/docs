@@ -167,7 +167,7 @@ const { instructions, walletPda, vaultPda, authorityPda } = await client.createW
 ```
 
 Creates Wallet PDA, Vault PDA, and the first Authority PDA in one transaction. `client` is
-a `LazorKitClient` from `@lazorkit/sdk-legacy` 1.x.
+a `LazorKitClient` from `@lazorkit/sdk-legacy` 2.x (`@next`).
 
 `compressedPubkey` must be the passkey's real key. Registration
 (`navigator.credentials.create`) returns it; a sign-in assertion does not. For a passkey

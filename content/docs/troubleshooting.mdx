@@ -60,8 +60,8 @@ npm install @lazorkit/wallet@^3.3.1
 
 ### `Buffer is not defined`
 
-`@lazorkit/wallet` 3.0.2 and later, and `@lazorkit/sdk-legacy` 0.3.2 / 1.x, need no global
-`Buffer`. If another library in your app does, polyfill it per environment:
+`@lazorkit/wallet` 3.0.2 and later, and `@lazorkit/sdk-legacy` 0.3.2, 1.x and 2.x, need no
+global `Buffer`. If another library in your app does, polyfill it per environment:
 
 <Tabs items={['React Native / Expo', 'Next.js', 'Vite', 'Create React App']}>
 <Tab value="React Native / Expo">
@@ -549,7 +549,7 @@ passkey's v2 wallet.
 A v2 `CreateWallet`, `Execute` or `ExecuteDeferred` came without the four protocol-fee
 accounts. v2 requires them even when no fee is charged. You are using an SDK older than
 the v2 release, or building instructions by hand: use the `LazorKitClient` methods of
-`@lazorkit/sdk-legacy` 1.x.
+`@lazorkit/sdk-legacy` 2.x (`npm install @lazorkit/sdk-legacy@next`).
 
 ### `InvalidMessageHash` / `0xbbd` (3005) on every passkey transaction
 
