@@ -33,6 +33,8 @@ the provider, call the hook.
 - React Native **≥ 0.70**; Expo SDK **54** (the adapter depends on `expo-web-browser` 14.2 or
   15 and `expo-crypto` 15; older Expo SDKs are untested)
 - A physical device or a simulator with biometrics enrolled (see [Troubleshooting](/troubleshooting) if you hit `NotAllowedError`)
+- iOS with **Xcode 27 and Expo SDK 54**: an iOS deployment target of **15.1** or later, and a
+  UTF-8 locale for CocoaPods ([below](#ios-xcode-27-and-expo-sdk-54))
 - A deep-link scheme for your app (e.g. `myapp://`)
 
 ---
@@ -59,6 +61,25 @@ an old pre-v2 build.
   `@solana/web3.js` is a **peer dependency**. Install it explicitly so bundlers pick one
   version instead of duplicating.
 </Callout>
+
+#### iOS: Xcode 27 and Expo SDK 54
+
+- **Deployment target 15.1 or later.** In an Expo app, set it with `expo-build-properties`
+  (`npx expo install expo-build-properties`):
+
+  ```json title="app.json"
+  {
+    "expo": {
+      "plugins": [["expo-build-properties", { "ios": { "deploymentTarget": "15.1" } }]]
+    }
+  }
+  ```
+
+  In a bare app, set `platform :ios, '15.1'` in `ios/Podfile`.
+- **A UTF-8 locale for `pod install`.** Run CocoaPods with `LANG=en_US.UTF-8`, including the
+  commands that run it for you: `LANG=en_US.UTF-8 npx expo run:ios` (or `npx expo prebuild`,
+  `npx pod-install`, `pod install`). Without it, `pod install` can stop with an encoding
+  error. `export LANG=en_US.UTF-8` in your shell profile sets it once.
 
 </Step>
 
@@ -170,10 +191,20 @@ That's the minimum. To override defaults:
     paymasterUrl: process.env.EXPO_PUBLIC_PAYMASTER_URL!,
     apiKey: process.env.EXPO_PUBLIC_PAYMASTER_KEY, // ships in the app: not a secret
   }}
+  rpId={process.env.EXPO_PUBLIC_RP_ID}   // the portal's hostname; default portal.lazor.sh
 >
   <Stack />
 </LazorKitProvider>
 ```
+
+<Callout type="warn" title="A portal other than portal.lazor.sh needs its rpId">
+  A passkey is created under the hostname of the portal that made it. When `portalUrl` is
+  not `https://portal.lazor.sh` (a staging or self-hosted portal), set `rpId` to that
+  portal's hostname, for example `rpId="staging-portal.example.com"`. With the default
+  `rpId` (`portal.lazor.sh`), the adapter checks that portal's passkeys against the wrong
+  relying party: connect cannot prove the passkey's wallet, and `verifyWalletMessage` with
+  the wrong `rpId` returns `false`.
+</Callout>
 
 If your app already has users on LazorKit v1, also set `v1ConfigPaymaster`; see
 [Migrating from v1](/v1-to-v2).

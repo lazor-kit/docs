@@ -61,9 +61,11 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 ### Prop details
 
 <Callout type="warn" title="rpId must match">
-  `rpId` is the WebAuthn Relying Party ID baked into each passkey at registration time.
-  Changing it between `connect` calls invalidates existing passkeys. Keep it stable in
-  production.
+  `rpId` is the WebAuthn Relying Party ID baked into each passkey at registration time:
+  the hostname of the portal that created it. With a `portalUrl` other than
+  `https://portal.lazor.sh` (a staging or self-hosted portal), set `rpId` to that portal's
+  hostname. Changing it between `connect` calls invalidates existing passkeys. Keep it
+  stable in production.
 </Callout>
 
 - **`rpcUrl`** — Any Solana RPC. Falsy values fall back to the Devnet default.
