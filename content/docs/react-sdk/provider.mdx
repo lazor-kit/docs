@@ -52,7 +52,7 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
 | ------------------- | ---------------------------------------------- | -------------------------------------- | ----- |
 | `rpcUrl`            | `string`                                       | `https://api.devnet.solana.com`        | |
 | `portalUrl`         | `string`                                       | `https://portal.lazor.sh`              | |
-| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`     | |
+| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`, see below | |
 | `v1PaymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | `paymasterConfig`                      | 3.0.0 |
 | `cluster`           | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | 3.0.0 |
 | `onConfirmWallet`   | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'`                            | 3.0.0 |
@@ -238,6 +238,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
+On devnet, set
+`paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`:
+that is LazorKit's devnet relayer for v2. The built-in default, `kora.devnet.lazorkit.com`,
+still reaches an earlier relayer until the name moves to it.
+
 The stored wallet belongs to the cluster it was created on: switching clusters does not
 move it. Disconnect before switching, or the app keeps showing an address from the other
 cluster.
@@ -247,7 +252,7 @@ cluster.
 ```tsx
 const paymasterConfig = process.env.NODE_ENV === 'production'
   ? { paymasterUrl: process.env.NEXT_PUBLIC_KORA_MAINNET!, apiKey: process.env.NEXT_PUBLIC_KORA_KEY }
-  : { paymasterUrl: 'https://kora.devnet.lazorkit.com' };
+  : { paymasterUrl: 'https://kora-devnet-production.up.railway.app' }; // LazorKit's devnet relayer
 
 <LazorkitProvider paymasterConfig={paymasterConfig}>{children}</LazorkitProvider>
 ```

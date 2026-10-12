@@ -54,7 +54,7 @@ import { registerLazorkitWallet } from '@lazorkit/wallet';
 const CONFIG = {
   RPC_URL: 'https://api.devnet.solana.com',
   PORTAL_URL: 'https://portal.lazor.sh',
-  PAYMASTER: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  PAYMASTER: { paymasterUrl: 'https://kora-devnet-production.up.railway.app' },
   CLUSTER: 'devnet' as const,
 };
 
@@ -167,7 +167,7 @@ import { registerLazorkitWallet } from '@lazorkit/wallet';
 registerLazorkitWallet({
   rpcUrl: 'https://api.devnet.solana.com',
   portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  paymasterConfig: { paymasterUrl: 'https://kora-devnet-production.up.railway.app' },
   clusterSimulation: 'devnet',
   trustedAuthorities: [BACKEND_ADMIN_KEY], // optional: your own Ed25519 keys, base58
   watchMints: [MY_TOKEN_MINT],             // optional: SPL mints your app receives

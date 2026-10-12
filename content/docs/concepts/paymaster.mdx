@@ -154,8 +154,10 @@ This is a direct growth incentive: LazorKit does not take a cut from your app-le
 ## Using a paymaster with the SDKs
 
 The React and React Native SDKs send every transaction to a Kora-compatible JSON-RPC
-endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
-`https://kora.devnet.lazorkit.com`.
+endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile). LazorKit's devnet relayer,
+which sponsors protocol v2, is **`https://kora-devnet-production.up.railway.app`**. The
+SDKs' built-in default, `https://kora.devnet.lazorkit.com`, still reaches an earlier
+relayer until that name moves to the new one, so set the Railway URL explicitly for now.
 
 - **Requests.** `getPayerSigner` for the fee payer, then `signAndSendTransaction` with
   `{ transaction, signer_key }`, where `signer_key` is the fee payer the transaction names.

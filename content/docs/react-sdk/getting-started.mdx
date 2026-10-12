@@ -8,8 +8,10 @@ the same `useWallet` hook.
 
 <Callout type="info" title="Zero-config defaults">
   All provider props are optional. With nothing set, the SDK targets Solana **devnet**
-  through `portal.lazor.sh` and LazorKit's devnet Kora paymaster, which is set up for
-  protocol v2 — perfect for demos and local dev.
+  through `portal.lazor.sh` and the paymaster `kora.devnet.lazorkit.com` — perfect for
+  demos and local dev. Until that paymaster name moves to LazorKit's devnet relayer for
+  protocol v2, set it yourself:
+  `paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`.
 </Callout>
 
 <Callout type="warn" title="Mainnet">

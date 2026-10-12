@@ -56,9 +56,11 @@ How message signing and verification work since 3.3.1 / 2.3.1:
   4.0. Sessions created on devnet before 2026-10-11 have expired. See
   [Migrating to 4.0](/react-sdk/migrating-to-4) and the tested combinations in
   [Versions & compatibility](/versions#compatibility).
-- **The default devnet paymaster is moving.** The SDKs' default devnet paymaster will move
-  to a new relayer that sponsors protocol v2 only: v1 transactions on devnet will no
-  longer be sponsored by it. An app with v1 wallets on devnet needs a relayer of its own
+- **The default devnet paymaster is moving.** The SDKs' default devnet paymaster,
+  `kora.devnet.lazorkit.com`, will move to a new relayer that sponsors protocol v2 only:
+  v1 transactions on devnet will no longer be sponsored by it. The new relayer already
+  runs at `https://kora-devnet-production.up.railway.app`; set it as `paymasterUrl` now to
+  use it before the move. An app with v1 wallets on devnet needs a relayer of its own
   that sponsors v1, set as `v1PaymasterConfig` (web) or `v1ConfigPaymaster` (mobile). See
   [Paymaster › Using a paymaster with the SDKs](/concepts/paymaster#using-a-paymaster-with-the-sdks).
 

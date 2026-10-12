@@ -144,7 +144,13 @@ With no props, both UI SDKs use devnet:
 | --- | --- |
 | RPC | `https://api.devnet.solana.com` |
 | Portal | `https://portal.lazor.sh` |
-| Paymaster | `https://kora.devnet.lazorkit.com` (LazorKit's devnet relayer, set up for v2) |
+| Paymaster | `https://kora.devnet.lazorkit.com` |
+
+LazorKit's devnet relayer for v2 is **`https://kora-devnet-production.up.railway.app`**.
+Until `kora.devnet.lazorkit.com` moves to it, that name still reaches an earlier relayer,
+so set the Railway URL yourself:
+`paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}` (web) or
+`configPaymaster={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}` (mobile).
 
 LazorKit's v2 relayer does not sponsor v1 transactions. An app with v1 users needs a
 relayer that does, set as `v1PaymasterConfig` (web) or `v1ConfigPaymaster` (mobile).

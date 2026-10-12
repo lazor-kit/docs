@@ -19,9 +19,11 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 ```
 
 <Callout type="info" title="Devnet defaults">
-  With no props, the provider connects to Solana devnet through `portal.lazor.sh` and
-  LazorKit's devnet Kora paymaster at `kora.devnet.lazorkit.com`. Perfect for demos and
-  local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
+  With no props, the provider connects to Solana devnet through `portal.lazor.sh` and the
+  paymaster at `kora.devnet.lazorkit.com`. That name still reaches an earlier relayer until
+  it moves to LazorKit's devnet relayer for v2, so set
+  `configPaymaster={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`
+  for now. Perfect for demos and local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
 </Callout>
 
 ## Production setup
@@ -49,7 +51,7 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 | ----------------- | ---------------------------------------------- | -------------------------------------- | -------- |
 | `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
 | `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
-| `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | Devnet Kora                            | no       |
+| `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com` (see above) | no       |
 | `v1ConfigPaymaster` | `{ paymasterUrl: string; apiKey?: string }`  | `configPaymaster`                      | no       |
 | `cluster`         | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | no       |
 | `rpId`            | `string`                                       | `portal.lazor.sh`                      | no       |
@@ -127,7 +129,7 @@ const isProd = !__DEV__;
   configPaymaster={{
     paymasterUrl: isProd
       ? process.env.EXPO_PUBLIC_MAINNET_PAYMASTER!
-      : 'https://kora.devnet.lazorkit.com',
+      : 'https://kora-devnet-production.up.railway.app', // LazorKit's devnet relayer
   }}
 >
   <App />
