@@ -3,8 +3,8 @@ title: Types
 description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-The public types and helpers of `@lazorkit/sdk-legacy` **2.0.0** (`@next`; protocol v2).
-Where 1.x differs, the page says so.
+The public types and helpers of `@lazorkit/sdk-legacy` **2.1.0** (`@next`; protocol v2).
+Where 2.0.0 or 1.x differs, the page says so.
 
 ## Signer helpers
 
@@ -204,7 +204,7 @@ interface WalletAuthorityRecord {
 
 <Callout type="warn" title="Version note">
   Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later (`next` is
-  2.0.0), except `createTaggedOwnershipChallenge` and `OWNERSHIP_PROOF_DOMAIN` (1.4.0), and
+  2.1.0), except `createTaggedOwnershipChallenge` and `OWNERSHIP_PROOF_DOMAIN` (1.4.0), and
   `WalletFacts.unixTimestamp` / `liveSessions[].expiresAt` (2.0.0).
   `0.3.x` (`latest`) and `1.1.x` do not have it.
 </Callout>
@@ -432,6 +432,11 @@ console.log(authority.role, authority.counter, authority.policyLen, authority.wa
 const session = await SessionAccount.fromAccountAddress(connection, sessionPda);
 console.log(session.sessionKey.toBase58(), session.expiresAt);
 
+// 2.1.0: who paid the rent (layout revision 2), or null for an older account
+console.log(authority.rentPayer?.toBase58(), authority.policyOffset, session.rentPayer?.toBase58());
+// Where closing an account must send its rent: the recorded payer, else the fallback
+const destination = await client.rentRefundDestination(sessionPda, payer.publicKey);
+
 // Every authority on a wallet, with rank, counter and policy:
 const authorities = await client.findAuthoritiesByWallet(walletPda);
 // Whether the wallet has an Owner left to manage it:
@@ -439,7 +444,17 @@ const { ownerCount, isRecoverable } = await client.getRecoveryStatus(walletPda);
 ```
 
 Both classes also have `fromBuffer(data)`. There is no exported reader for the wallet or
-`DeferredExec` accounts. `readAuthorityCounter` / `readAuthorityPubkey` (and
+`DeferredExec` accounts.
+
+**Layout revision 2** (2.1.0). An authority or session created on devnet's v2 since
+2026-10-13 stores the 32-byte account that paid its rent after its fixed part, so its
+policy (an authority's) or actions (a session's) start 32 bytes later. `AuthorityAccount`
+has `rentPayer` and `policyOffset`, `SessionAccount` has `rentPayer` and `actions`;
+`rentPayer` is `null` for an older account. Module helpers: `recordedRentPayer(data)`,
+`authorityPolicyOffset(authorityType, version)`, `sessionActionsOffset(version)`,
+`authorityKeyEnd(authorityType)`, and the constants `RENT_PAYER_LAYOUT_VERSION` (2) and
+`RENT_PAYER_LEN` (32). 2.0.0 does not know this revision and reads such an account's policy
+or actions 32 bytes early. See [Layout revision 2](/versions#layout-revision-2). `readAuthorityCounter` / `readAuthorityPubkey` (and
 `client.readCounter`) read one field and take the
 [challenge-read options](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
 
@@ -464,7 +479,13 @@ Program ids: `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET` (v2), `PROGRAM_ID_MAINNET
 ## Error utilities
 
 ```typescript
-import { ERROR_NAMES, MinContextSlotNotReachedError, errorFromCode, extractErrorCode } from '@lazorkit/sdk-legacy';
+import {
+  ERROR_NAMES,
+  MinContextSlotNotReachedError,
+  RefundDestinationMismatchError,
+  errorFromCode,
+  extractErrorCode,
+} from '@lazorkit/sdk-legacy';
 
 // From a thrown SendTransactionError (reads the error's text):
 const code = extractErrorCode(err);          // e.g. 3024, or null
@@ -474,12 +495,19 @@ console.log(code, name, ERROR_NAMES[3006]);
 if (err instanceof MinContextSlotNotReachedError) {
   console.log(err.minContextSlot, err.waitedMs, err.commitment);
 }
+
+// 2.1.0: a close asked to refund rent to an account other than the recorded payer.
+// Thrown before anything is sent; the program would refuse it with 3039.
+if (err instanceof RefundDestinationMismatchError) {
+  console.log(err.account.toBase58(), err.rentPayer.toBase58(), err.requested.toBase58());
+}
 ```
 
 `extractErrorCode` returns `null` for a `{ InstructionError: … }` object, and both read only
-the number: an inner program can return the same code. Since 1.4.0 (and in 2.0.0) `ERROR_NAMES` names
+the number: an inner program can return the same code. Since 1.4.0 `ERROR_NAMES` names
 3036 (`SessionNotExpired`), 3037 (`ActionUnlistedSolOutflow`), 3038
 (`ActionUnlistedTokenOutflow`) and 4018 (`RetiredDeployment`); 1.3.1 has no entry for them.
+2.1.0 adds 3039 (`RefundDestinationMismatch`).
 
 Error ranges:
 
@@ -491,6 +519,7 @@ Error ranges:
 | 3033–3035   | Ranks and policies                                |
 | 3036        | `SessionNotExpired`                               |
 | 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). On devnet's v2 since 2026-10-03 |
+| 3039        | `RefundDestinationMismatch`: a close refunds only to the recorded rent payer. On devnet's v2 since 2026-10-13 |
 | 4001–4018   | Protocol fee and deployment errors, including 4018 `RetiredDeployment` |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

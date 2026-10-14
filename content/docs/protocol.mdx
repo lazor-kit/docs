@@ -185,7 +185,7 @@ An on-chain agent needs to execute recurring actions on behalf of a user (e.g. r
 1. User creates a session key with a defined scope: program address, max value per tx, expiry date
 2. Agent holds the session key and triggers execution on its own schedule
 3. Each execution passes RBAC validation before the Paymaster funds it
-4. Session expires at its expiry time and can no longer sign. After expiry anyone may close the account and keep its rent (`CloseExpiredSession`), so revoke it yourself if you want the rent back
+4. Session expires at its expiry time and can no longer sign. After expiry anyone may close the account (`CloseExpiredSession`); its rent goes back to the account that paid it, the Paymaster on a sponsored flow (sessions created on devnet since 2026-10-13, and on mainnet once v2 is deployed; an older session's rent goes to whoever closes it)
 
 **Who pays:** The agent operator pre-funds the Paymaster, or the user configures a self-funded execution budget.
 

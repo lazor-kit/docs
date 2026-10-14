@@ -20,10 +20,11 @@ touches private key material.
 </Callout>
 
 <Callout type="warn" title="3.0 pre-release on next">
-  `@lazorkit/wallet-mobile-adapter` **3.0.0-next.0** (`npm install
+  `@lazorkit/wallet-mobile-adapter` **3.0.0-next.1** (`npm install
   @lazorkit/wallet-mobile-adapter@next`) takes session expiry and recurring windows in
-  seconds, checks a session's actions against 224 bytes before the portal opens, and sends
-  the portal typed approval requests. Devnet's v2 program measures sessions in seconds now,
+  seconds, checks a session's actions against 224 bytes before the portal opens, sends
+  the portal typed approval requests, and adds plain-language errors (`describeError`) and
+  a bounded portal trip (`browserOptions.timeoutMs`). Devnet's v2 program measures sessions in seconds now,
   so creating a session there needs 3.0: 2.4.0's `createSession` is refused with 3008. See
   [Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
 </Callout>

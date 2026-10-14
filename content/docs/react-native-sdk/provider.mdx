@@ -19,11 +19,11 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 ```
 
 <Callout type="info" title="Devnet defaults">
-  With no props, the provider connects to Solana devnet through `portal.lazor.sh` and the
-  paymaster at `kora.devnet.lazorkit.com`. That name still reaches an earlier relayer until
-  it moves to LazorKit's devnet relayer for v2, so set
-  `configPaymaster={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`
-  for now. Perfect for demos and local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
+  With no props, the provider connects to Solana devnet through `portal.lazor.sh` and a
+  devnet paymaster. In 2.4.0 that is `kora.devnet.lazorkit.com`, which still reaches an
+  earlier relayer that sponsors only v1, so set
+  `configPaymaster={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`,
+  LazorKit's devnet relayer for v2. From 3.0.0-next.1 that relayer is the default. Perfect for demos and local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
 </Callout>
 
 ## Production setup
@@ -51,10 +51,11 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 | ----------------- | ---------------------------------------------- | -------------------------------------- | -------- |
 | `rpcUrl`          | `string`                                       | `https://api.devnet.solana.com`        | no       |
 | `portalUrl`       | `string`                                       | `https://portal.lazor.sh`              | no       |
-| `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com` (see above) | no       |
+| `configPaymaster` | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`; `https://kora-devnet-production.up.railway.app` from 3.0.0-next.1 (see above) | no       |
 | `v1ConfigPaymaster` | `{ paymasterUrl: string; apiKey?: string }`  | `configPaymaster`                      | no       |
 | `cluster`         | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | no       |
 | `rpId`            | `string`                                       | `portal.lazor.sh`                      | no       |
+| `browserOptions`  | `{ timeoutMs?: number; preferEphemeralSession?: boolean }` | `{ timeoutMs: 120_000, preferEphemeralSession: true }` (3.0.0-next.1) | no |
 | `isDebug`         | `boolean`                                      | `false`                                | no       |
 | `children`        | `ReactNode`                                    | —                                      | yes      |
 
@@ -73,6 +74,12 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 - **`configPaymaster`** — Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as `x-api-key` on every request; it ships in your app, so it is not a secret.
 - **`v1ConfigPaymaster`** (2.0.0+) — the relayer for users whose wallet is still on LazorKit v1: the one your app used before v2. LazorKit's v2 relayer does not sponsor v1. See [Migrating from v1](/v1-to-v2).
 - **`cluster`** (2.0.0+) — which cluster `rpcUrl` serves. Read from the URL (`mainnet`, `devnet`, `localhost`) otherwise, and anything unrecognised is taken as **mainnet**.
+- **`browserOptions`** (3.0.0-next.1) — how the portal opens in the system browser.
+  `timeoutMs`: how long a portal trip may go unanswered before the browser is closed and
+  the call rejects with `PortalTimeoutError` (default 2 minutes; a typed approval gets at
+  least 10). `preferEphemeralSession` (iOS): open the portal in an ephemeral
+  authentication session, which skips the "wants to use … to sign in" alert before each
+  approval and shares no cookies with Safari (default `true`; ignored on Android).
 - **`isDebug`** — Enables verbose logs via the built-in `logger`.
 
 ### Wallet confirmation props

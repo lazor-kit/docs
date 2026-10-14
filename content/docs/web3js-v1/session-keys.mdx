@@ -4,9 +4,10 @@ description: Create, use, and revoke session keys with the low-level web3.js v1 
 ---
 
 Session keys let an app or agent execute on a wallet's behalf without passkey
-re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` **2.0.0** API
-(`npm install @lazorkit/sdk-legacy@next`), where session time is Unix seconds; 1.x took
-slots, which devnet's v2 refuses for a session (3008). See
+re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` **2.x** API
+(`npm install @lazorkit/sdk-legacy@next`, 2.1.0), where session time is Unix seconds; 1.x
+took slots, which devnet's v2 refuses for a session (3008). Rent refunds to the recorded
+payer (`closeExpiredSession`, `RefundDestinationMismatchError`) are 2.1.0. See
 [Session Keys concept](/concepts/session-keys) for the protocol-level explanation and
 [React SDK](/react-sdk/use-wallet#createsession) / [React Native SDK](/react-native-sdk/use-wallet#createsession)
 for higher-level wrappers.
@@ -271,8 +272,9 @@ const { instructions } = client.reclaimDeferred({
 });
 ```
 
-Only the original payer can reclaim, only to itself (`UnauthorizedReclaim`, 3017), and only
-after the window has passed (`DeferredAuthorizationNotExpired`, 3018).
+Only the original payer can reclaim (`UnauthorizedReclaim`, 3017), only to itself, and only
+after the window has passed (`DeferredAuthorizationNotExpired`, 3018). Since 2026-10-13
+devnet's v2 reports a refund to any other account as `RefundDestinationMismatch` (3039).
 
 ---
 
@@ -286,16 +288,35 @@ const { instructions } = await client.revokeSession({
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionPda,
-  refundDestination: payer.publicKey,
+  // refundDestination left out: 2.1.0 uses the payer the session records
 });
 ```
 
-Closes the session PDA and refunds rent. Works on active or already-expired sessions.
+Closes the session PDA and refunds its rent. Works on active or already-expired sessions.
 Owner or Admin only.
 
-After a session expires, **anyone** may close it with `CloseExpiredSession` (instruction
-18) and keep the rent; before that the program refuses with `SessionNotExpired` (3036).
-2.0.0 has no public builder for it; `@lazorkit/sdk` exports `createCloseExpiredSessionIx`.
+**Where the rent goes.** A session created on devnet's v2 since 2026-10-13 (layout revision
+2) records the account that paid its rent, usually the paymaster's fee payer, and the
+program refunds only to it: any other `refundDestination` is refused with
+`RefundDestinationMismatch` (3039). 2.1.0 reads the session and uses that account when you
+leave `refundDestination` out, and throws `RefundDestinationMismatchError` before sending
+if you pass another. A session from before revision 2 records no payer: its rent goes to
+`refundDestination`, by default `payer`. `client.rentRefundDestination(sessionPda,
+fallback)` returns where it will go.
+
+After a session expires, **anyone** may close it with `CloseExpiredSession`; before that the
+program refuses with `SessionNotExpired` (3036). The rent goes to the recorded payer, not to
+the caller (a session from before revision 2: wherever the caller says).
+
+```typescript
+const { instructions } = await client.closeExpiredSession({
+  caller: payer.publicKey, // signs and pays the fee
+  sessionPda,
+});
+```
+
+`closeExpiredSession` is 2.1.0; 2.0.0 had no client method for it. `@lazorkit/sdk` exports
+`closeExpiredSession` on its client and the `createCloseExpiredSessionIx` builder.
 
 ---
 
@@ -364,5 +385,6 @@ edge cases (expired actions, gross outflow tracking, etc.).
 | `0xbc7`   | `DeferredHashMismatch`              | TX2 instructions, accounts or sender differ from TX1's authorization. |
 | `0xbd9`   | `DelegateRequiresPolicy`            | `ROLE_SPENDER` added without a `policy`.                            |
 | `0xbdc`   | `SessionNotExpired`                 | `CloseExpiredSession` on a live session.                            |
+| `0xbdf`   | `RefundDestinationMismatch`         | The refund destination is not the session's recorded rent payer. Leave `refundDestination` out (2.1.0). |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

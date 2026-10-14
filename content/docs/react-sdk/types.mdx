@@ -198,7 +198,10 @@ class PaymasterError extends Error {
   readonly httpStatus?: number;
   readonly signature?: string;
   maybeSent: boolean;
+  readonly offline?: boolean;      // 4.0.0-next.1: no request was made, nothing was sent
+  readonly retryAfterMs?: number;  // 4.0.0-next.1: a 429's Retry-After
 }
+class SignatureTooOldError extends Error { readonly code: 3007 } // 4.0.0-next.1: approval too old; nothing sent
 
 // Deferred execution (3.2.0+)
 class DeferredExpiredError extends Error {
@@ -280,14 +283,29 @@ class TypedRequestTooLargeError extends Error {    // over 8,192 / 16,384 charac
 
 function errorKind(error: unknown): ErrorKind;     // 'rejected', 'config', 'network', 'policy', …
 function userMessage(error: unknown, context?: 'connect' | 'send'): string | null; // default 'connect'
+
+// 4.0.0-next.1: plain-language errors
+interface ErrorDescription {
+  title: string;
+  message: string;
+  action?: string;
+  retryable: boolean;              // never true when maybeSent is
+  maybeSent: boolean;              // it may still land: show it as pending
+  code: ErrorDescriptionCode;      // 'user-rejected', 'outcome-unknown', 'program-3008', …
+  programError?: string;           // the program's name for the error, from ERROR_NAMES
+}
+type SendStatus = 'idle' | 'reviewing' | 'signing' | 'submitted' | 'confirmed' | 'checking' | 'failed' | 'cancelled';
+function describeError(error: unknown): ErrorDescription;
+function sendStatusOf(error: unknown): 'cancelled' | 'checking' | 'failed';
 ```
 
-What each means: [Errors › Typed approval requests](/errors#typed-approval-requests-40) and
+What each means: [Errors › Typed approval requests](/errors#typed-approval-requests-40),
+[Errors › Plain-language errors](/errors#plain-language-errors-describeerror) and
 [Embedded mode › Errors](/react-sdk/embedded-mode#errors).
 
 Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`,
-`isKeyWalletMismatchError`, and since 3.4.0 `isUnlistedSolOutflowError` and
-`isUnlistedTokenOutflowError`. Each is true for its class from any copy of the package,
+`isKeyWalletMismatchError`, since 3.4.0 `isUnlistedSolOutflowError` and
+`isUnlistedTokenOutflowError`, and since 4.0.0-next.1 `isSignatureTooOldError`. Each is true for its class from any copy of the package,
 also wrapped in `cause` or in a wallet-adapter `WalletError`
 ([Errors › Telling errors apart](/errors#telling-errors-apart)). Since 3.3.0: in 3.2.1
 `isSignatureReusedError` and `isRetiredDeploymentError` read only the error's text and
@@ -305,7 +323,7 @@ interface TransactionOptions {
   txVersion?: 'legacy' | 'v0';                              // default 'v0'
   clusterSimulation?: 'devnet' | 'mainnet';                 // the portal's preview
   feeToken?: string;                                        // ignored by the web SDK
-  computeUnitLimit?: number;                                // ignored by the web SDK
+  computeUnitLimit?: number;                                // ignored in 3.4.1; honoured from 4.0.0-next.1 (1 to 1,400,000)
 }
 
 // Every send-tx method on the hook.
@@ -615,7 +633,7 @@ import { Actions, serializeActions } from '@lazorkit/wallet';
 import { PublicKey } from '@solana/web3.js';
 
 const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-// 4.0 (@lazorkit/sdk-legacy 2.0.0): recurring windows in seconds.
+// 4.0 (@lazorkit/sdk-legacy 2.x): recurring windows in seconds.
 const policy = serializeActions([
   Actions.solLimit(1_000_000_000n),
   Actions.solRecurringLimit({ limit: 100_000_000n, windowSeconds: 86_400n }),
@@ -639,7 +657,7 @@ throws on one that looks like a slot; a slot in 3.4.
 | Export | Value |
 | ------ | ----- |
 | `DEFAULTS.PORTAL_URL` | `https://portal.lazor.sh` |
-| `DEFAULTS.PAYMASTER_URL` | `https://kora.devnet.lazorkit.com` (until it moves, LazorKit's devnet relayer for v2 is `https://kora-devnet-production.up.railway.app`) |
+| `DEFAULTS.PAYMASTER_URL` | `https://kora.devnet.lazorkit.com` in 3.4.1, which still reaches an earlier relayer that sponsors only v1; `https://kora-devnet-production.up.railway.app`, LazorKit's devnet relayer for v2, in 4.0.0-next.1 |
 | `DEFAULTS.RPC_ENDPOINT` | `https://api.devnet.solana.com` |
 | `DEFAULTS.SESSION_EXPIRY_SLOTS` | `50000n` (in 4.0, v1 wallets only) |
 | `DEFAULTS.SESSION_EXPIRY_SECONDS` | `18000`, 5 hours (4.0) |

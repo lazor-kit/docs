@@ -19,10 +19,10 @@ portal** — no extension, no seed phrase.
 </Callout>
 
 <Callout type="warn" title="4.0 pre-release on next">
-  `@lazorkit/wallet` **4.0.0-next.0** (`npm install @lazorkit/wallet@next`) adds
+  `@lazorkit/wallet` **4.0.0-next.1** (`npm install @lazorkit/wallet@next`) adds
   [Embedded mode](/react-sdk/embedded-mode) (passkeys on your own domain, no portal), a
-  required `mode` prop, typed approval requests, and session expiry and recurring windows in
-  seconds. Devnet's v2 program measures sessions in seconds now, so creating a session
+  required `mode` prop, typed approval requests, session expiry and recurring windows in
+  seconds, and plain-language errors (`describeError`). Devnet's v2 program measures sessions in seconds now, so creating a session
   there needs 4.0: 3.4.1's `createSession` is refused with 3008. See
   [Migrating to 4.0](/react-sdk/migrating-to-4).
 </Callout>

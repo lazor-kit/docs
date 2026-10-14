@@ -14,9 +14,11 @@ see [Sending transactions](/react-sdk/sending-transactions).
 
 This page describes 3.4.x (`latest`); where 4.0 (`next`) differs it says so. 4.0 adds
 `status`, `address` and `signAndSend` (with `onSubmitted`), takes session expiry and
-recurring windows in seconds, and deprecates `isLoading`, `isConnecting`, `isSigning` and,
-for a later move to `@lazorkit/wallet/hooks`, the session, authority and deferred functions
-here (they keep working, and warn once). See [Migrating to 4.0](/react-sdk/migrating-to-4).
+recurring windows in seconds, and deprecates `isLoading`, `isConnecting`, `isSigning` and
+the session, authority and deferred functions here (they keep working until 5.0, and warn
+once). From 4.0.0-next.1 those functions are also in `@lazorkit/wallet/hooks`, with the same
+names and parameters and no warning: `useSessions()`, `useAuthorities()` and
+`useDeferred()`. See [Migrating to 4.0](/react-sdk/migrating-to-4).
 
 ## Quick reference
 
@@ -41,7 +43,8 @@ here (they keep working, and warn once). See [Migrating to 4.0](/react-sdk/migra
 All send-tx methods take `{ instructions, transactionOptions? }`. `transactionOptions`
 accepts `addressLookupTableAccounts`, `txVersion: 'legacy' | 'v0'` (default `'v0'`) and
 `clusterSimulation`; `feeToken` and `computeUnitLimit` are in the types but **ignored** by
-the web SDK (3.4.0).
+the web SDK (3.4.0). From 4.0.0-next.1 `computeUnitLimit` (1 to 1,400,000) is honoured: it
+puts a `SetComputeUnitLimit` instruction first in the transaction.
 
 Every method except `verifyMessage` also takes `onSuccess` / `onFail` (in the payload;
 `connect`, `disconnect`, `signMessage` and `removeAuthority` in their options). One of them
@@ -596,7 +599,11 @@ await revokeSession({ sessionPda: 'SESSION_PDA_BASE58' }); // a specific one, e.
 Closes the session PDA and refunds the rent. Without `sessionPda`, it revokes the session
 whose key the SDK keeps, which must be the connected wallet's (`KeyWalletMismatchError`
 otherwise, before the prompt), and deletes that key once the revoke lands. After expiry, anyone may close a session with
-`CloseExpiredSession` and keep the rent: revoke yours if you want it back.
+`CloseExpiredSession`. The rent goes back to the account that paid it (your paymaster's
+fee payer) for a session created on devnet since 2026-10-13, which records it; an older
+session's rent goes to whoever closes it, so revoke yours if you want it back.
+4.0.0-next.1 refunds `revokeSession` to the recorded payer; see
+[Layout revision 2](/versions#layout-revision-2).
 
 ### What the user approves (4.0)
 

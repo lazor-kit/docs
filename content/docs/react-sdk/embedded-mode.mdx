@@ -3,8 +3,8 @@ title: Embedded mode (4.0)
 description: "@lazorkit/wallet 4.0 pre-release — passkeys on your own domain, every ceremony in your page, the Easy tier (status, address, signAndSend, ConnectButton) and the /core and /hooks entry points."
 ---
 
-<Callout type="warn" title="Pre-release: @lazorkit/wallet 4.0.0-next.0">
-  Embedded mode ships in `@lazorkit/wallet` **4.0**, published as `4.0.0-next.0` on the
+<Callout type="warn" title="Pre-release: @lazorkit/wallet 4.0.0-next.1">
+  Embedded mode ships in `@lazorkit/wallet` **4.0**, published as `4.0.0-next.1` on the
   npm `next` tag. Its API can still change before 4.0.0; **3.4.1** is the stable release
   (`latest`), and has no Embedded mode. Install with `npm install @lazorkit/wallet@next`.
   Coming from 3.x: [Migrating to 4.0](/react-sdk/migrating-to-4).
@@ -180,7 +180,7 @@ prompt itself shows nothing about the transaction.
 `createSession`, `revokeSession` and `removeAuthority` prepare the same typed request as in
 portal mode ([What the user approves](/react-sdk/use-wallet#what-the-user-approves-40)).
 The passkey signs it in the page, and the signature is checked against the request before
-anything is sent. These three have no review sheet in 4.0.0-next.0. Session and authority
+anything is sent. These three have no review sheet in the 4.0 pre-releases (4.0.0-next.1 included). Session and authority
 keys work as in portal mode: `spendingLimits` are checked before the passkey is asked, and a
 send that loaded its key before a disconnect neither signs nor sends after it.
 `signMessage` signs the same challenge as in portal mode; check it on your server with
@@ -273,8 +273,8 @@ Your domain holds your users' wallets. Read this before shipping:
 | Import | What | React |
 | ------ | ---- | ----- |
 | `@lazorkit/wallet` | `LazorkitProvider`, `ConnectButton`, `useWallet`, and everything in `/core` | yes (client module) |
-| `@lazorkit/wallet/hooks` | `useWallet`, `useWalletStore`, `useLazorkitClient`, `useWalletStatus` | yes (client module) |
-| `@lazorkit/wallet/core` | No React: `createLazorkitClient`, the errors, `verifyWalletMessage`, the protocol helpers, the adapter | no |
+| `@lazorkit/wallet/hooks` | `useWallet`, `useWalletStore`, `useLazorkitClient`, `useWalletStatus`, and from 4.0.0-next.1 `useSessions`, `useAuthorities`, `useDeferred` | yes (client module) |
+| `@lazorkit/wallet/core` | No React: `createLazorkitClient`, the errors (and from 4.0.0-next.1 `describeError`, `sendStatusOf`), `verifyWalletMessage`, the protocol helpers, the adapter | no |
 
 All three share one store and one client per page. The React entries start with
 `'use client'`; server code, such as a route handler that checks a signed message, imports
@@ -310,8 +310,6 @@ object and function again.
 ## Not in 4.0 yet
 
 - "Remember this device" (the `session` prop is reserved and does nothing).
-- Session, authority and deferred hooks in `/hooks` (the `useWallet` functions keep
-  working).
 - Embedded mode for `LazorkitWalletAdapter` and the Wallet Standard wallet, which stay
   portal-only.
 - Embedded mode and the Easy tier in `@lazorkit/wallet-mobile-adapter`.

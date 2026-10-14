@@ -487,16 +487,21 @@ with the original error as `cause`; nothing in it ran. See
 
 ```ts
 const signature = await revokeSession(
-  {
-    sessionPda,
-    refundDestination: smartWalletPubkey!,  // send rent back to the vault
-  },
+  { sessionPda }, // the rent goes back to the account that paid it
   { redirectUrl: 'myapp://callback' },
 );
 ```
 
-After a session expires, anyone may close it with `CloseExpiredSession` and keep the
-rent; revoke it yourself if you want the rent back. To check a kept key's session is still
+Leave `refundDestination` out. A session created on devnet's v2 since 2026-10-13 records
+the account that paid its rent (the paymaster's fee payer), and the program refunds only
+to it (`RefundDestinationMismatch`, 3039); 3.0.0-next.1 fills it in, and refuses another
+destination before the passkey prompt (`RefundDestinationMismatchError`). For a session
+that records no payer, the rent goes to `refundDestination`, by default the paymaster's
+fee payer. See [Layout revision 2](/versions#layout-revision-2).
+
+After a session expires, anyone may close it with `CloseExpiredSession`. A session that
+records its rent payer refunds to it; an older one refunds to whoever closes it, so revoke
+it yourself if you want that rent back. To check a kept key's session is still
 live, compare its `expiresAt` with the cluster's time
 (`new LazorKitClient(connection).getClusterTime()`); a session made by 2.4.0 stores a slot.
 
@@ -581,10 +586,13 @@ you add can spend the whole vault.
 
 ```ts
 await removeAuthority(
-  { targetAuthorityPda, refundDestination: smartWalletPubkey! },
+  { targetAuthorityPda }, // the rent goes back to the account that paid it
   { redirectUrl: 'myapp://callback' },
 );
 ```
+
+As with `revokeSession`, leave `refundDestination` out: an authority created on devnet's v2
+since 2026-10-13 refunds its rent only to the account that paid it (3039 otherwise).
 
 <Callout type="warn">
   You cannot remove the last Owner, nor the passkey you sign with; an Admin can remove

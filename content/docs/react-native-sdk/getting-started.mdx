@@ -8,9 +8,11 @@ the provider, call the hook.
 
 <Callout type="info" title="Zero-config defaults">
   Every provider prop is optional. If you leave them blank the SDK uses devnet defaults
-  (`api.devnet.solana.com`, `portal.lazor.sh`, and the paymaster `kora.devnet.lazorkit.com`).
-  Until that paymaster name moves to LazorKit's devnet relayer for v2, set it yourself:
+  (`api.devnet.solana.com`, `portal.lazor.sh`, and a devnet paymaster). The default
+  paymaster of 2.4.0 is `kora.devnet.lazorkit.com`, which still reaches an earlier relayer
+  that sponsors only v1, so set LazorKit's devnet relayer for v2 yourself:
   `configPaymaster={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`.
+  From 3.0.0-next.1 that relayer is the default.
   Ship to production by overriding `rpcUrl` + `configPaymaster`.
 </Callout>
 

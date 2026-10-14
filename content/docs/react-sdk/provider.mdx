@@ -52,7 +52,7 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
 | ------------------- | ---------------------------------------------- | -------------------------------------- | ----- |
 | `rpcUrl`            | `string`                                       | `https://api.devnet.solana.com`        | |
 | `portalUrl`         | `string`                                       | `https://portal.lazor.sh`              | |
-| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`, see below | |
+| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`; `https://kora-devnet-production.up.railway.app` from 4.0.0-next.1 (see below) | |
 | `v1PaymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | `paymasterConfig`                      | 3.0.0 |
 | `cluster`           | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | 3.0.0 |
 | `onConfirmWallet`   | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'`                            | 3.0.0 |
@@ -240,8 +240,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 On devnet, set
 `paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`:
-that is LazorKit's devnet relayer for v2. The built-in default, `kora.devnet.lazorkit.com`,
-still reaches an earlier relayer until the name moves to it.
+that is LazorKit's devnet relayer for v2, and the built-in default from 4.0.0-next.1 on.
+The default of 3.4.1, `kora.devnet.lazorkit.com`, still reaches an earlier relayer that
+sponsors only v1.
 
 The stored wallet belongs to the cluster it was created on: switching clusters does not
 move it. Disconnect before switching, or the app keeps showing an address from the other

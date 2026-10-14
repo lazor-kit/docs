@@ -59,8 +59,15 @@ interface LazorKitProviderProps {
   v1ConfigPaymaster?: { paymasterUrl: string; apiKey?: string };
   cluster?: 'mainnet' | 'devnet';
   rpId?: string;
+  browserOptions?: BrowserOptions;                               // 3.0.0-next.1
   isDebug?: boolean;
   children: ReactNode;
+}
+
+// 3.0.0-next.1
+interface BrowserOptions {
+  preferEphemeralSession?: boolean; // iOS: ephemeral authentication session (default true)
+  timeoutMs?: number;               // default 120_000; a typed approval gets at least 10 minutes
 }
 ```
 
@@ -321,7 +328,7 @@ interface CreateSessionPayload {
 
 interface RevokeSessionPayload {
   sessionPda: PublicKey;
-  refundDestination?: PublicKey;          // default: paymaster fee payer
+  refundDestination?: PublicKey;          // leave unset: the recorded rent payer (3.0.0-next.1), else the paymaster fee payer
 }
 ```
 
@@ -338,7 +345,7 @@ interface AddAuthorityPayload {
 
 interface RemoveAuthorityPayload {
   targetAuthorityPda: PublicKey;
-  refundDestination?: PublicKey;
+  refundDestination?: PublicKey;          // leave unset, as for RevokeSessionPayload
 }
 
 interface AuthorityEntry {
@@ -454,7 +461,7 @@ Actions.programBlacklist(programId, expiresAt?)
 ```
 
 `expiresAt` is that action's own expiry: a Unix time in seconds in 3.0
-(`@lazorkit/sdk-legacy` 2.0.0, where `serializeActions` throws on one that looks like a
+(`@lazorkit/sdk-legacy` 2.x, where `serializeActions` throws on one that looks like a
 slot), a slot in 2.4.
 
 ### Raw enum / union

@@ -4,9 +4,10 @@ description: The prepare / finalize flow, turning a WebAuthn assertion into a We
 ---
 
 Everything here is `@lazorkit/sdk-legacy` **1.x and 2.x** (protocol v2): install it with
-`npm install @lazorkit/sdk-legacy@next` (2.0.0). The challenge-read options and key
+`npm install @lazorkit/sdk-legacy@next` (2.1.0). The challenge-read options and key
 recovery are in **1.3.0** and later, the tagged message and ownership challenges in
-**1.4.0**, typed approval requests in **2.0.0**. `@lazorkit/sdk` (kit) has the same API with
+**1.4.0**, typed approval requests in **2.0.0**, and rent refunds to the recorded payer
+(layout revision 2) in **2.1.0**. `@lazorkit/sdk` (kit) has the same API with
 kit types (the tagged challenges since 1.0.0-rc.6), except the typed requests, which are in
 sdk-legacy only.
 
@@ -302,7 +303,7 @@ length from 16 bytes, so proofs over either form verify.
 ## Typed approval requests
 
 A passkey challenge is a hash: a page that shows only the challenge cannot say what it
-approves. For `CreateSession`, `RevokeSession` and `RemoveAuthority`, 2.0.0 can also hand
+approves. For `CreateSession`, `RevokeSession` and `RemoveAuthority`, 2.0.0 and later can also hand
 over the *request* the challenge is computed from, so the page that asks for the passkey
 shows exactly what it signs and computes the challenge itself, at the slot and counter it
 reads when the user approves. The wallet packages use this with the LazorKit portal since
@@ -362,6 +363,14 @@ actions buffer exactly when the program does. It imports only `@noble/hashes` an
 browser and React Native. Its errors: `PortalReplyMismatchError`,
 `TypedRequestTooLargeError`, `RequestOutOfDateError` (a portal's `stale-counter` refusal),
 `TransactionTooLargeError`, `ApprovalRequestError` and `ApprovalActionsError`.
+
+In 2.1.0 the subpath's account decoders read layout revision 2 (`rentPayer` on
+`AuthorityFacts` and `SessionFacts`, and on the descriptions), and `describeApproval`
+refuses a `revokeSession` or `removeAuthority` request whose refund destination is not the
+recorded rent payer (`request-invalid`, reason `refund-not-rent-payer`). The decoders of
+2.0.0 return `null` for revision-2 accounts, so a page on 2.0.0 refuses every typed request
+from a wallet created on devnet since 2026-10-13. See
+[Layout revision 2](/versions#layout-revision-2).
 
 ## Deferred execution: `executor` and `feePayer`
 

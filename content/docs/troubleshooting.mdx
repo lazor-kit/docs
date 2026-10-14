@@ -326,9 +326,13 @@ report it as it came.
 
 ### `InvalidSignatureAge` / `0xbbf` (3007)
 
-The challenge's slot is more than 150 slots old by the time the transaction runs — the
-user took too long to approve, or (with `commitment: 'finalized'`) the slot was already old
-when the prompt opened. Prepare again.
+The challenge's slot is more than 150 slots old by the time the transaction runs (about
+35 s at today's slot times, portal loading included) — the user took too long to approve,
+or (with `commitment: 'finalized'`) the slot was already old when the prompt opened.
+Prepare again. `@lazorkit/wallet` 4.0.0-next.1 and `@lazorkit/wallet-mobile-adapter`
+3.0.0-next.1 throw it as `SignatureTooOldError` ("Approval took too long" from
+`describeError`), never resend it, and read the slot for a passkey send's challenge right
+before the portal opens: offer "Try again", which asks for a new approval.
 
 ---
 
@@ -344,7 +348,7 @@ rc.6 and earlier all do. Move to a release that sends seconds:
 ```bash
 npm install @lazorkit/wallet@next                 # 4.0, pre-release
 npm install @lazorkit/wallet-mobile-adapter@next  # 3.0, pre-release
-npm install @lazorkit/sdk-legacy@next             # 2.0.0
+npm install @lazorkit/sdk-legacy@next             # 2.1.0
 ```
 
 With 4.0 / 3.0, pass `expiresInSeconds` (at most 30 days); with the contract SDKs,
@@ -356,8 +360,22 @@ expiry is not after the cluster's time, or is more than 30 days ahead of it.
 
 `SessionExpired`. Every v2 session created on devnet before 2026-10-11 stored its expiry
 as a slot, which the program now reads as a time decades past. Create a new session with a
-release that sends seconds (above). Anyone may close the old one with
-`CloseExpiredSession` and keep its rent; revoke it yourself to get the rent back.
+release that sends seconds (above). Such a session records no rent payer, so anyone may
+close the old one with `CloseExpiredSession` and keep its rent; revoke it yourself to get
+the rent back. Sessions created since 2026-10-13 record their rent payer, and closing one
+refunds only to it (see the next entry).
+
+### `0xbdf` (3039) when revoking, removing or closing
+
+`RefundDestinationMismatch`. Since 2026-10-13 devnet's v2 records who paid each new
+authority's and session's rent, and refunds only to that account, whoever signs or pays
+for the close. The transaction named another refund destination. With
+`@lazorkit/sdk-legacy` 2.1.0 / `@lazorkit/sdk` 1.0.0-rc.8 leave `refundDestination` out:
+the SDK reads the recorded payer and uses it, and throws `RefundDestinationMismatchError`
+before sending if you pass another account. Earlier releases default the refund to the
+transaction's `payer`, which fails when a different payer created the account (for
+example, a relayer other than the one that sponsored it). See
+[Layout revision 2](/versions#layout-revision-2).
 
 ### `UnlistedSolOutflowError` / `0xbdd` (3037)
 
@@ -478,6 +496,12 @@ a non-success HTTP status.
   sponsor v1 wallets: set `v1PaymasterConfig` / `v1ConfigPaymaster`.
 - **Simulation failed**: the instruction set reverts. `data` usually holds the program
   logs; see [Errors › Program error codes](/errors#program-error-codes).
+- **`offline: true`** (4.0.0-next.1 / 3.0.0-next.1): the device reported it was offline,
+  so no request was made and nothing was sent.
+- **Every v2 transaction refused on devnet** with "not in the allowed list": the app uses
+  `kora.devnet.lazorkit.com`, which still reaches an earlier relayer that sponsors only v1.
+  Set `https://kora-devnet-production.up.railway.app` (the default from 4.0.0-next.1 /
+  3.0.0-next.1).
 
 ### `getProgramAccounts` refused, or `connect` fails reading the chain
 

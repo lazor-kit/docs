@@ -10,6 +10,73 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
+## 2026-10-13 — devnet's v2 refunds rent to whoever paid it; wallet 4.0.0-next.1, wallet-mobile-adapter 3.0.0-next.1, sdk-legacy 2.1.0, sdk 1.0.0-rc.8
+
+Checklists: [Migrating to 4.0](/react-sdk/migrating-to-4),
+[React Native › Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release),
+[Versions & compatibility › Layout revision 2](/versions#layout-revision-2).
+
+### Devnet program
+
+Devnet's v2 (`57bTNW…`) runs build `e7930c8b…` since 2026-10-13 (slot 510,645,372).
+Mainnet has no v2 program yet; its planned build is now `b242e187…`, with the same rules.
+The sunset builds for v1 are now `353dfee3…` (mainnet) and `2f0fae7e…` (devnet).
+
+- **Rent goes back to whoever paid it.** Every authority and session the program creates
+  records the account that paid its rent (layout revision 2). `RevokeSession`,
+  `CloseExpiredSession`, `RemoveAuthority` and `TransferOwnership` refund only to it; any
+  other destination is refused with the new error **3039 `RefundDestinationMismatch`**,
+  whoever signs or pays for the close. `CloseExpiredSession` stays open to anyone, but the
+  rent goes to the recorded payer. `ExecuteDeferred` and `ReclaimDeferred` report a wrong
+  refund destination as 3039 too. Accounts from before revision 2 keep the old rule.
+- **Lower compute for `Execute`.** The program checks its accounts with the PDA bumps it
+  stored, instead of searching for them: on devnet a passkey SOL transfer measured 11,672
+  CU (14,469 before), a session SOL transfer 7,570 (10,345).
+- **What it breaks.** `@lazorkit/sdk-legacy` 2.0.0 and `@lazorkit/sdk` rc.7 read a
+  revision-2 Delegate's policy and a session's actions 32 bytes early, and sdk-legacy
+  2.0.0's approval decoders return `null` for revision-2 accounts. A close whose refund
+  destination is not the account that paid the rent fails with 3039.
+
+### `@lazorkit/sdk-legacy` 2.1.0 (`next`) and `@lazorkit/sdk` 1.0.0-rc.8
+
+Additive. `revokeSession`, `removeAuthority`, `transferOwnership` and their `prepare*`
+halves use the closed account's recorded rent payer when `refundDestination` is left out
+(before: `payer`), and throw `RefundDestinationMismatchError` for another destination. New
+`rentRefundDestination` and `closeExpiredSession` on both clients; decoders return
+`rentPayer` (and `policyOffset` / `actions` in sdk-legacy). `@lazorkit/sdk-legacy/approval`
+reads revision 2 and refuses a refund that is not the rent payer (`refund-not-rent-payer`).
+sdk-legacy's `ERROR_NAMES` names 3039.
+
+### `@lazorkit/wallet` 4.0.0-next.1 and `@lazorkit/wallet-mobile-adapter` 3.0.0-next.1 (pre-releases, `next`)
+
+- **Plain-language errors:** `describeError(error)` and `sendStatusOf(error)`, the same in
+  both packages ([Errors › Plain-language errors](/errors#plain-language-errors-describeerror)).
+- **Default devnet paymaster:** `https://kora-devnet-production.up.railway.app`, LazorKit's
+  relayer for v2 (was `kora.devnet.lazorkit.com`).
+- **Retries:** a refusal that would come back the same is sent once; a 429 is waited out;
+  a network error, timeout or 5xx is resent with the same bytes only while the blockhash is
+  valid; at most 30 s per attempt and 60 s per send. The mobile adapter, which never
+  resent, follows the same policy. An offline device makes no request, and a new call after
+  an unknown outcome waits at most 20 s.
+- **3007:** `SignatureTooOldError` ("Approval took too long"), never resent; a passkey send
+  reads its challenge's slot last, right before the portal opens.
+- **`connect`** never creates a second wallet when a creation's answer was lost.
+- **`computeUnitLimit`** is honoured on web (it was ignored) and checked (1 to 1,400,000)
+  on both.
+- **Web:** `useSessions()`, `useAuthorities()` and `useDeferred()` in
+  `@lazorkit/wallet/hooks`, where the deprecation warnings on `useWallet` now point; portal
+  listeners are removed on `destroy()`; storage denied by the browser no longer breaks
+  connect or disconnect; `errorKind` is `'tx-unknown'` for a paymaster error whose
+  transaction may have been sent.
+- **Mobile:** `browserOptions.timeoutMs` (`PortalTimeoutError`) and
+  `browserOptions.preferEphemeralSession` (default `true` on iOS); one portal trip to create
+  a wallet on iOS; a `refundDestination` other than the rent payer is refused before the
+  passkey prompt.
+- Both require `@lazorkit/sdk-legacy` ^2.1.0 and name 3039 in `describeError`
+  ("Refund can't go there").
+
+---
+
 ## 2026-10-11 — devnet's v2 counts session time in seconds; wallet 4.0.0-next.0, wallet-mobile-adapter 3.0.0-next.0, sdk-legacy 2.0.0, sdk 1.0.0-rc.7
 
 Checklists: [Migrating to 4.0](/react-sdk/migrating-to-4),
