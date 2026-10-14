@@ -10,6 +10,169 @@ Each package's own CHANGELOG has the full detail:
 [`@lazorkit/wallet-mobile-adapter`](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md),
 [protocol and contract SDKs](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
 
+## 2026-10-13 — devnet's v2 refunds rent to whoever paid it; wallet 4.0.0-next.1, wallet-mobile-adapter 3.0.0-next.1, sdk-legacy 2.1.0, sdk 1.0.0-rc.8
+
+Checklists: [Migrating to 4.0](/react-sdk/migrating-to-4),
+[React Native › Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release),
+[Versions & compatibility › Layout revision 2](/versions#layout-revision-2).
+
+### Devnet program
+
+Devnet's v2 (`57bTNW…`) runs build `e7930c8b…` since 2026-10-13 (slot 510,645,372).
+Mainnet has no v2 program yet; its planned build is now `b242e187…`, with the same rules.
+The sunset builds for v1 are now `353dfee3…` (mainnet) and `2f0fae7e…` (devnet).
+
+- **Rent goes back to whoever paid it.** Every authority and session the program creates
+  records the account that paid its rent (layout revision 2). `RevokeSession`,
+  `CloseExpiredSession`, `RemoveAuthority` and `TransferOwnership` refund only to it; any
+  other destination is refused with the new error **3039 `RefundDestinationMismatch`**,
+  whoever signs or pays for the close. `CloseExpiredSession` stays open to anyone, but the
+  rent goes to the recorded payer. `ExecuteDeferred` and `ReclaimDeferred` report a wrong
+  refund destination as 3039 too. Accounts from before revision 2 keep the old rule.
+- **Lower compute for `Execute`.** The program checks its accounts with the PDA bumps it
+  stored, instead of searching for them: on devnet a passkey SOL transfer measured 11,672
+  CU (14,469 before), a session SOL transfer 7,570 (10,345).
+- **What it breaks.** `@lazorkit/sdk-legacy` 2.0.0 and `@lazorkit/sdk` rc.7 read a
+  revision-2 Delegate's policy and a session's actions 32 bytes early, and sdk-legacy
+  2.0.0's approval decoders return `null` for revision-2 accounts. A close whose refund
+  destination is not the account that paid the rent fails with 3039.
+
+### `@lazorkit/sdk-legacy` 2.1.0 (`next`) and `@lazorkit/sdk` 1.0.0-rc.8
+
+Additive. `revokeSession`, `removeAuthority`, `transferOwnership` and their `prepare*`
+halves use the closed account's recorded rent payer when `refundDestination` is left out
+(before: `payer`), and throw `RefundDestinationMismatchError` for another destination. New
+`rentRefundDestination` and `closeExpiredSession` on both clients; decoders return
+`rentPayer` (and `policyOffset` / `actions` in sdk-legacy). `@lazorkit/sdk-legacy/approval`
+reads revision 2 and refuses a refund that is not the rent payer (`refund-not-rent-payer`).
+sdk-legacy's `ERROR_NAMES` names 3039.
+
+### `@lazorkit/wallet` 4.0.0-next.1 and `@lazorkit/wallet-mobile-adapter` 3.0.0-next.1 (pre-releases, `next`)
+
+- **Plain-language errors:** `describeError(error)` and `sendStatusOf(error)`, the same in
+  both packages ([Errors › Plain-language errors](/errors#plain-language-errors-describeerror)).
+- **Default devnet paymaster:** `https://kora-devnet-production.up.railway.app`, LazorKit's
+  relayer for v2 (was `kora.devnet.lazorkit.com`).
+- **Retries:** a refusal that would come back the same is sent once; a 429 is waited out;
+  a network error, timeout or 5xx is resent with the same bytes only while the blockhash is
+  valid; at most 30 s per attempt and 60 s per send. The mobile adapter, which never
+  resent, follows the same policy. An offline device makes no request, and a new call after
+  an unknown outcome waits at most 20 s.
+- **3007:** `SignatureTooOldError` ("Approval took too long"), never resent; a passkey send
+  reads its challenge's slot last, right before the portal opens.
+- **`connect`** never creates a second wallet when a creation's answer was lost.
+- **`computeUnitLimit`** is honoured on web (it was ignored) and checked (1 to 1,400,000)
+  on both.
+- **Web:** `useSessions()`, `useAuthorities()` and `useDeferred()` in
+  `@lazorkit/wallet/hooks`, where the deprecation warnings on `useWallet` now point; portal
+  listeners are removed on `destroy()`; storage denied by the browser no longer breaks
+  connect or disconnect; `errorKind` is `'tx-unknown'` for a paymaster error whose
+  transaction may have been sent.
+- **Mobile:** `browserOptions.timeoutMs` (`PortalTimeoutError`) and
+  `browserOptions.preferEphemeralSession` (default `true` on iOS); one portal trip to create
+  a wallet on iOS; a `refundDestination` other than the rent payer is refused before the
+  passkey prompt.
+- Both require `@lazorkit/sdk-legacy` ^2.1.0 and name 3039 in `describeError`
+  ("Refund can't go there").
+
+---
+
+## 2026-10-11 — devnet's v2 counts session time in seconds; wallet 4.0.0-next.0, wallet-mobile-adapter 3.0.0-next.0, sdk-legacy 2.0.0, sdk 1.0.0-rc.7
+
+Checklists: [Migrating to 4.0](/react-sdk/migrating-to-4),
+[React Native › Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
+
+### Devnet program (breaking for session creation)
+
+Devnet's v2 (`57bTNW…`) runs build `f2779b66…` since 2026-10-11 (slot 509,609,649).
+Mainnet has no v2 program yet; v1 is unchanged on both clusters.
+
+- **Session time is Unix seconds.** A session's `expires_at`, an action's own `expires_at`,
+  and a recurring limit's window and last reset are read against the cluster clock
+  (`Clock::unix_timestamp`), not the slot. `CreateSession` takes an `expires_at` after the
+  cluster's time and at most 30 days (2,592,000 s) ahead (`InvalidSessionDuration`, 3008).
+  A passkey signature's age (150 slots) and the deferred window (`expiryOffset`) stay in
+  slots. A v1 session still expires at a slot. See
+  [Session Keys › Session time is Unix seconds](/concepts/session-keys#session-time-is-unix-seconds).
+- **What it breaks.** `@lazorkit/wallet` 3.4.1, `@lazorkit/wallet-mobile-adapter` 2.4.0,
+  `@lazorkit/sdk-legacy` 1.x and `@lazorkit/sdk` rc.6 and earlier send a session's expiry as
+  a slot: their `createSession` on a v2 wallet is refused there with 3008. Every v2 session
+  created on devnet before the upgrade stored a slot, which now reads as long past: it is
+  refused with `SessionExpired` (3009), and anyone may close it. An action expiry written
+  as a slot reads as expired, and a recurring window written in slots is read as that many
+  seconds.
+- **Only an Owner may change who controls the vault.** Every other signer — any session
+  (with or without actions), an Admin, a Delegate — is refused with 3030–3032 when an
+  `Execute` reassigns the vault (`System::Assign`, `Allocate`), changes a vault token
+  account's authority, delegate or close authority, closes or freezes one, or hands the
+  vault a token account that still has a delegate or close authority. Earlier builds held
+  only a signer with a policy to this. `ExecuteDeferred` follows the same rule for an
+  authorization an Admin signed. See
+  [Session Keys › Who controls the vault](/concepts/session-keys#who-controls-the-vault).
+- Devnet's v2 has also returned errors 3037 and 3038 since 2026-10-03: a session's or a
+  Delegate's policy names what may leave the wallet, and nothing else may
+  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)).
+
+### `@lazorkit/wallet` 4.0.0-next.0 (pre-release, `next`)
+
+- **Embedded mode** (`mode="embedded"`): the passkey on your own domain (`rpId`), every
+  ceremony in your page, no portal. With it the Easy tier (`status`, `address`,
+  `signAndSend` with `onSubmitted`, `<ConnectButton>`, `useWalletStatus`) and the `/core`
+  and `/hooks` entry points. See [Embedded mode](/react-sdk/embedded-mode).
+- **Breaking:** `LazorkitProvider` requires `mode` (add `mode="portal"` to keep 3.x
+  behaviour); session expiry in seconds (`expiresInSeconds`, `expiresAt`; `expiresInSlots`
+  deprecated; default 5 hours, at most 30 days); recurring windows in seconds
+  (`windowSeconds`; `windowSlots` throws); a session's actions within 224 bytes (was 244);
+  user rejections no longer set `error` (`UserRejectedError`); `KeyRecoveryError`; the root
+  and `/hooks` entries are client modules; requires `@lazorkit/sdk-legacy` 2.0.0.
+- **Typed approval requests:** `createSession`, `revokeSession` and `removeAuthority` on a
+  v2 wallet send the portal the operation itself, which it shows and computes the challenge
+  from; the reply is checked before anything is sent. The portal waits up to 10 minutes for
+  these. New errors `PortalReplyMismatchError`, `RequestOutOfDateError`,
+  `PortalRefusedError`, `TypedRequestTooLargeError`
+  ([Errors › Typed approval requests](/errors#typed-approval-requests-40)).
+- **Fixed:** a send refused with 3023 (`ActionSolMaxPerTxExceeded`) is not resent.
+- **New:** `errorKind`, `userMessage`, `createLazorkitClient`, `MAX_SESSION_SECONDS`,
+  `DEFAULTS.SESSION_EXPIRY_SECONDS`, `forgetEmbeddedDevice`, `passkeyCapabilities`, `onEvent`
+  (experimental); `react` and `react-dom` are optional peers.
+- **Deprecated:** `isLoading`, `isConnecting`, `isSigning` (use `status`); the session,
+  authority and deferred functions on `useWallet` (moving to `/hooks` in a later 4.x).
+
+### `@lazorkit/wallet-mobile-adapter` 3.0.0-next.0 (pre-release, `next`)
+
+Session expiry in seconds (`expiresInSeconds`, `expiresAt`; `expiresAtSlot` deprecated and
+optional), recurring windows in seconds, a session's actions checked against 16 actions
+and 224 bytes before the portal opens, and the same typed approval requests and errors.
+Requires `@lazorkit/sdk-legacy` 2.0.0. No Embedded mode.
+
+### `@lazorkit/sdk-legacy` 2.0.0 (`next`) and `@lazorkit/sdk` 1.0.0-rc.7
+
+- **Breaking:** `createSession` / `prepareCreateSession` take `expiresAt` in Unix seconds and
+  throw on one below 2020-01-01 (a slot); `Actions.solRecurringLimit` /
+  `tokenRecurringLimit` take `windowSeconds` instead of `window`; `serializeActions` throws
+  on an action expiry that looks like a slot and on a window of 0. sdk-legacy's parsed
+  actions carry `windowSeconds` (and `lastReset` is a Unix time), and
+  `WalletFacts.liveSessions[].expiresAtSlot` is `expiresAt`, with `WalletFacts.unixTimestamp`.
+- **New:** `getClusterTime()` (`{ slot, unixTimestamp }` from the Clock sysvar) and
+  `MAX_SESSION_SECONDS`, in both SDKs.
+- **New (sdk-legacy):** the `@lazorkit/sdk-legacy/approval` subpath, typed approval
+  requests for `CreateSession`, `RevokeSession` and `RemoveAuthority`:
+  `prepare*` returns `request` given `secp256r1.credentialId`, `withApprovalFragment`,
+  `verifyApprovalReply`, `describeApproval`, `approvalChallenge`, `rebindSecp256r1`, and
+  `TransactionTooLargeError` before the prompt when a passkey `CreateSession` could not fit
+  (224 bytes of actions). See
+  [Passkey signing › Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests).
+
+---
+
+## 2026-10-05 — wallet 3.4.1
+
+- `signMessage` with bytes that start with a UTF-8 byte order mark (EF BB BF) sends a
+  `displayMessage` that keeps the mark, so the text the portal shows encodes back to
+  exactly the signed bytes. Strings were not affected.
+
+---
+
 ## 2026-10-03 — wallet 3.4.0, wallet-mobile-adapter 2.4.0, sdk-legacy 1.4.0, sdk 1.0.0-rc.6
 
 Checklists: [React › Upgrading to 3.4.0](/react-sdk/upgrading#upgrading-to-340),
@@ -80,8 +243,9 @@ Checklists: [React › Upgrading to 3.4.0](/react-sdk/upgrading#upgrading-to-340
 
 ### Next v2 program release (not deployed)
 
-The v2 program release that adds errors 3037 and 3038 is not deployed on devnet or mainnet
-yet ([Networks & versions](/networks)). From it, a session's actions and a Delegate's
+Update: devnet's v2 has run this release since later on 2026-10-03; mainnet has no v2
+program yet ([Networks & versions](/networks)). As written that day: the v2 program
+release that adds errors 3037 and 3038 is not deployed on devnet or mainnet yet. From it, a session's actions and a Delegate's
 policy name what may leave the wallet, and nothing else may: SOL only with a `Sol*`
 action, rent the vault pays for a new account included (3037), and a token only with a
 `Token*` action naming its mint (3038); the vault's token accounts passed writable may

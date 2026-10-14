@@ -3,7 +3,8 @@ title: Types
 description: TypeScript interfaces, constants, error classes, and the SpendingLimits wrapper of @lazorkit/wallet.
 ---
 
-The public types of `@lazorkit/wallet` 3.4.0, grouped by what you're doing. Each block says
+The public types of `@lazorkit/wallet` 3.4.x (`latest`), grouped by what you're doing, with
+what 4.0 (`next`) changes marked where it applies. Each block says
 whether the type is **exported** (`import type { … } from '@lazorkit/wallet'`) or a
 **shape only**: the SDK uses it internally without exporting it, so derive it from an
 exported type when you need it in your code:
@@ -114,7 +115,8 @@ interface WalletChoice {
   liveSessions: {                      // session keys that can still sign
     address: string;
     sessionKey: string | null;         // null when unreadable
-    approxExpiresAt: number | null;    // ms since the epoch (400 ms a slot)
+    approxExpiresAt: number | null;    // ms since the epoch (3.4: from the slot at 400 ms a
+                                       // slot; 4.0: a v2 session's expiry, a Unix time)
     trusted: boolean;
   }[];
   pendingDeferred: {                   // authorized, not yet executed. Never trusted.
@@ -196,7 +198,10 @@ class PaymasterError extends Error {
   readonly httpStatus?: number;
   readonly signature?: string;
   maybeSent: boolean;
+  readonly offline?: boolean;      // 4.0.0-next.1: no request was made, nothing was sent
+  readonly retryAfterMs?: number;  // 4.0.0-next.1: a 429's Retry-After
 }
+class SignatureTooOldError extends Error { readonly code: 3007 } // 4.0.0-next.1: approval too old; nothing sent
 
 // Deferred execution (3.2.0+)
 class DeferredExpiredError extends Error {
@@ -242,9 +247,65 @@ class UnlistedTokenOutflowError extends Error {        // "This session is not a
 }
 ```
 
+In 4.0 (pre-release) `PortalCancelledError` and `WalletConfirmationDeclinedError` extend
+`UserRejectedError`, and these are new, all exported:
+
+```ts
+// The user said no, or disconnect ran during connect. Never sets the store's error.
+type UserRejectionReason =
+  'passkey-closed' | 'review-cancelled' | 'portal-closed' | 'not-now' | 'wallet-declined' | 'abandoned';
+class UserRejectedError extends Error { readonly code: 'USER_REJECTED'; readonly reason: UserRejectionReason }
+class KeyRecoveryError extends Error { readonly code: 'KEY_RECOVERY' }   // connect: key not recovered
+class PasskeyMismatchError extends Error { readonly code: 'PASSKEY_MISMATCH' }
+class PasskeyUnavailableError extends Error { readonly code: 'PASSKEY_UNAVAILABLE' }
+class LazorkitConfigError extends Error { readonly code: 'LAZORKIT_CONFIG'; readonly problem: LazorkitConfigProblem }
+class NetworkError extends Error { readonly code: 'NETWORK' }
+class WalletVerificationError extends Error { readonly code: 'WALLET_VERIFICATION'; readonly wallet: string }
+
+// Typed approval requests: createSession, revokeSession, removeAuthority on a v2 wallet.
+class PortalReplyMismatchError extends Error {     // nothing was sent
+  readonly code: 'portal-reply-mismatch';
+  readonly reason: string;
+}
+class RequestOutOfDateError extends Error {        // portal refused: stale-counter; nothing signed
+  readonly code: 'stale-counter';
+  readonly retryable: true;
+}
+class PortalRefusedError extends Error {           // portal refused; nothing signed
+  readonly code: 'request-invalid' | 'wrong-network' | 'challenge-mismatch'
+    | 'typed-malformed' | 'typed-unsupported' | 'chain-unavailable';
+}
+class TypedRequestTooLargeError extends Error {    // over 8,192 / 16,384 characters; nothing opened
+  readonly code: 'typed-request-too-large';
+  readonly length: number;
+  readonly limit: number;
+}
+
+function errorKind(error: unknown): ErrorKind;     // 'rejected', 'config', 'network', 'policy', …
+function userMessage(error: unknown, context?: 'connect' | 'send'): string | null; // default 'connect'
+
+// 4.0.0-next.1: plain-language errors
+interface ErrorDescription {
+  title: string;
+  message: string;
+  action?: string;
+  retryable: boolean;              // never true when maybeSent is
+  maybeSent: boolean;              // it may still land: show it as pending
+  code: ErrorDescriptionCode;      // 'user-rejected', 'outcome-unknown', 'program-3008', …
+  programError?: string;           // the program's name for the error, from ERROR_NAMES
+}
+type SendStatus = 'idle' | 'reviewing' | 'signing' | 'submitted' | 'confirmed' | 'checking' | 'failed' | 'cancelled';
+function describeError(error: unknown): ErrorDescription;
+function sendStatusOf(error: unknown): 'cancelled' | 'checking' | 'failed';
+```
+
+What each means: [Errors › Typed approval requests](/errors#typed-approval-requests-40),
+[Errors › Plain-language errors](/errors#plain-language-errors-describeerror) and
+[Embedded mode › Errors](/react-sdk/embedded-mode#errors).
+
 Predicates: `isDeferredExpiredError`, `isSignatureReusedError`, `isRetiredDeploymentError`,
-`isKeyWalletMismatchError`, and since 3.4.0 `isUnlistedSolOutflowError` and
-`isUnlistedTokenOutflowError`. Each is true for its class from any copy of the package,
+`isKeyWalletMismatchError`, since 3.4.0 `isUnlistedSolOutflowError` and
+`isUnlistedTokenOutflowError`, and since 4.0.0-next.1 `isSignatureTooOldError`. Each is true for its class from any copy of the package,
 also wrapped in `cause` or in a wallet-adapter `WalletError`
 ([Errors › Telling errors apart](/errors#telling-errors-apart)). Since 3.3.0: in 3.2.1
 `isSignatureReusedError` and `isRetiredDeploymentError` read only the error's text and
@@ -262,7 +323,7 @@ interface TransactionOptions {
   txVersion?: 'legacy' | 'v0';                              // default 'v0'
   clusterSimulation?: 'devnet' | 'mainnet';                 // the portal's preview
   feeToken?: string;                                        // ignored by the web SDK
-  computeUnitLimit?: number;                                // ignored by the web SDK
+  computeUnitLimit?: number;                                // ignored in 3.4.1; honoured from 4.0.0-next.1 (1 to 1,400,000)
 }
 
 // Every send-tx method on the hook.
@@ -415,7 +476,10 @@ Shape only: not exported.
 
 ```ts
 interface CreateSessionPayload {
-  expiresInSlots?: bigint;          // default 50,000 slots
+  // 4.0: at most one of the three. Seconds by the cluster clock; at most 30 days.
+  expiresInSeconds?: number | bigint; // 4.0. Default DEFAULTS.SESSION_EXPIRY_SECONDS (5 hours)
+  expiresAt?: number | bigint;        // 4.0. Unix seconds
+  expiresInSlots?: bigint;          // 3.4: default 50,000 slots. Deprecated in 4.0 (converted)
   spendingLimits?: SpendingLimits;  // required unless unrestricted; checked before the prompt
   unrestricted?: boolean;           // a session with no limits, explicitly
   sessionKey?: PublicKey | string;  // register an external key; nothing generated or stored.
@@ -445,10 +509,11 @@ interface SpendingLimits {
   /** Maximum lamports per single execute. */
   solPerTxMax?: bigint;
 
-  /** SOL cap that resets every `windowSlots` slots. */
+  /** SOL cap that resets every window. */
   solRecurring?: {
     limit: bigint;
-    windowSlots: bigint;
+    windowSlots: bigint;     // 3.4: slots
+    // 4.0: windowSeconds: bigint (86_400n is a day). A windowSlots throws.
   };
 
   /** The tokens the session may spend, one entry per mint (3.4.0+). */
@@ -460,22 +525,22 @@ interface TokenSpendingLimit {
   mint: PublicKey | string;         // the token's mint
   lifetimeCap?: bigint;             // exhausted for this token once spent
   perTxMax?: bigint;                // max per single execute
-  recurring?: {                     // cap that resets every windowSlots slots
+  recurring?: {                     // cap that resets every window
     limit: bigint;
-    windowSlots: bigint;
+    windowSlots: bigint;            // 3.4; 4.0: windowSeconds
   };
 }
 ```
 
-An asset the limits do not name cannot leave the wallet, from the v2 program release that
-adds errors 3037 and 3038 (not deployed yet; until then it is not bounded at all): with no
+An asset the limits do not name cannot leave the wallet where errors 3037 and 3038 apply
+(devnet's v2 since 2026-10-03; mainnet once v2 is deployed there): with no
 SOL limit the session spends no SOL, rent the vault pays for a new account included, and
 it spends a token only with a `tokens` entry for its mint. wSOL is a mint of its own. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
 `createSession` checks the limits before anything is read or the passkey is asked, and
 throws on a `tokens` entry with no limit, a mint named twice, an amount outside a u64, a
-window of 0 slots, more than 16 actions, or more than 244 bytes of actions. A SOL limit
+window of 0, more than 16 actions, or more than 244 bytes of actions (224 in 4.0). A SOL limit
 takes 19 bytes (`solRecurring` 43), a token's `lifetimeCap` or `perTxMax` 51 and its
 `recurring` 75.
 
@@ -493,15 +558,16 @@ function spendingLimitsToActions(limits: SpendingLimits | undefined): SessionAct
 
 ### Common windows
 
-| `windowSlots`  | at 400 ms a slot |
-| -------------- | ---------------- |
-| `9_000n`       | 1 hour           |
-| `54_000n`      | 6 hours          |
-| `216_000n`     | 1 day            |
-| `1_512_000n`   | 7 days           |
+| Window | 4.0 `windowSeconds` | 3.4 `windowSlots` (at 400 ms a slot) |
+| ------ | ------------------- | ------------------------------------ |
+| 1 hour | `3_600n`            | `9_000n`                             |
+| 6 hours | `21_600n`          | `54_000n`                            |
+| 1 day  | `86_400n`           | `216_000n`                           |
+| 7 days | `604_800n`          | `1_512_000n`                         |
 
-A slot's length varies by cluster and load (devnet ran near 230 ms in September 2026), so
-these are approximations.
+In 4.0 a window is exact on any cluster. A slot's length varies by cluster and load (devnet
+ran near 230 ms in September 2026), so the 3.4 figures are approximations, and devnet's v2
+now reads a window written in slots as that many seconds.
 
 ---
 
@@ -513,7 +579,7 @@ Shape only: not exported.
 interface AddAuthorityPayload {
   role: number;            // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
   policy?: Uint8Array;     // required for ROLE_SPENDER on v2: serializeActions([...]).
-                           // Names every asset the key may spend; within 244 bytes (not checked)
+                           // Names every asset the key may spend; within 224 bytes (244 in 3.4; not checked)
   unrestricted?: boolean;  // required to add a key to a v1 wallet
 }
 ```
@@ -567,19 +633,22 @@ import { Actions, serializeActions } from '@lazorkit/wallet';
 import { PublicKey } from '@solana/web3.js';
 
 const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+// 4.0 (@lazorkit/sdk-legacy 2.x): recurring windows in seconds.
 const policy = serializeActions([
   Actions.solLimit(1_000_000_000n),
-  Actions.solRecurringLimit({ limit: 100_000_000n, window: 216_000n }),
+  Actions.solRecurringLimit({ limit: 100_000_000n, windowSeconds: 86_400n }),
   Actions.solMaxPerTx(50_000_000n),
   Actions.tokenLimit({ mint, remaining: 100_000_000n }),
-  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, window: 216_000n }),
+  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, windowSeconds: 86_400n }),
   Actions.tokenMaxPerTx({ mint, max: 5_000_000n }),
   Actions.programWhitelist(new PublicKey('11111111111111111111111111111111')),
 ]);
 ```
 
-Every builder takes an optional `expiresAt` slot as its last argument (inside the object
-for the object forms).
+In 3.4 (`@lazorkit/sdk-legacy` 1.x) the recurring builders take `window`, in slots, instead
+of `windowSeconds`. Every builder takes an optional `expiresAt` as its last argument (inside
+the object for the object forms): a Unix time in seconds in 4.0, where `serializeActions`
+throws on one that looks like a slot; a slot in 3.4.
 
 ---
 
@@ -588,9 +657,11 @@ for the object forms).
 | Export | Value |
 | ------ | ----- |
 | `DEFAULTS.PORTAL_URL` | `https://portal.lazor.sh` |
-| `DEFAULTS.PAYMASTER_URL` | `https://kora.devnet.lazorkit.com` |
+| `DEFAULTS.PAYMASTER_URL` | `https://kora.devnet.lazorkit.com` in 3.4.1, which still reaches an earlier relayer that sponsors only v1; `https://kora-devnet-production.up.railway.app`, LazorKit's devnet relayer for v2, in 4.0.0-next.1 |
 | `DEFAULTS.RPC_ENDPOINT` | `https://api.devnet.solana.com` |
-| `DEFAULTS.SESSION_EXPIRY_SLOTS` | `50000n` |
+| `DEFAULTS.SESSION_EXPIRY_SLOTS` | `50000n` (in 4.0, v1 wallets only) |
+| `DEFAULTS.SESSION_EXPIRY_SECONDS` | `18000`, 5 hours (4.0) |
+| `MAX_SESSION_SECONDS` | `2_592_000n`, 30 days (4.0) |
 | `DEFAULTS.DEFERRED_EXPIRY_SLOTS` | `1500` |
 | `MIN_DEFERRED_EXPIRY_SLOTS` / `MAX_DEFERRED_EXPIRY_SLOTS` | `10` / `9000` |
 | `SIGNATURE_REUSED_CODE` | `3006` |
@@ -622,7 +693,8 @@ kept key before each attempt.
 
 ## Hook interface
 
-`WalletHookInterface` (exported) is the full return type of `useWallet`:
+`WalletHookInterface` (exported) is the full return type of `useWallet` in 3.4. 4.0 adds
+`status`, `address` and `signAndSend` (see [useWallet › State](/react-sdk/use-wallet#state)):
 
 ```ts
 interface WalletHookInterface {
@@ -651,7 +723,9 @@ interface WalletHookInterface {
 
   // Session
   createSession: (payload?: {
-    expiresInSlots?: bigint;
+    expiresInSeconds?: number | bigint;   // 4.0
+    expiresAt?: number | bigint;          // 4.0
+    expiresInSlots?: bigint;              // deprecated in 4.0
     spendingLimits?: SpendingLimits;
     sessionKey?: PublicKey | string;
     unrestricted?: boolean;

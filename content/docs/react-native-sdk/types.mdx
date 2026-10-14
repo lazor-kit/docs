@@ -4,7 +4,8 @@ description: TypeScript interfaces, constants, and session action builders.
 ---
 
 Every public type grouped by what you're doing. Import anything below from
-`@lazorkit/wallet-mobile-adapter` directly.
+`@lazorkit/wallet-mobile-adapter` directly. This page describes 2.4.0 (`latest`), with what
+the 3.0 pre-release (`next`) changes marked where it applies.
 
 ## Wallet state
 
@@ -58,8 +59,15 @@ interface LazorKitProviderProps {
   v1ConfigPaymaster?: { paymasterUrl: string; apiKey?: string };
   cluster?: 'mainnet' | 'devnet';
   rpId?: string;
+  browserOptions?: BrowserOptions;                               // 3.0.0-next.1
   isDebug?: boolean;
   children: ReactNode;
+}
+
+// 3.0.0-next.1
+interface BrowserOptions {
+  preferEphemeralSession?: boolean; // iOS: ephemeral authentication session (default true)
+  timeoutMs?: number;               // default 120_000; a typed approval gets at least 10 minutes
 }
 ```
 
@@ -116,7 +124,8 @@ interface WalletChoice {
   liveSessions: {                         // sessions that can still sign
     address: string;
     sessionKey: string | null;            // null when unreadable
-    approxExpiresAt: number | null;       // ms since the epoch (slots × 400 ms)
+    approxExpiresAt: number | null;       // ms since the epoch (2.4: slots × 400 ms; 3.0: a v2
+                                          // session's own Unix time)
     trusted: boolean;
   }[];
   pendingDeferred: {                      // authorized, not yet run or expired. Never trusted.
@@ -307,15 +316,19 @@ interface TransferSolPayload {
 ```ts
 interface CreateSessionPayload {
   sessionKey: PublicKey;                  // fresh Ed25519 public key; you keep the secret key
-  expiresAtSlot: bigint;                  // absolute slot, at most 6,480,000 slots ahead
+  expiresAtSlot: bigint;                  // 2.4: required, an absolute slot.
+                                          // 3.0: optional and deprecated (converted to seconds)
+  expiresInSeconds?: number | bigint;     // 3.0: at most 30 days; default 5 hours
+  expiresAt?: number | bigint;            // 3.0: Unix seconds, within 30 days of the cluster's time
   actions?: SessionAction[];              // required unless unrestricted. Name every asset it
-                                          // may spend; at most 16, within 244 bytes (not checked)
+                                          // may spend; at most 16, within 244 bytes (2.4, not
+                                          // checked) / 224 bytes (3.0, checked before the portal)
   unrestricted?: boolean;                 // a session with no limits, explicitly (2.0.0+)
 }
 
 interface RevokeSessionPayload {
   sessionPda: PublicKey;
-  refundDestination?: PublicKey;          // default: paymaster fee payer
+  refundDestination?: PublicKey;          // leave unset: the recorded rent payer (3.0.0-next.1), else the paymaster fee payer
 }
 ```
 
@@ -326,13 +339,13 @@ interface AddAuthorityPayload {
   newEd25519Pubkey: PublicKey;
   role: number;                           // required, no default: ROLE_SPENDER (2, a Delegate) | ROLE_ADMIN (1) | ROLE_OWNER (0, v1 only)
   policy?: Uint8Array;                    // required for ROLE_SPENDER on v2: serializeActions([...]).
-                                          // Names every asset the key may spend; within 244 bytes
+                                          // Names every asset the key may spend; within 224 bytes
   unrestricted?: boolean;                 // required to add a key to a v1 wallet
 }
 
 interface RemoveAuthorityPayload {
   targetAuthorityPda: PublicKey;
-  refundDestination?: PublicKey;
+  refundDestination?: PublicKey;          // leave unset, as for RevokeSessionPayload
 }
 
 interface AuthorityEntry {
@@ -407,8 +420,8 @@ was `{ signature, signedPayload }`).
 
 Actions are **immutable policies** attached to a session at creation — or, serialized with
 `serializeActions`, to a Delegate authority. The on-chain program enforces them on every
-`Execute` signed by that key. From the v2 program release that adds errors 3037 and 3038,
-an asset no action names cannot leave the wallet: SOL needs a `sol*` action (rent the vault
+`Execute` signed by that key. Where errors 3037 and 3038 apply (devnet's v2 since
+2026-10-03), an asset no action names cannot leave the wallet: SOL needs a `sol*` action (rent the vault
 pays counts) and each token a `token*` action for its mint. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
@@ -420,9 +433,10 @@ pays counts) and each token a `token*` action for its mint. See
 | `tokenRecurringLimit` | 75 |
 | `programWhitelist`, `programBlacklist` | 43 |
 
-Keep a session's actions, or a policy, within 244 bytes (`serializeActions(actions).length`):
-that is what fits in the transaction beside the passkey's response. The adapter does not
-check it before the portal opens.
+Keep a session's actions, or a policy, within 224 bytes (`serializeActions(actions).length`):
+that is what fits in the transaction beside the passkey's response, with the
+`clientDataJSON` sized at 320 bytes. Adapter 3.0's `createSession` refuses more before the
+portal opens; 2.4.0 does not check, and nothing checks a policy.
 
 ### Builder — `Actions`
 
@@ -433,18 +447,22 @@ import { Actions } from '@lazorkit/wallet-mobile-adapter';
 
 // SOL
 Actions.solLimit(remainingLamports, expiresAt?)
-Actions.solRecurringLimit({ limit, window, expiresAt? })
+Actions.solRecurringLimit({ limit, windowSeconds, expiresAt? })  // 3.0; 2.4: window (slots)
 Actions.solMaxPerTx(maxLamports, expiresAt?)
 
 // SPL tokens
 Actions.tokenLimit({ mint, remaining, expiresAt? })
-Actions.tokenRecurringLimit({ mint, limit, window, expiresAt? })
+Actions.tokenRecurringLimit({ mint, limit, windowSeconds, expiresAt? })  // 3.0; 2.4: window
 Actions.tokenMaxPerTx({ mint, max, expiresAt? })
 
 // CPI filters
 Actions.programWhitelist(programId, expiresAt?)
 Actions.programBlacklist(programId, expiresAt?)
 ```
+
+`expiresAt` is that action's own expiry: a Unix time in seconds in 3.0
+(`@lazorkit/sdk-legacy` 2.x, where `serializeActions` throws on one that looks like a
+slot), a slot in 2.4.
 
 ### Raw enum / union
 
@@ -462,10 +480,10 @@ enum SessionActionType {
 
 type SessionAction =
   | { type: SessionActionType.SolLimit; remaining: bigint; expiresAt?: bigint }
-  | { type: SessionActionType.SolRecurringLimit; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolRecurringLimit; limit: bigint; windowSeconds: bigint; expiresAt?: bigint } // 2.4: window
   | { type: SessionActionType.SolMaxPerTx; max: bigint; expiresAt?: bigint }
   | { type: SessionActionType.TokenLimit; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
-  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; windowSeconds: bigint; expiresAt?: bigint } // 2.4: window
   | { type: SessionActionType.TokenMaxPerTx; mint: PublicKey; max: bigint; expiresAt?: bigint }
   | { type: SessionActionType.ProgramWhitelist; programId: PublicKey; expiresAt?: bigint }
   | { type: SessionActionType.ProgramBlacklist; programId: PublicKey; expiresAt?: bigint };
@@ -473,15 +491,20 @@ type SessionAction =
 
 ### Common limits (cheat sheet)
 
-| Slot window   | at 400 ms a slot |
-| ------------- | ---------------- |
-| `9_000n`      | 1 hour           |
-| `54_000n`     | 6 hours          |
-| `216_000n`    | 1 day            |
-| `1_512_000n`  | 7 days           |
+| Window  | 3.0 `windowSeconds` | 2.4 `window` (at 400 ms a slot) |
+| ------- | ------------------- | ------------------------------- |
+| 1 hour  | `3_600n`            | `9_000n`                        |
+| 6 hours | `21_600n`           | `54_000n`                       |
+| 1 day   | `86_400n`           | `216_000n`                      |
+| 7 days  | `604_800n`          | `1_512_000n`                    |
 
 A slot's length varies by cluster and load (devnet ran near 230 ms in September 2026), so
-these are approximations.
+the 2.4 figures are approximations; devnet's v2 now reads a window written in slots as that
+many seconds.
+
+Constants for sessions: `DEFAULTS.SESSION_EXPIRY_SECONDS` (18,000, 5 hours; 3.0),
+`DEFAULTS.SESSION_EXPIRY_SLOTS` (50,000n; new in 3.0, the v1 default) and
+`MAX_SESSION_SECONDS` (`2_592_000n`, 30 days; 3.0).
 
 ---
 
@@ -539,8 +562,8 @@ interface DeferredFailureContext { deferredExecPda?: PublicKey; authorizeSignatu
 class V1WalletRetiredError extends Error { readonly code: 4018 }
 class V1WalletMigratedError extends Error {}
 
-// A session send moving an asset its actions do not name (2.4.0+), from the v2 program
-// release that adds errors 3037 and 3038. Nothing in it ran.
+// A session send moving an asset its actions do not name (2.4.0+), where the v2 program
+// returns errors 3037 and 3038. Nothing in it ran.
 type PolicySigner = 'session' | 'authority';  // always 'session' from this adapter
 class UnlistedSolOutflowError extends Error {   // "This session is not allowed to spend SOL"
   readonly code: 3037;
@@ -555,7 +578,16 @@ class UnlistedTokenOutflowError extends Error { // "This session is not allowed 
 
 // Re-exported from @lazorkit/sdk-legacy
 class MinContextSlotNotReachedError extends Error {}
+
+// 3.0: typed approval requests (createSession, revokeSession, removeAuthority on v2)
+class PortalReplyMismatchError extends Error { readonly code: 'portal-reply-mismatch'; readonly reason: string } // nothing sent
+class RequestOutOfDateError extends Error { readonly code: 'stale-counter'; readonly retryable: true }       // nothing signed
+class PortalRefusedError extends Error { readonly code: ApprovalRefusalCode }                                // nothing signed
+class TypedRequestTooLargeError extends Error { readonly code: 'typed-request-too-large'; readonly length: number; readonly limit: number }
 ```
+
+In 3.0 a typed-request refusal in the portal's redirect is `RequestOutOfDateError` or
+`PortalRefusedError`; any other portal error stays a `LazorKitError` as before. See [Errors › Typed approval requests](/errors#typed-approval-requests-40).
 
 Also exported: `isDeferredExpiredError`, `isSignatureReusedError` and
 `isRetiredDeploymentError`, each true for its class from any copy of the package, also

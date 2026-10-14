@@ -1,13 +1,15 @@
 ---
 title: Passkey signing
-description: The prepare / finalize flow, turning a WebAuthn assertion into a WebAuthnResponse, challenge-read options (minContextSlot, commitment), one flow per authority, and recovering a passkey's public key.
+description: The prepare / finalize flow, turning a WebAuthn assertion into a WebAuthnResponse, challenge-read options (minContextSlot, commitment), one flow per authority, recovering a passkey's public key, and typed approval requests.
 ---
 
-Everything here is `@lazorkit/sdk-legacy` **1.x** (protocol v2): install it with
-`npm install @lazorkit/sdk-legacy@next`. The challenge-read options and key recovery are
-in **1.3.0** and later, the tagged message and ownership challenges in **1.4.0**.
-`@lazorkit/sdk` (kit) has the same API with kit types (the tagged challenges since
-1.0.0-rc.6).
+Everything here is `@lazorkit/sdk-legacy` **1.x and 2.x** (protocol v2): install it with
+`npm install @lazorkit/sdk-legacy@next` (2.1.0). The challenge-read options and key
+recovery are in **1.3.0** and later, the tagged message and ownership challenges in
+**1.4.0**, typed approval requests in **2.0.0**, and rent refunds to the recorded payer
+(layout revision 2) in **2.1.0**. `@lazorkit/sdk` (kit) has the same API with
+kit types (the tagged challenges since 1.0.0-rc.6), except the typed requests, which are in
+sdk-legacy only.
 
 ## The three phases
 
@@ -297,6 +299,78 @@ look exactly like a transaction challenge. Use `createTaggedOwnershipChallenge()
 new proof. `verifyOwnershipProof`, `recoverPasskeyPublicKeys`, `resolvePasskeyPublicKey`
 and `findOwnPasskeyWallet` check a proof over exactly the challenge it carries, of any
 length from 16 bytes, so proofs over either form verify.
+
+## Typed approval requests
+
+A passkey challenge is a hash: a page that shows only the challenge cannot say what it
+approves. For `CreateSession`, `RevokeSession` and `RemoveAuthority`, 2.0.0 and later can also hand
+over the *request* the challenge is computed from, so the page that asks for the passkey
+shows exactly what it signs and computes the challenge itself, at the slot and counter it
+reads when the user approves. The wallet packages use this with the LazorKit portal since
+`@lazorkit/wallet` 4.0 / `@lazorkit/wallet-mobile-adapter` 3.0 (pre-releases). Pass the
+credential id to the prepare call and forward `prepared.request`:
+
+```typescript
+import {
+  withApprovalFragment,
+  parseTypedReply,
+  verifyApprovalReply,
+} from '@lazorkit/sdk-legacy/approval';
+
+const { unixTimestamp } = await client.getClusterTime();
+const prepared = await client.prepareCreateSession({
+  payer, walletPda, sessionKey,
+  expiresAt: unixTimestamp + 3_600n,         // an hour, in Unix seconds
+  actions,
+  secp256r1: { credentialIdHash, credentialId, authorityPda }, // credentialId: the raw id bytes
+});
+
+// The request travels in the URL fragment: #/?lk1=<base64url JSON>. Over the size cap this
+// throws TypedRequestTooLargeError; it never truncates.
+const url = withApprovalFragment(portalUrl, prepared.request!);
+
+// The portal signs at the slot and counter it reads when the user approves, and says which
+// in its reply. Check the reply before sending anything:
+const { binding } = verifyApprovalReply(prepared.request!, {
+  clientDataJson: response.clientDataJson,
+  typed: parseTypedReply(reply.typed),      // undefined when the reply names no binding
+});
+const { instructions } = client.finalizeCreateSession(prepared, response, binding);
+```
+
+- `prepared.request` is set when `secp256r1.credentialId` is given (its SHA-256 must be
+  `credentialIdHash`) and the client's program is the devnet or mainnet v2 deployment. The
+  same holds for `prepareRevokeSession` and `prepareRemoveAuthority`.
+- `verifyApprovalReply` throws `PortalReplyMismatchError` when the passkey signed anything
+  but this request (at the reply's slot, and a counter no lower than the request's), and
+  `finalize*(..., binding)` checks the same again. A reply without a `typed` block must
+  carry the SDK's own challenge.
+- With a credential id, `prepareCreateSession` throws `TransactionTooLargeError` before any
+  read or prompt when the signed transaction could not fit 1,232 bytes: the program
+  receives the WebAuthn data whole, which leaves room for
+  `MAX_PASSKEY_SESSION_ACTIONS_BYTES` (224) bytes of actions, with the assumed lengths
+  `ASSUMED_AUTHENTICATOR_DATA_BYTES` (37) and `ASSUMED_CLIENT_DATA_JSON_BYTES` (320).
+  `createSessionTransactionBytes` sizes one. Without a credential id nothing changes.
+- `rebindSecp256r1(prepared, { slot, counter })` recomputes any prepared passkey signing at
+  another slot and counter.
+
+The subpath also holds what the approving page needs: `readApprovalFragment`,
+`checkApprovalQuery`, `approvalReadPlan`, `describeApproval` (what the request approves, as
+data: amounts in base units, windows in seconds, and the reason when it would fail on
+chain), `approvalChallenge` and `typedReplyFor`; and `decodeActions`, which accepts an
+actions buffer exactly when the program does. It imports only `@noble/hashes` and
+`@noble/curves`: no `@solana/web3.js` and no `buffer`, so it bundles on its own for the
+browser and React Native. Its errors: `PortalReplyMismatchError`,
+`TypedRequestTooLargeError`, `RequestOutOfDateError` (a portal's `stale-counter` refusal),
+`TransactionTooLargeError`, `ApprovalRequestError` and `ApprovalActionsError`.
+
+In 2.1.0 the subpath's account decoders read layout revision 2 (`rentPayer` on
+`AuthorityFacts` and `SessionFacts`, and on the descriptions), and `describeApproval`
+refuses a `revokeSession` or `removeAuthority` request whose refund destination is not the
+recorded rent payer (`request-invalid`, reason `refund-not-rent-payer`). The decoders of
+2.0.0 return `null` for revision-2 accounts, so a page on 2.0.0 refuses every typed request
+from a wallet created on devnet since 2026-10-13. See
+[Layout revision 2](/versions#layout-revision-2).
 
 ## Deferred execution: `executor` and `feePayer`
 

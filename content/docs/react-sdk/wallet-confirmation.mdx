@@ -6,7 +6,9 @@ description: How connect finds a returning user's wallet, when it asks the user 
 <Callout type="warn" title="Version note">
   This page describes `@lazorkit/wallet` **3.0.0 and later** (key recovery: 3.1.0 and
   later). Earlier versions (`2.x` and before) have none of `onConfirmWallet`,
-  `confirmWallet`, `trustedAuthorities`, `watchMints` or the built-in chooser.
+  `confirmWallet`, `trustedAuthorities`, `watchMints` or the built-in chooser. 4.0
+  (pre-release) keeps all of it, in both modes; in [Embedded mode](/react-sdk/embedded-mode)
+  the chooser is drawn in the SDK's own sheet instead of the portal's dialog.
 </Callout>
 
 When nothing is stored yet, `connect` looks the passkey's wallet up on chain. Looking it
@@ -210,10 +212,12 @@ While a wallet is connected, a `confirmWallet` naming another one throws too:
 | --------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `WalletNeedsConfirmationError`    | `onConfirmWallet: 'throw'` and the wallet needs the user. Carries `credentialId` and `candidates: WalletChoice[]`. |
 | `WalletConfirmationDeclinedError` | The user chose none ("None of these", or your handler returned `null`). Nothing was saved.                |
-| `PortalCancelledError`            | The user closed the portal dialog (X, Escape, a click outside) or its popup window before it answered — on `connect` and on every signing action. Raised at once, not after the 60 s timeout. Also what a `connect` still running rejects with when `disconnect` is called: its portal or chooser closes and it connects nothing. |
+| `PortalCancelledError`            | The user closed the portal dialog (X, Escape, a click outside) or its popup window before it answered — on `connect` and on every signing action. Raised at once, not after the 60 s timeout (10 minutes for `createSession`, `revokeSession` and `removeAuthority` on a v2 wallet in 4.0). Also what a `connect` still running rejects with when `disconnect` is called: its portal or chooser closes and it connects nothing. |
 
 All three are exported from `@lazorkit/wallet`. Portal errors carry the portal's own
-message.
+message. In 4.0, `WalletConfirmationDeclinedError` and `PortalCancelledError` extend
+`UserRejectedError` and no longer set the store's `error`; a passkey whose key cannot be
+recovered rejects with `KeyRecoveryError`.
 
 ---
 
@@ -227,7 +231,7 @@ import { LazorkitWalletAdapter } from '@lazorkit/wallet';
 const adapter = new LazorkitWalletAdapter({
   rpcUrl: 'https://api.devnet.solana.com',
   portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  paymasterConfig: { paymasterUrl: 'https://kora-devnet-production.up.railway.app' },
   onConfirmWallet: 'throw',
   trustedAuthorities: [BACKEND_ADMIN_KEY],
   watchMints: [MY_TOKEN_MINT],

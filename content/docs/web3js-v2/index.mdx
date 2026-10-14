@@ -9,11 +9,20 @@ description: "@lazorkit/sdk — the LazorKit client for @solana/kit (web3.js v2)
 types (`Address`, `Instruction`, `Rpc`) and tree-shakable module functions, and produces
 the same transactions.
 
+## Which package do I use?
+
+| You are building | Package | Install | Version |
+| ---------------- | ------- | ------- | ------- |
+| A **React** web app | [`@lazorkit/wallet`](/react-sdk) | `npm i @lazorkit/wallet` | 3.4.1 (`latest`). 4.0.0-next.1 on `@next`, which creating a session on devnet needs |
+| A **React Native** or Expo app | [`@lazorkit/wallet-mobile-adapter`](/react-native-sdk) | `npm i @lazorkit/wallet-mobile-adapter` | 2.4.0 (`latest`). 3.0.0-next.1 on `@next`, which creating a session on devnet needs |
+| Program-level code on **`@solana/web3.js` v1**: your own UI, a backend, a relayer, an agent | [`@lazorkit/sdk-legacy`](/web3js-v1) | `npm i @lazorkit/sdk-legacy@next` | 2.1.0, protocol v2. Without `@next` you get `latest`, 0.3.2, the protocol v1 line |
+| The same on **`@solana/kit`** (web3.js v2) | [`@lazorkit/sdk`](/web3js-v2) | `npm i @lazorkit/sdk @solana/kit` | 1.0.0-rc.8, release candidate, protocol v2 only |
+
 <Callout type="warn" title="Release candidate, protocol v2 only">
-  - Current release **1.0.0-rc.6**, on both the `latest` and `next` npm tags. Its surface is
-    complete for protocol v2 and covered by unit tests and a local-validator suite; three
-    public paths are not covered by tests yet (`revokeSession`, the one-shot
-    `transferOwnership`, `signWithSecp256r1`).
+  - Current release **1.0.0-rc.8**, on both the `latest` and `next` npm tags. Its surface is
+    complete for protocol v2 and covered by unit tests and a local-validator suite
+    (`revokeSession` and `closeExpiredSession` included since rc.8); one public path is not
+    covered by tests yet (`signWithSecp256r1`).
   - It speaks **protocol v2 only**, which runs on devnet today; the v2 mainnet program is
     not deployed yet. For mainnet today, use `@lazorkit/sdk-legacy` 0.3.x (protocol v1).
     See [Networks & versions](/networks).
@@ -65,7 +74,62 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
 `rpc` must support `getAccountInfo`, `getMultipleAccounts`, `getProgramAccounts`,
 `getSlot` and `getTokenAccountsByOwner`; `createSolanaRpc(url)` does.
 
-## What is the same as `@lazorkit/sdk-legacy` 1.x
+## Session time is Unix seconds (rc.7)
+
+rc.7 measures a session's `expiresAt`, an action's own `expiresAt` and a recurring limit's
+`windowSeconds` in Unix seconds of the cluster clock, as devnet's v2 program does since
+2026-10-11. rc.6 and earlier send slots, which devnet's v2 refuses for a session (3008).
+
+Continuing the quick start:
+
+```ts
+import { Actions, MAX_SESSION_SECONDS } from '@lazorkit/sdk';
+
+const sessionKey = await generateKeyPairSigner();      // the key the session signs with
+const { unixTimestamp } = await lk.getClusterTime();   // the Clock sysvar the program reads
+const { instructions, sessionPda } = await lk.createSession({
+  payer: payer.address,
+  walletPda,
+  adminSigner: ed25519(owner.address),
+  sessionKey: sessionKey.address,
+  expiresAt: unixTimestamp + 86_400n,                    // a day; at most MAX_SESSION_SECONDS
+  actions: [Actions.solRecurringLimit({ limit: 1_000_000_000n, windowSeconds: 86_400n })],
+});
+console.log(MAX_SESSION_SECONDS, sessionPda, instructions.length);
+```
+
+- `createSession` / `prepareCreateSession` throw before any read or prompt on an `expiresAt`
+  that looks like a slot (below 2020-01-01), and `serializeActions` on an action expiry that
+  does, so a Delegate policy is checked too. The program refuses an expiry not after the
+  cluster's time, or more than 30 days (`MAX_SESSION_SECONDS`) ahead of it (3008).
+- `Actions.solRecurringLimit` / `tokenRecurringLimit` take `windowSeconds` (`86_400n` is a
+  day) instead of `window`, so code written for slots fails to compile.
+- `WalletFacts` gains `unixTimestamp`, and `liveSessions[].expiresAt` replaces
+  `expiresAtSlot`.
+- A deferred execution's `expiryOffset` is still a slot count.
+
+## Rent goes back to whoever paid it (rc.8)
+
+Devnet's v2 records the rent payer of every authority and session it has created since
+2026-10-13 (layout revision 2), and `RevokeSession`, `CloseExpiredSession`,
+`RemoveAuthority` and `TransferOwnership` refund only to it (`RefundDestinationMismatch`,
+3039). rc.8's `revokeSession`, `removeAuthority`, `transferOwnership` and
+`closeExpiredSession` read the account being closed and fill in that payer when
+`refundDestination` is left out, and throw `RefundDestinationMismatchError` for another
+one. `rentRefundDestination(account, fallback)` answers the same question for a close you
+build yourself (with `createCloseExpiredSessionIx`, say). `decodeAuthorityAccount` and
+`decodeSessionAccount` return `rentPayer` (`null` for an older account). rc.7 reads a
+revision-2 Delegate's policy and a session's actions 32 bytes early. See
+[Versions & compatibility › Layout revision 2](/versions#layout-revision-2).
+
+```ts
+const { instructions } = await lk.closeExpiredSession({
+  caller: payer.address, // anyone may close an expired session; the rent goes to its payer
+  sessionPda,
+});
+```
+
+## What is the same as `@lazorkit/sdk-legacy` 2.1.0
 
 - Every instruction, PDA seed (`lk2:`) and account layout; a parity suite checks both SDKs
   against the same golden vectors the program asserts against.
@@ -83,17 +147,21 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
 - Sessions (no actions throws without `unrestricted: true`), Delegate policies, deferred
   execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`. A
   policy names what may leave the vault: from the v2 program release that adds errors 3037
-  and 3038 (not deployed yet), nothing it does not name may
-  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)).
+  and 3038 (on devnet since 2026-10-03), nothing it does not name may
+  ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Only an Owner may
+  change who controls the vault or its token accounts: every other signer, any session,
+  an Admin or a Delegate, is refused with 3030–3032, policy or not.
+- Time in Unix seconds (rc.7 / sdk-legacy 2.0.0), as above, and rent refunds to the
+  recorded payer (rc.8 / sdk-legacy 2.1.0).
 - `MinContextSlotNotReachedError` and the error codes on [Errors](/errors).
 
 ## What is different
 
 - **Smaller surface:** no `parseActions`, `findAuthoritiesByWallet` or
-  `getRecoveryStatus` yet, and no `ERROR_NAMES` table — use `@lazorkit/sdk-legacy` for
-  those.
+  `getRecoveryStatus` yet, no `ERROR_NAMES` table, and no typed approval requests (the
+  `@lazorkit/sdk-legacy/approval` subpath) — use `@lazorkit/sdk-legacy` for those.
 - **More low-level builders are exported**, including `createCloseExpiredSessionIx` (close
-  an expired session and keep its rent) and `createMigrateWalletIx`.
+  an expired session; its rent goes to the recorded payer) and `createMigrateWalletIx`.
 - **Account decoders:** `decodeWalletAccount`, `decodeAuthorityAccount`,
   `decodeSessionAccount`.
 - Addresses are kit `Address` strings, and PDA helpers are `async`.

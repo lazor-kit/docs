@@ -52,7 +52,7 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
 | ------------------- | ---------------------------------------------- | -------------------------------------- | ----- |
 | `rpcUrl`            | `string`                                       | `https://api.devnet.solana.com`        | |
 | `portalUrl`         | `string`                                       | `https://portal.lazor.sh`              | |
-| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`     | |
+| `paymasterConfig`   | `{ paymasterUrl: string; apiKey?: string }`    | `https://kora.devnet.lazorkit.com`; `https://kora-devnet-production.up.railway.app` from 4.0.0-next.1 (see below) | |
 | `v1PaymasterConfig` | `{ paymasterUrl: string; apiKey?: string }`    | `paymasterConfig`                      | 3.0.0 |
 | `cluster`           | `'mainnet' \| 'devnet'`                        | read from `rpcUrl`, else mainnet       | 3.0.0 |
 | `onConfirmWallet`   | `'builtin' \| 'throw' \| ConfirmWalletHandler` | `'builtin'`                            | 3.0.0 |
@@ -83,8 +83,23 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
   `'auto'` uses IndexedDB when it can, `'memory'` keeps nothing at rest (the key is gone
   on reload). See [below](#keys-the-sdk-generates).
 
-The props are typed as `LazorkitProviderProps` internally; the type is not exported, use
-`React.ComponentProps<typeof LazorkitProvider>`.
+The props are typed as `LazorkitProviderProps` internally; 3.x does not export the type,
+so use `React.ComponentProps<typeof LazorkitProvider>` (4.0 exports it).
+
+### In 4.0: `mode`
+
+`@lazorkit/wallet` 4.0 (pre-release on `next`) adds a required `mode` prop, with no default:
+
+| Prop | Type | Notes |
+| ---- | ---- | ----- |
+| `mode` | `'portal' \| 'embedded'` | Required. `'portal'` is everything on this page, as in 3.x: a 3.x app adds `mode="portal"` and keeps its users' wallets. Without it the app does not compile, and from JavaScript it throws `LazorkitConfigError('no-mode')`. |
+| `rpId`, `appName`, `confirm` | | Embedded mode only (where `rpId` and `appName` are required); portal mode does not take them. See [Embedded mode › Provider props](/react-sdk/embedded-mode#provider-props). |
+| `onEvent` | `(event: LazorkitEvent) => void` | Experimental instrumentation, in either mode. |
+
+The stored wallet is read synchronously when the provider first renders, so the first
+render can already be connected, and the props are the config: a config stored by 3.x is
+never read back. A static mistake in the props throws `LazorkitConfigError` while rendering.
+See [Migrating to 4.0](/react-sdk/migrating-to-4).
 
 ## What the SDK stores in the browser
 
@@ -223,6 +238,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
+On devnet, set
+`paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`:
+that is LazorKit's devnet relayer for v2, and the built-in default from 4.0.0-next.1 on.
+The default of 3.4.1, `kora.devnet.lazorkit.com`, still reaches an earlier relayer that
+sponsors only v1.
+
 The stored wallet belongs to the cluster it was created on: switching clusters does not
 move it. Disconnect before switching, or the app keeps showing an address from the other
 cluster.
@@ -232,7 +253,7 @@ cluster.
 ```tsx
 const paymasterConfig = process.env.NODE_ENV === 'production'
   ? { paymasterUrl: process.env.NEXT_PUBLIC_KORA_MAINNET!, apiKey: process.env.NEXT_PUBLIC_KORA_KEY }
-  : { paymasterUrl: 'https://kora.devnet.lazorkit.com' };
+  : { paymasterUrl: 'https://kora-devnet-production.up.railway.app' }; // LazorKit's devnet relayer
 
 <LazorkitProvider paymasterConfig={paymasterConfig}>{children}</LazorkitProvider>
 ```

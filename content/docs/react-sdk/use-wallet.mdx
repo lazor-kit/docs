@@ -12,6 +12,14 @@ portal (a dialog iframe, or a popup) where the user approves with their passkey;
 no `redirectUrl` argument. Every send resolves once its transaction is **confirmed** —
 see [Sending transactions](/react-sdk/sending-transactions).
 
+This page describes 3.4.x (`latest`); where 4.0 (`next`) differs it says so. 4.0 adds
+`status`, `address` and `signAndSend` (with `onSubmitted`), takes session expiry and
+recurring windows in seconds, and deprecates `isLoading`, `isConnecting`, `isSigning` and
+the session, authority and deferred functions here (they keep working until 5.0, and warn
+once). From 4.0.0-next.1 those functions are also in `@lazorkit/wallet/hooks`, with the same
+names and parameters and no warning: `useSessions()`, `useAuthorities()` and
+`useDeferred()`. See [Migrating to 4.0](/react-sdk/migrating-to-4).
+
 ## Quick reference
 
 | Method                     | Passkey prompt   | Use for                                                      |
@@ -19,6 +27,7 @@ see [Sending transactions](/react-sdk/sending-transactions).
 | `connect`                  | first time       | Authenticate; returns the stored wallet without a prompt     |
 | `disconnect`               | no               | Clear the stored wallet and the kept session key             |
 | `signAndSendTransaction`   | yes              | Single-tx Execute via paymaster                              |
+| `signAndSend` (4.0)        | yes              | The same function, with `onSubmitted`; in Embedded mode a review sheet first |
 | `signMessage`              | yes              | Off-chain signature; check it with `verifyWalletMessage`     |
 | `verifyMessage`            | no               | **Deprecated.** Never use it to authenticate                 |
 | `createSession`            | yes              | Mint a scoped Ed25519 session (`SpendingLimits`)             |
@@ -34,7 +43,8 @@ see [Sending transactions](/react-sdk/sending-transactions).
 All send-tx methods take `{ instructions, transactionOptions? }`. `transactionOptions`
 accepts `addressLookupTableAccounts`, `txVersion: 'legacy' | 'v0'` (default `'v0'`) and
 `clusterSimulation`; `feeToken` and `computeUnitLimit` are in the types but **ignored** by
-the web SDK (3.4.0).
+the web SDK (3.4.0). From 4.0.0-next.1 `computeUnitLimit` (1 to 1,400,000) is honoured: it
+puts a `SetComputeUnitLimit` instruction first in the transaction.
 
 Every method except `verifyMessage` also takes `onSuccess` / `onFail` (in the payload;
 `connect`, `disconnect`, `signMessage` and `removeAuthority` in their options). One of them
@@ -55,7 +65,9 @@ runs per call, once the action is over, right before the promise settles; see
 | `isLoading`         | `boolean`            | `isConnecting \|\| isSigning \|\| …`                       |
 | `isConnecting`      | `boolean`            |                                                            |
 | `isSigning`         | `boolean`            | `true` from the prompt until the transaction is confirmed. |
-| `error`             | `Error \| null`      | The last action's error.                                   |
+| `error`             | `Error \| null`      | The last action's error. In 4.0, never a user rejection.  |
+| `status` (4.0)      | `'disconnected' \| 'connecting' \| 'connected' \| 'signing'` | Replaces `isConnecting`, `isSigning` and `isLoading`, which 4.0 deprecates. |
+| `address` (4.0)     | `string \| null`     | The vault, base58. |
 
 <Callout type="warn" title="smartWalletPubkey ≠ vault">
   On the web SDK, `smartWalletPubkey` is the wallet PDA the program uses to resolve
@@ -93,7 +105,10 @@ const wallet = await connect();
 **Returns** `Promise<WalletInfo>`.
 
 `connect` can reject with `WalletNeedsConfirmationError`, `WalletConfirmationDeclinedError`
-or `PortalCancelledError`, and with "Already connecting" while one is running. Full flow:
+or `PortalCancelledError`, and with "Already connecting" while one is running. In 4.0
+`WalletConfirmationDeclinedError` and `PortalCancelledError` are `UserRejectedError`s and
+leave `error` unset, and a passkey whose key cannot be
+recovered rejects with `KeyRecoveryError` instead of a plain `Error`. Full flow:
 [Wallet Confirmation](/react-sdk/wallet-confirmation).
 
 ```ts
@@ -310,7 +325,12 @@ with "The portal did not sign this message: its reply is over another challenge.
 A message signature proves that a passkey's key signed the message, not which wallet that
 key belongs to. To authenticate a wallet, read the key from the chain, never from the
 client: a server that takes the key from the request accepts anyone's passkey for any
-wallet they name. `verifyWalletMessage`, a package export, does the lookup:
+wallet they name. `verifyWalletMessage`, a package export, does the lookup.
+
+On a server, import it from **`@lazorkit/wallet/core`** in 4.0: the package root and
+`/hooks` are client modules (`'use client'`) and import React, so a Next.js route handler or
+a Node server must not load them. `/core` has no React. 3.x has no `/core`: import from
+`@lazorkit/wallet`.
 
 ```ts
 // In the app: sign a message your server issued, and send the result with the wallet.
@@ -325,7 +345,7 @@ await fetch('/api/sign-in', {
 ```ts
 // On the server
 import { Connection } from '@solana/web3.js';
-import { verifyWalletMessage } from '@lazorkit/wallet';
+import { verifyWalletMessage } from '@lazorkit/wallet/core'; // 3.x: from '@lazorkit/wallet'
 
 const ok = await verifyWalletMessage({
   connection: new Connection(RPC_URL),
@@ -366,8 +386,9 @@ sign-in message.
 **Returns** `Promise<boolean>`.
 
 **Offline: `verifySignedMessage`.** `verifySignedMessage({ message, publicKey, ...result })`
-is the part of that check that needs no RPC: `true` only when `publicKey`'s passkey signed
-`signedMessageChallenge(message)` with the user present, and `false` for any other
+(also from `@lazorkit/wallet/core` in 4.0) is the part of that check that needs no RPC:
+`true` only when `publicKey`'s passkey signed `signedMessageChallenge(message)` with the
+user present, and `false` for any other
 challenge, the raw message bytes included. It never throws. It proves that a key signed
 the message and nothing about which wallet holds that key, so use it alone only with a key
 you read from the claimed wallet's authority on chain yourself. `publicKey` is the P-256
@@ -395,6 +416,61 @@ takes the three as bytes and resolves with a `boolean`.
 
 Mint an Ed25519 session key and register it on the wallet.
 
+<Callout type="error" title="On devnet, sessions need 4.0">
+  Devnet's v2 program reads a session's expiry as a Unix time since 2026-10-11. 3.4.1 sends
+  it as a slot, so its `createSession` on a v2 wallet is refused there with
+  `InvalidSessionDuration` (3008), after the user approved. Use 4.0 (`@next`) for sessions
+  on devnet. 3.4.1 still creates sessions on v1 wallets, which count in slots. See
+  [Migrating to 4.0](/react-sdk/migrating-to-4).
+</Callout>
+
+<Tabs items={['4.0 (next)', '3.4 (latest)']}>
+<Tab value="4.0 (next)">
+
+```ts
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+const { sessionPda, sessionPublicKey } = await createSession({
+  expiresInSeconds: 86_400,             // a day, by the cluster clock; default 5 hours
+  spendingLimits: {
+    solPerTxMax:    500_000_000n,       // 0.5 SOL per tx, rent the vault pays included
+    solRecurring:   {
+      limit: 1_000_000_000n,            // 1 SOL per window
+      windowSeconds: 86_400n,           // a day
+    },
+    // Each token the session may spend, by mint. Amounts in base units.
+    tokens: [{ mint: USDC, perTxMax: 5_000_000n, lifetimeCap: 100_000_000n }],
+  },
+});
+```
+
+| Field              | Type                    | Notes |
+| ------------------ | ----------------------- | ----- |
+| `expiresInSeconds` | `number \| bigint`      | How long the session lasts, counted from the cluster's time when `createSession` reads it: more than 0, at most 30 days (`MAX_SESSION_SECONDS`). Default `DEFAULTS.SESSION_EXPIRY_SECONDS`, 5 hours. |
+| `expiresAt`        | `number \| bigint`      | When it ends instead, as a Unix time in seconds: after the cluster's time and at most 30 days ahead of it. |
+| `expiresInSlots`   | `bigint`                | **Deprecated.** Converted to seconds with the cluster's measured slot time, with a warning; throws when the slot time cannot be read. Give at most one of the three. |
+| `spendingLimits`   | `SpendingLimits`        | SOL limits and `tokens`, one entry per mint the session may spend. Recurring limits take `windowSeconds`; a `windowSlots` throws. Required unless `unrestricted: true`. Checked before anything is read or the passkey is asked. |
+| `unrestricted`     | `boolean`               | Mint a session with **no limits**: it can spend the whole vault through any program until it expires. Without limits and without this, `createSession` throws. |
+| `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). As in 3.4. |
+
+The expiry is checked against the cluster clock (the Clock sysvar, which the program
+compares against) before the passkey is asked. On a v2 wallet the portal shows what the
+session may spend and until when before the user approves: see
+[What the user approves](#what-the-user-approves-40). On a v1 wallet the session still
+counts in slots: with no expiry it lasts `DEFAULTS.SESSION_EXPIRY_SLOTS` (50,000 slots), and
+`expiresInSeconds`, `expiresAt` and `windowSeconds` are converted to slots with the measured
+slot time.
+
+**Checked before the prompt:** an expiry the program would refuse; a `tokens` entry with no
+limit, a mint named twice, an amount outside a u64, a window of 0 seconds, more than 16
+actions, or more than **224 bytes** of actions (what fits in the transaction beside the
+passkey's response) throws. A SOL limit takes 19 bytes (`solRecurring` 43), a token's
+`lifetimeCap` or `perTxMax` 51, its `recurring` 75: `solPerTxMax` with `perTxMax` and
+`lifetimeCap` fits for 2 mints (223 bytes), or with `perTxMax` alone for 4.
+
+</Tab>
+<Tab value="3.4 (latest)">
+
 ```ts
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
@@ -414,26 +490,27 @@ const { sessionPda, sessionPublicKey } = await createSession({
 
 | Field              | Type                    | Notes |
 | ------------------ | ----------------------- | ----- |
-| `expiresInSlots`   | `bigint`                | Default 50,000 slots. The program allows at most 6,480,000. |
+| `expiresInSlots`   | `bigint`                | Default 50,000 slots. A v2 program before the time-based release allowed at most 6,480,000; devnet's v2 now refuses any slot (3008). |
 | `spendingLimits`   | `SpendingLimits`        | SOL limits and, since 3.4.0, `tokens`: one entry per mint the session may spend. Required unless `unrestricted: true`. Checked before anything is read or the passkey is asked. |
 | `unrestricted`     | `boolean`               | Mint a session with **no limits**: it can spend the whole vault through any program until it expires. Without limits and without this, `createSession` throws. |
 | `sessionKey`       | `PublicKey \| string`   | Register a key you hold elsewhere (a backend, an agent). The SDK generates nothing and stores nothing. If this key already has a session, `createSession` resolves with that session as it was made, without a prompt, whatever `spendingLimits` you pass. |
 
-**What the limits bound.** Name every asset the session may spend: a SOL limit for SOL
-(rent the vault pays for a new account counts), and a `tokens` entry for each mint, with at
-least one of `lifetimeCap`, `perTxMax` and `recurring: { limit, windowSlots }`. wSOL is a
-mint of its own. From the v2 program release that adds errors 3037 and 3038, an asset the
-limits do not name cannot leave the wallet: SOL limits alone let the session spend no
-token, and token limits alone no SOL. That release is not deployed yet; until it is, an
-asset the limits do not name is not bounded at all. See
-[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
-
 **Checked before the prompt** (3.4.0): a `tokens` entry with no limit, a mint named twice,
 an amount outside a u64, a window of 0 slots, more than 16 actions, or more than 244 bytes
-of actions (what fits in the transaction beside the passkey's response) throws. A SOL limit
-takes 19 bytes (`solRecurring` 43), a token's `lifetimeCap` or `perTxMax` 51, its
-`recurring` 75: `solPerTxMax` with `perTxMax` and `lifetimeCap` fits for 2 mints, or with
-`perTxMax` alone for 4. Nothing is added that you did not ask for.
+of actions throws. 3.4 sizes the passkey's response smaller than 4.0 does, so a preset
+between 225 and 244 bytes can still fail after the user approved.
+
+</Tab>
+</Tabs>
+
+**What the limits bound.** Name every asset the session may spend: a SOL limit for SOL
+(rent the vault pays for a new account counts), and a `tokens` entry for each mint, with at
+least one of `lifetimeCap`, `perTxMax` and `recurring`. wSOL is a mint of its own. On
+devnet's v2 (since 2026-10-03, and on mainnet once v2 is deployed there), an asset the
+limits do not name cannot leave the wallet: SOL limits alone let the session spend no
+token, and token limits alone no SOL. A session also cannot change who controls the vault
+or its token accounts, whatever its limits (3030–3032). See
+[Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
 **A `sessionKey` that already has a session.** Since 3.4.0 the limits are checked first, so
 a call with no `spendingLimits` (and not `unrestricted`), or invalid ones, throws where
@@ -448,10 +525,10 @@ wallet. There is one slot: a new session replaces it. See
 
 <Callout type="warn" title="Limits are immutable">
   Session actions can't be changed once created. To adjust, revoke and recreate. Every
-  session made with `SpendingLimits` before 3.4.0 names SOL only, so from the program
-  release that adds errors 3037 and 3038 it moves no token: create a new one with
-  `tokens`. Program filters and per-action expiries are not in `SpendingLimits`; for those
-  use `LazorKitClient` with the `Actions` catalogue.
+  session made with `SpendingLimits` before 3.4.0 names SOL only, so where errors 3037 and
+  3038 apply it moves no token: create a new one with `tokens`. Program filters and
+  per-action expiries are not in `SpendingLimits`; for those use `LazorKitClient` with the
+  `Actions` catalogue.
 </Callout>
 
 **Returns** `Promise<{ sessionPda: string; sessionPublicKey: string }>`.
@@ -465,8 +542,8 @@ const sig = await signAndSendWithSession({ instructions: [ix] });
 ```
 
 Fails with `0xbd0` (`ActionSolLimitExceeded`) and related errors once limits are hit —
-see [Errors](/errors#spending-limits-and-policies-30203038). From the program release that
-adds errors 3037 and 3038, a transaction that would move SOL, or a token, that the
+see [Errors](/errors#spending-limits-and-policies-30203038). Where errors 3037 and 3038
+apply (devnet's v2 today), a transaction that would move SOL, or a token, that the
 session's limits do not name rejects with `UnlistedSolOutflowError` or
 `UnlistedTokenOutflowError` (3.4.0): nothing in it ran, and it is not resent. See
 [Errors › Assets a policy does not name](/errors#assets-a-policy-does-not-name).
@@ -477,7 +554,8 @@ anything is signed or sent. A send still running when the wallet is disconnected
 `disconnect()`, wallet-adapter or the Wallet Standard, neither signs nor sends after it
 (3.4.0): it rejects with `KeyWalletMismatchError`, `reason` `'disconnected'` when the same
 wallet is connected again by then (send again). A key whose session has expired is deleted
-when it is next read, and the call rejects. See
+when it is next read, and the call rejects (4.0 compares a v2 session's expiry with the
+cluster clock, 3.4 with the slot). See
 [Errors › Kept session and authority keys](/errors#kept-session-and-authority-keys-web).
 
 ```ts
@@ -521,7 +599,49 @@ await revokeSession({ sessionPda: 'SESSION_PDA_BASE58' }); // a specific one, e.
 Closes the session PDA and refunds the rent. Without `sessionPda`, it revokes the session
 whose key the SDK keeps, which must be the connected wallet's (`KeyWalletMismatchError`
 otherwise, before the prompt), and deletes that key once the revoke lands. After expiry, anyone may close a session with
-`CloseExpiredSession` and keep the rent: revoke yours if you want it back.
+`CloseExpiredSession`. The rent goes back to the account that paid it (your paymaster's
+fee payer) for a session created on devnet since 2026-10-13, which records it; an older
+session's rent goes to whoever closes it, so revoke yours if you want it back.
+4.0.0-next.1 refunds `revokeSession` to the recorded payer; see
+[Layout revision 2](/versions#layout-revision-2).
+
+### What the user approves (4.0)
+
+In 4.0, `createSession`, `revokeSession` and `removeAuthority` on a v2 wallet send the
+portal the operation itself, not only its challenge: a *typed request* in the URL fragment
+(`#/?lk1=…`). The portal shows exactly what the passkey approves, for example "Let MyApp
+spend up to 0.002 SOL per payment and 5 USDC in total, until about 6:50 PM", recomputes the
+challenge from what it shows, and picks the slot it signs at when the user taps Approve.
+It waits up to 10 minutes for the user on these three screens (60 seconds for other
+signing), so time spent reading costs nothing. `signAndSendTransaction`, `addAuthority`,
+the deferred actions and wallets made before LazorKit v2 open the portal as in 3.x.
+
+Before anything is sent, the wallet checks the portal's reply against the request it
+prepared: the passkey must have signed this operation, at the slot and counter the portal
+names in its reply, or at the prepared ones when it names none. The transaction is then
+finalized at that slot and counter.
+
+| Error | When | What to do |
+| ----- | ---- | ---------- |
+| `PortalReplyMismatchError` | The reply does not match the request (another operation, slot, counter or kind). `reason` says what differed. | Nothing was sent. Ask the user to approve again. |
+| `RequestOutOfDateError` | The portal refused the request with `stale-counter`: its view of the passkey's counter was behind. `retryable: true`. | The passkey signed nothing: offer to try again. |
+| `PortalRefusedError` | The portal refused the request; `code` is `request-invalid` (it would fail on chain), `wrong-network`, `challenge-mismatch`, `typed-malformed`, `typed-unsupported` or `chain-unavailable`. | The passkey signed nothing. Fix the request, or check `portalUrl` and the cluster. |
+| `TypedRequestTooLargeError` | The request is over 8,192 characters, or the portal URL carrying it over 16,384. | Nothing was opened. Use fewer actions. |
+
+```ts
+import { RequestOutOfDateError } from '@lazorkit/wallet';
+
+try {
+  await createSession({ spendingLimits, expiresInSeconds: 3600 });
+} catch (error) {
+  if (error instanceof RequestOutOfDateError) {
+    // Nothing was signed: offer to try again.
+  } else throw error;
+}
+```
+
+In [Embedded mode](/react-sdk/embedded-mode) the same request is prepared, the passkey
+signs it in your page, and the signature is checked against it the same way.
 
 ---
 
@@ -568,7 +688,7 @@ For a key your app holds, use `ROLE_SPENDER` with a `policy`.
 | Field          | Type         | Notes |
 | -------------- | ------------ | ----- |
 | `role`         | `number`     | Required. `ROLE_SPENDER` (Delegate), `ROLE_ADMIN`, or `ROLE_OWNER` on a v1 wallet only. |
-| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. It names what may leave the wallet ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Keep it within 244 bytes: `addAuthority` does not check its size, and a policy that does not fit fails after the user approved. |
+| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. It names what may leave the wallet ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Keep it within 224 bytes (244 with 3.4): `addAuthority` does not check its size, and a policy that does not fit fails after the user approved. A recurring window in it is in seconds with 4.0 (`windowSeconds`). |
 | `unrestricted` | `boolean`    | Required to add a key to a **v1** wallet, where any added key can spend the whole vault. Ignored on v2. |
 
 **Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
@@ -595,8 +715,9 @@ Only while the wallet the authority was added to is connected: otherwise it reje
 `KeyWalletMismatchError`, and nothing is sent. As with a session, a send still running when
 the wallet is disconnected neither signs nor sends after it (3.4.0). A Delegate's send that
 would move an asset its policy does not name rejects with `UnlistedSolOutflowError` or
-`UnlistedTokenOutflowError` ("This key is not allowed to spend …"), from the program
-release that adds errors 3037 and 3038.
+`UnlistedTokenOutflowError` ("This key is not allowed to spend …"), where errors 3037 and
+3038 apply (devnet's v2 today). Like a session, a Delegate cannot change who controls the
+vault or its token accounts (3030–3032).
 
 ### `removeAuthority`
 
@@ -605,7 +726,9 @@ await removeAuthority('TARGET_AUTHORITY_PDA');   // base58 string
 await removeAuthority('TARGET_AUTHORITY_PDA', { onSuccess, onFail });
 ```
 
-Removing the authority whose key the SDK keeps also deletes that key.
+Removing the authority whose key the SDK keeps also deletes that key. In 4.0 the portal
+shows which authority is removed before the user approves:
+[What the user approves](#what-the-user-approves-40).
 
 <Callout type="warn">
   You can't remove the last Owner, nor the passkey you sign with. An Admin can remove only

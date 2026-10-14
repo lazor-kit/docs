@@ -20,7 +20,7 @@ and a concrete fix. Every error class and program code is listed on [Errors](/er
 | [Wallet address](#wallet-address) | Funds sent to the wrong address, balance stuck at 0                 |
 | [Passkey / WebAuthn](#passkey--webauthn) | `NotAllowedError`, "user denied permission", simulator issues, portal closed, a message signature that does not verify |
 | [Sending transactions](#sending-transactions) | 3006, outcome unknown, "Already signing", deferred expiry |
-| [Sessions and kept keys](#sessions-and-kept-keys) | 3037 / 3038, `KeyWalletMismatchError`, `createSession` refusing its limits, a sign-out through wallet-adapter |
+| [Sessions and kept keys](#sessions-and-kept-keys) | 3008 on devnet, 3037 / 3038, `KeyWalletMismatchError`, `createSession` refusing its limits, a sign-out through wallet-adapter, typed-request refusals |
 | [Network / relay](#network--relay)      | `Network request failed`, paymaster errors, RPC refusals       |
 | [Deep linking](#deep-linking-react-native-only) | Portal never returns, redirect drops signature          |
 | [v1 and v2](#v1-and-v2)        | 4018, 4008, 3005, migrated wallets, cluster detection                 |
@@ -60,8 +60,8 @@ npm install @lazorkit/wallet@^3.3.1
 
 ### `Buffer is not defined`
 
-`@lazorkit/wallet` 3.0.2 and later, and `@lazorkit/sdk-legacy` 0.3.2 / 1.x, need no global
-`Buffer`. If another library in your app does, polyfill it per environment:
+`@lazorkit/wallet` 3.0.2 and later, and `@lazorkit/sdk-legacy` 0.3.2, 1.x and 2.x, need no
+global `Buffer`. If another library in your app does, polyfill it per environment:
 
 <Tabs items={['React Native / Expo', 'Next.js', 'Vite', 'Create React App']}>
 <Tab value="React Native / Expo">
@@ -326,20 +326,63 @@ report it as it came.
 
 ### `InvalidSignatureAge` / `0xbbf` (3007)
 
-The challenge's slot is more than 150 slots old by the time the transaction runs — the
-user took too long to approve, or (with `commitment: 'finalized'`) the slot was already old
-when the prompt opened. Prepare again.
+The challenge's slot is more than 150 slots old by the time the transaction runs (about
+35 s at today's slot times, portal loading included) — the user took too long to approve,
+or (with `commitment: 'finalized'`) the slot was already old when the prompt opened.
+Prepare again. `@lazorkit/wallet` 4.0.0-next.1 and `@lazorkit/wallet-mobile-adapter`
+3.0.0-next.1 throw it as `SignatureTooOldError` ("Approval took too long" from
+`describeError`), never resend it, and read the slot for a passkey send's challenge right
+before the portal opens: offer "Try again", which asks for a new approval.
 
 ---
 
 ## Sessions and kept keys
+
+### `createSession` fails with `0xbc0` (3008) on devnet
+
+`InvalidSessionDuration`, after the user approved. Devnet's v2 program reads a session's
+expiry as a Unix time since 2026-10-11, and the SDK sent a slot: `@lazorkit/wallet` 3.4.1,
+`@lazorkit/wallet-mobile-adapter` 2.4.0, `@lazorkit/sdk-legacy` 1.x and `@lazorkit/sdk`
+rc.6 and earlier all do. Move to a release that sends seconds:
+
+```bash
+npm install @lazorkit/wallet@next                 # 4.0, pre-release
+npm install @lazorkit/wallet-mobile-adapter@next  # 3.0, pre-release
+npm install @lazorkit/sdk-legacy@next             # 2.1.0
+```
+
+With 4.0 / 3.0, pass `expiresInSeconds` (at most 30 days); with the contract SDKs,
+`expiresAt: (await client.getClusterTime()).unixTimestamp + seconds`. See
+[Migrating to 4.0](/react-sdk/migrating-to-4). With a time-based SDK, a 3008 means the
+expiry is not after the cluster's time, or is more than 30 days ahead of it.
+
+### A session that worked yesterday fails with `0xbc1` (3009) on devnet
+
+`SessionExpired`. Every v2 session created on devnet before 2026-10-11 stored its expiry
+as a slot, which the program now reads as a time decades past. Create a new session with a
+release that sends seconds (above). Such a session records no rent payer, so anyone may
+close the old one with `CloseExpiredSession` and keep its rent; revoke it yourself to get
+the rent back. Sessions created since 2026-10-13 record their rent payer, and closing one
+refunds only to it (see the next entry).
+
+### `0xbdf` (3039) when revoking, removing or closing
+
+`RefundDestinationMismatch`. Since 2026-10-13 devnet's v2 records who paid each new
+authority's and session's rent, and refunds only to that account, whoever signs or pays
+for the close. The transaction named another refund destination. With
+`@lazorkit/sdk-legacy` 2.1.0 / `@lazorkit/sdk` 1.0.0-rc.8 leave `refundDestination` out:
+the SDK reads the recorded payer and uses it, and throws `RefundDestinationMismatchError`
+before sending if you pass another account. Earlier releases default the refund to the
+transaction's `payer`, which fails when a different payer created the account (for
+example, a relayer other than the one that sponsored it). See
+[Layout revision 2](/versions#layout-revision-2).
 
 ### `UnlistedSolOutflowError` / `0xbdd` (3037)
 
 "This session is not allowed to spend SOL" ("This key …" for a Delegate). The transaction
 would have lowered the wallet's SOL balance, and the session's limits (the Delegate's
 policy) name no SOL. Only the v2 program release that adds errors 3037 and 3038 returns it;
-that release is not deployed yet ([Networks & versions](/networks)). Nothing in the
+devnet's v2 has run it since 2026-10-03 ([Networks & versions](/networks)). Nothing in the
 transaction ran, and the SDK does not resend it. Causes:
 
 - **No SOL limit, and the transaction moves SOL.** A session made with token limits only
@@ -370,13 +413,26 @@ not LazorKit's; `isUnlistedSolOutflowError` / `isUnlistedTokenOutflowError` tell
 
 Since 3.4.0 `createSession` checks `spendingLimits` before anything is read or the passkey
 is asked. It throws on a `tokens` entry with no limit, or with a `mint` that is not an
-address; a mint named twice; an amount outside a u64; a window of 0 slots; more than 16
+address; a mint named twice; an amount outside a u64; a window of 0; more than 16
 actions; or "spendingLimits makes N bytes of actions; at most 244 fit in the transaction
-beside the passkey's response". A SOL limit takes 19 bytes (`solRecurring` 43), a token's
-`lifetimeCap` or `perTxMax` 51, its `recurring` 75: drop a limit, or a mint. The same
-budget applies to a Delegate `policy` and to a React Native session's `actions`, but there
-nothing checks it before the prompt, and a policy that does not fit fails after the user
-approved.
+beside the passkey's response" (224 in 4.0). A SOL limit takes 19 bytes (`solRecurring`
+43), a token's `lifetimeCap` or `perTxMax` 51, its `recurring` 75: drop a limit, or a mint.
+4.0 also throws on an expiry the program would refuse, and on a recurring limit given
+`windowSlots` instead of `windowSeconds`. The same 224-byte budget applies to a Delegate
+`policy`, which nothing checks before the prompt, and to a React Native session's
+`actions`, which adapter 3.0 checks (2.4.0 does not): a policy that does not fit fails
+after the user approved.
+
+### `RequestOutOfDateError`, `PortalRefusedError` or `PortalReplyMismatchError` (4.0)
+
+From `createSession`, `revokeSession` or `removeAuthority` with `@lazorkit/wallet` 4.0 or
+`@lazorkit/wallet-mobile-adapter` 3.0. `RequestOutOfDateError` and `PortalRefusedError`
+mean the portal refused the typed request and the passkey signed nothing:
+`RequestOutOfDateError` is retryable (the portal's view of the passkey's counter was
+behind), and a `PortalRefusedError` with `code: 'request-invalid'` means the request would
+fail on chain (check its limits and expiry). `PortalReplyMismatchError` means the reply was
+over something other than the request, and nothing was sent. See
+[Errors › Typed approval requests](/errors#typed-approval-requests-40).
 
 ### `createSession` returns the session my `sessionKey` already had (web)
 
@@ -440,6 +496,12 @@ a non-success HTTP status.
   sponsor v1 wallets: set `v1PaymasterConfig` / `v1ConfigPaymaster`.
 - **Simulation failed**: the instruction set reverts. `data` usually holds the program
   logs; see [Errors › Program error codes](/errors#program-error-codes).
+- **`offline: true`** (4.0.0-next.1 / 3.0.0-next.1): the device reported it was offline,
+  so no request was made and nothing was sent.
+- **Every v2 transaction refused on devnet** with "not in the allowed list": the app uses
+  `kora.devnet.lazorkit.com`, which still reaches an earlier relayer that sponsors only v1.
+  Set `https://kora-devnet-production.up.railway.app` (the default from 4.0.0-next.1 /
+  3.0.0-next.1).
 
 ### `getProgramAccounts` refused, or `connect` fails reading the chain
 
@@ -511,7 +573,7 @@ passkey's v2 wallet.
 A v2 `CreateWallet`, `Execute` or `ExecuteDeferred` came without the four protocol-fee
 accounts. v2 requires them even when no fee is charged. You are using an SDK older than
 the v2 release, or building instructions by hand: use the `LazorKitClient` methods of
-`@lazorkit/sdk-legacy` 1.x.
+`@lazorkit/sdk-legacy` 2.x (`npm install @lazorkit/sdk-legacy@next`).
 
 ### `InvalidMessageHash` / `0xbbd` (3005) on every passkey transaction
 
@@ -579,7 +641,8 @@ and 4001–4018, with what each means — is on
 | `0xbd0` | 3024 | `ActionSolLimitExceeded` | Lifetime SOL cap spent. Revoke and create a new session. |
 | `0xbd1` | 3025 | `ActionSolRecurringLimitExceeded` | Window cap hit. Wait for the reset. |
 | `0xbcd` | 3021 | `ActionProgramNotWhitelisted` | The call targets a program outside the whitelist. |
-| `0xbc1` | 3009 | `SessionExpired` | Create a new session. |
+| `0xbc1` | 3009 | `SessionExpired` | Create a new session. On devnet, see [above](#a-session-that-worked-yesterday-fails-with-0xbc1-3009-on-devnet). |
+| `0xbc0` | 3008 | `InvalidSessionDuration` | See [above](#createsession-fails-with-0xbc0-3008-on-devnet). |
 | `0xbbe` | 3006 | `SignatureReused` | See [above](#signaturereusederror--0xbbe-3006). |
 | `0xbc6` | 3014 | `DeferredAuthorizationExpired` | See [above](#deferredexpirederror--0xbc6-3014). |
 | `0xbd9` | 3033 | `DelegateRequiresPolicy` | Pass a `policy` when adding `ROLE_SPENDER`. |
@@ -616,7 +679,7 @@ const name = code === null ? undefined : errorFromCode(code); // 'ActionSolLimit
 ### Session exhaustion pattern
 
 `0xbd0` / `0xbd1` / `0xbd3` all mean "session hit a spending limit". Because actions are
-immutable, the only way forward is to revoke and recreate (React Native shown):
+immutable, the only way forward is to revoke and recreate (React Native adapter 3.0 shown):
 
 ```ts
 import { Actions } from '@lazorkit/wallet-mobile-adapter';
@@ -625,8 +688,8 @@ await revokeSession({ sessionPda }, { redirectUrl });
 const { sessionPda: newPda } = await createSession(
   {
     sessionKey: freshKp.publicKey,
-    expiresAtSlot: currentSlot + 216_000n,
-    actions: [Actions.solRecurringLimit({ limit: 2_000_000_000n, window: 216_000n })],
+    expiresInSeconds: 86_400,
+    actions: [Actions.solRecurringLimit({ limit: 2_000_000_000n, windowSeconds: 86_400n })],
   },
   { redirectUrl },
 );

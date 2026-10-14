@@ -1,0 +1,270 @@
+---
+title: Versions & compatibility
+description: Every LazorKit program with its status, build hash, upgrade authority and audit status; retired programs and the SDK releases that target them; and which SDK versions work with which program through the portal.
+---
+
+This page lists every program LazorKit runs or has run, how to check what is deployed, and
+which SDK releases work with which program. Package versions and npm tags are on
+[Networks & versions](/networks); how long each release is supported is on
+[Support policy](/support-policy).
+
+Last checked on chain and on npm: 2026-10-14.
+
+## Programs
+
+| Protocol | Network | Program id | Status | Build (SHA-256) | Upgrade authority |
+| -------- | ------- | ---------- | ------ | --------------- | ----------------- |
+| v2 | devnet | `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv` | **Active** | `e7930c8b…`, the `devnet` release build, since slot 510,645,372 (2026-10-13) | `hij78MKbJSSs15qvkHWTDCtnmba2c1W4r1V22g5sD8w` (single key) |
+| v2 | mainnet | `LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` | **Not deployed yet** | planned: `b242e187…`, the `mainnet` release build | set at deploy (see [Upgrade authority](#upgrade-authority)) |
+| v1 | mainnet | `LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi` | **Active**, sunset planned | `8ad5abf5…`, deployed in slot 416,478,802 (2026-04-29) | `4fZM6RPRLkeW8T5dDctZjWaqidFDACyW41Kqztj7uL5V` (single key) |
+| v1 | devnet | `4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS` | **Active**, sunset planned | `2bc794a8…`, deployed in slot 458,619,631 (2026-04-28) | `hij78MKbJSSs15qvkHWTDCtnmba2c1W4r1V22g5sD8w` (single key) |
+
+**Audit status** of every program above: not externally audited. What has been done
+instead is under [Audit status](#audit-status).
+
+**v1 is never closed.** After v2 is live on mainnet, both v1 programs are upgraded to a
+**sunset build**: it refuses everything except withdrawing funds and moving the wallet to
+v2 (`MigrateWallet`), so every v1 wallet keeps a way out. See
+[Migrating from v1](/v1-to-v2). The sunset builds are already fixed:
+
+| Sunset build | For | Size | SHA-256 |
+| ------------ | --- | ---- | ------- |
+| `mainnet-v1` | `LazorjRF…` | 46,872 bytes | `353dfee3fdccef241c7c996cbf2e3faaadc32c31c82cdb15d3b630d6591d2bcf` |
+| `devnet-v1` | `4h3XoNRe…` | 46,872 bytes | `2f0fae7e609250d8d61c76146707f971b44cbd66aecf19a8ebac2ff9642e54bc` |
+
+### Full build hashes
+
+| Program | Bytes hashed | SHA-256 |
+| ------- | ------------ | ------- |
+| v2 devnet (deployed) and `devnet` release build | 158,096 | `e7930c8bf6df5964e7d25774ad2807c4ab24d1d97f9e59c076f0ff0bfb8c2d7b` |
+| v2 mainnet, planned `mainnet` release build | 158,096 | `b242e187e4f5b4a4200edea8946fbbe996255957e6835d5e416df3539518e9c7` |
+| v1 mainnet (deployed) | 137,904 | `8ad5abf5dd8a2443fea6b26b5effa9ce11477ce85ba9564f5c43663744c3255b` |
+| v1 devnet (deployed) | 161,568 | `2bc794a82f91fb91ecf4a55fbb424ea6e72ef87fb9a752ee809a05d5180029c7` |
+
+The v2 builds are reproducible: the protocol repository records the expected hash of each
+release build in
+[`scripts/release-hashes.txt`](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/scripts/release-hashes.txt),
+with the pinned toolchain, and its CI rebuilds all four release builds (v2 and sunset, both
+networks) on every change to the program and checks them against that file. The v1 rows are
+the hashes of the bytes on chain.
+
+To check a program yourself, dump it and hash the number of bytes in the table (the
+program account can be larger than the program it holds; the rest is zeros):
+
+```bash
+solana program dump 57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv v2-devnet.so --url devnet
+head -c 158096 v2-devnet.so | shasum -a 256
+solana program show 57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv --url devnet   # authority, last deployed slot
+```
+
+### Devnet v2 builds
+
+| Build | Running since | What changed for integrators |
+| ----- | ------------- | ---------------------------- |
+| `e7930c8b…` (current) | 2026-10-13, slot 510,645,372 | Authorities and sessions record who paid their rent, and closing one refunds only to that account (3039, see [Layout revision 2](#layout-revision-2)). `Execute` checks its accounts with stored PDA bumps, which lowers its compute: a passkey SOL transfer measured 11,672 CU on devnet (14,469 before), a session SOL transfer 7,570 (10,345). |
+| `f2779b66…` | 2026-10-11, slot 509,609,649 | Session time in Unix seconds; only an Owner may change who controls the vault (3030–3032). See [Migrating to 4.0](/react-sdk/migrating-to-4#devnet-runs-the-time-based-program). |
+
+Earlier devnet builds are listed in the protocol's
+[deploy checklist](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/docs/mainnet-deploy-checklist.md).
+The planned mainnet build `b242e187…` has the same rules as the current devnet build.
+
+### Layout revision 2
+
+From build `e7930c8b…` every authority and session the program creates records the
+account that paid its rent (account layout revision 2). `RevokeSession`,
+`CloseExpiredSession`, `RemoveAuthority` and `TransferOwnership` refund that rent only to
+the recorded payer; any other destination is refused with `RefundDestinationMismatch`
+(3039), whoever signs or pays for the close. `CloseExpiredSession` is still open to anyone,
+but the rent goes to the recorded payer, not to the caller. On a sponsored flow the payer
+is the relayer's fee payer.
+
+- **Older accounts keep the old rule.** Authorities and sessions written before revision 2
+  (on devnet, those created before 2026-10-13) and v1 accounts record no payer: their rent
+  goes to the destination the instruction names.
+- **SDKs.** `@lazorkit/sdk-legacy` 2.1.0 and `@lazorkit/sdk` 1.0.0-rc.8 read both revisions
+  and default the refund to the recorded payer. Earlier releases build every instruction
+  the same way and default the refund to the transaction's `payer`, which is right when the
+  same payer created the account (a relayer closing what it sponsored). They do not know
+  revision 2: they read a revision-2 Delegate's policy and a session's actions 32 bytes
+  early, and the approval decoders of sdk-legacy 2.0.0 return `null` for revision-2
+  accounts. The portal code for the coming update
+  ([`lazor-kit/portal-v2`](https://github.com/lazor-kit/portal-v2)) reads both revisions.
+- **Rent.** Each authority and session is 32 bytes larger: 162,560 lamports more rent at
+  the devnet and mainnet rate on 2026-10-14 (5,080 lamports per byte), returned on close.
+
+### Upgrade authority
+
+Each deployed program is upgradeable, and its upgrade authority is today a single key (the
+table above). The protocol's
+[deploy checklist](https://github.com/lazor-kit/lazorkit-protocol/blob/main/docs/mainnet-deploy-checklist.md)
+plans to move the mainnet programs to a Squads multisig that already exists on mainnet:
+`Gb65EbMEZocGgotuTzJEfogfT3GPr8t8fARWYfMCHaw9` (vault
+`E11nkm79w4rEnB2ZNmTKhWKF4BH5z34LUkTw2L4LBjKa`), 3 of 5 members, no time lock:
+
+- the **v2** program, once it has settled on mainnet;
+- the **v1** program, after its sunset build is deployed.
+
+This page is updated when either move happens.
+
+## Audit status
+
+**Protocol v2** (`57bTNW…`, `LazorFroi…`): **not externally audited.**
+
+- A prior external audit by Accretion for the Solana Foundation (report A26SFR1, February
+  2026, in the repository's [`audits/`](https://github.com/lazor-kit/lazorkit-protocol/tree/main/audits)
+  folder) covered only the predecessor codebase, `lazor-kit/program-v2` at commit
+  `cd09588d`, from which `lazor-kit/lazorkit-protocol` was forked. It did not cover the
+  current programs' code: the changes made since (the protocol fee layer, ranks and
+  policies, multiple Owners, `MigrateWallet`, session time in seconds, rent refunds to the
+  recorded payer, and others) were never externally audited.
+- Internal reviews: independent reviewers, each working from a fresh context on one
+  subsystem; every issue found was reproduced with a test before it was fixed. The scope,
+  method and results are public in
+  [`docs/audit/`](https://github.com/lazor-kit/lazorkit-protocol/tree/main/docs/audit).
+- Tests: on the current source (`develop` at `345625b`, the last change to the program and
+  the SDKs), CI runs 512 Rust tests (236 unit tests, and 276 integration tests that load
+  the built program, the sunset build included) and 361 tests of `@lazorkit/sdk`, all
+  passing.
+- Reproducible builds: see [Full build hashes](#full-build-hashes).
+- Two-id rehearsal: the whole rollout (v2 at its new id, v1 upgraded to the sunset build,
+  v1 wallets migrated by owner key and by passkey) was run end to end on a local validator
+  at both the mainnet and the devnet ids, 18 of 18 checks each, and the rollback at the
+  mainnet ids (2026-10-04, on an earlier build). The deploy checklist repeats it with the
+  final release builds before the mainnet deploy.
+
+**Protocol v1** (`LazorjRF…`, `4h3XoNRe…`): **not externally audited.** It is also forked
+from `lazor-kit/program-v2`, with changes that include the protocol fee layer; the prior
+audit did not cover them. It was reviewed internally before its mainnet deploy
+([2026-04-21](https://github.com/lazor-kit/lazorkit-protocol/blob/main/docs/security-review-2026-04-21.md),
+[2026-04-28](https://github.com/lazor-kit/lazorkit-protocol/blob/main/docs/audit-2026-04-28/findings.md)).
+
+## Retired programs
+
+| Program id | Network | Status | What it was |
+| ---------- | ------- | ------ | ----------- |
+| `Gsuz7YcA5sbMGVRXT3xSYhJBessW4xFC4xYsihNCqMFh` | mainnet | **Retired, closed** on 2026-01-06 | An Anchor program from an archived LazorKit repository (`lazor-kit/wallet-program`, not public), deployed to mainnet for testing on 2025-11-09 and not upgraded after that. Not audited. |
+
+A closed program cannot run again, so the **22 wallets** created on it on mainnet can no
+longer be operated. Together they hold about **0.045 SOL and 0.064 USDC**. They are separate
+from protocol v1 and v2: `MigrateWallet` does not apply to them.
+
+On devnet the same id still holds an old build. It is not maintained or supported.
+
+### SDK releases that target `Gsuz…`
+
+Do not use these releases. Each one contains the `Gsuz…` program id (in its bundled IDL) and
+no other LazorKit program:
+
+| Package | Versions | Published |
+| ------- | -------- | --------- |
+| `@lazorkit/wallet` | 1.6.4 to 1.8.4 (every release in between), 2.0.0-beta.0, 2.0.0-beta, 2.0.0, 2.0.1 | 2025-09-28 to 2025-12-19 |
+| `@lazorkit/wallet-mobile-adapter` | 1.3.38 to 1.4.7 (every release in between), 1.5.0-beta.0, 1.5.0-beta, 1.5.1-beta, 1.5.0, 1.5.1 | 2025-11-13 to 2025-12-19 |
+
+No release of `@lazorkit/sdk-legacy` or `@lazorkit/sdk` contains it. Releases older than
+these (`@lazorkit/wallet` before 1.6.4, `@lazorkit/wallet-mobile-adapter` before 1.3.38)
+target none of the programs on this page. Use a current release:
+[Networks & versions › Packages](/networks#packages).
+
+## Compatibility
+
+### SDK releases and the current builds
+
+What each release supports on devnet's current v2 build (`e7930c8b…`), which has the same
+rules as the planned mainnet build:
+
+| Package | Release | Session time in seconds | Knows layout revision 2 |
+| ------- | ------- | ----------------------- | ----------------------- |
+| `@lazorkit/wallet` | 4.0.0-next.1 (`next`) | yes | yes (depends on `@lazorkit/sdk-legacy` ^2.1.0) |
+| `@lazorkit/wallet` | 4.0.0-next.0 | yes | depends on `@lazorkit/sdk-legacy` ^2.0.0: a fresh install gets 2.1.0, a lockfile that pins 2.0.0 does not |
+| `@lazorkit/wallet` | 3.4.1 (`latest`) and earlier | no: `createSession` on a v2 wallet is refused (3008) | no (`@lazorkit/sdk-legacy` ^1.3.0) |
+| `@lazorkit/wallet-mobile-adapter` | 3.0.0-next.1 (`next`) | yes | yes (^2.1.0) |
+| `@lazorkit/wallet-mobile-adapter` | 3.0.0-next.0 | yes | as wallet 4.0.0-next.0 |
+| `@lazorkit/wallet-mobile-adapter` | 2.4.0 (`latest`) and earlier | no (3008, as above) | no |
+| `@lazorkit/sdk-legacy` | 2.1.0 (`next`) | yes | yes |
+| `@lazorkit/sdk-legacy` | 2.0.0 | yes | no |
+| `@lazorkit/sdk-legacy` | 1.x | no (3008) | no |
+| `@lazorkit/sdk` | 1.0.0-rc.8 (`latest`, `next`) | yes | yes |
+| `@lazorkit/sdk` | 1.0.0-rc.7 | yes | no |
+| `@lazorkit/sdk` | 1.0.0-rc.6 and earlier | no (3008) | no |
+
+`@lazorkit/sdk-legacy` 0.3.2 (`latest`) is the v1 line and does not talk to v2. What not
+knowing revision 2 means: [Layout revision 2](#layout-revision-2).
+
+### Tested: web SDK × portal × program
+
+`@lazorkit/wallet` 3.3.0, 3.4.1 and 4.0.0-next.0, run on 2026-10-12 against the portal code
+for the coming update (`lazor-kit/portal-v2` at `e9bd0ca`) and both devnet programs, with
+devnet's v2 on build `f2779b66…`, before the 2026-10-13 upgrade; this matrix has not been
+re-run on `e7930c8b…`. A script drove each step in Chromium with a virtual passkey and
+approved every portal screen the way a user would; every transaction that landed was read
+back from devnet.
+
+**v2 on devnet** (`57bTNW…`, build `f2779b66…`):
+
+| SDK | Connect | Send | `signMessage` | `createSession` | Add / remove a key |
+| --- | ------- | ---- | ------------- | --------------- | ------------------ |
+| `@lazorkit/wallet` 3.3.0 | ✓ | ✓ | refused by the portal¹ | **fails with 3008**² | ✓, generic confirmation³ |
+| `@lazorkit/wallet` 3.4.1 | ✓ | ✓ | ✓ | **fails with 3008**² | ✓, generic confirmation³ |
+| `@lazorkit/wallet` 4.0.0-next.0 | ✓ | ✓ | ✓ | ✓, the portal shows the session's limits | ✓; adding: generic confirmation³, removing: shown in full |
+
+**v1 on devnet** (`4h3XoNRe…`), with a paymaster that sponsors v1 set as
+`v1PaymasterConfig` (LazorKit's default devnet paymaster sponsors v2 only):
+
+| SDK | Connect | Send | `signMessage` | `createSession` | Add / remove a key |
+| --- | ------- | ---- | ------------- | --------------- | ------------------ |
+| `@lazorkit/wallet` 3.3.0 | ✓⁴ | ✓ | refused by the portal¹ | ✓, generic confirmation³ | ✓, generic confirmation³ |
+| `@lazorkit/wallet` 3.4.1 | ✓ | ✓ | ✓ | ✓, generic confirmation³ | ✓, generic confirmation³ |
+| `@lazorkit/wallet` 4.0.0-next.0 | ✓ | ✓ | ✓ | ✓, generic confirmation³ | ✓, generic confirmation³ |
+
+1. Releases before 3.3.1 send messages in a format the updated portal does not sign. The
+   app's `signMessage` rejects with `Request not readable: The data to sign is not valid
+   base64.` See [Upcoming changes](/upgrade-notice).
+2. 3.x sends the session's expiry as a slot; v2 reads it as Unix seconds and refuses it
+   (`InvalidSessionDuration`, 3008). With 3.4.1 and earlier this happens after the user has
+   approved with their passkey.
+3. The portal shows "a change LazorKit can't show", which the user must approve
+   explicitly. Only 4.0 sends `createSession`, `revokeSession` and `removeAuthority` in a
+   form the portal can show in full, and only for v2 wallets.
+4. A returning v1 user sees one extra generic confirmation at sign-in with 3.3.0.
+
+Not covered by this run: `@lazorkit/wallet-mobile-adapter` (2.4.0 and 3.0.0-next.0 were not
+tested here), mainnet, `@lazorkit/sdk-legacy` other than the 1.4.0 / 2.0.0 that the wallet
+releases installed, and Safari or platform authenticators.
+
+**On build `e7930c8b…`** (2026-10-13), `@lazorkit/wallet` 4.0.0-next.1 with
+`@lazorkit/sdk-legacy` 2.1.0 passed the protocol repository's devnet smoke run, through the
+portal code at `lazor-kit/portal-v2` `7d7ed95` and LazorKit's devnet relayer: the portal
+showed a new session's limits, the session was spent, a payment over its per-payment cap
+was refused (3023), SOL from a token-only session was refused (3037), and a
+`revokeSession` refunded the session's rent to the relayer's fee payer. New passkey
+authorities and sessions were written at layout revision 2. The 3.3.0 and 3.4.1 rows above
+were not re-run on this build.
+
+<Callout type="warn" title="Creating sessions on v2 needs 4.0">
+  Creating a session on a v2 wallet requires `@lazorkit/wallet` 4.0 or
+  `@lazorkit/wallet-mobile-adapter` 3.0 (pre-releases on the npm `next` tag). This holds on
+  devnet today and on mainnet once v2 is deployed there, since the planned mainnet build
+  has the same session time rules. The coming `@lazorkit/wallet` 3.4.2 refuses
+  `createSession` on a v2 wallet with a clear error before the passkey prompt. See
+  [Migrating to 4.0](/react-sdk/migrating-to-4).
+</Callout>
+
+### What the portal does with each SDK version
+
+The portal's own compatibility table (from the
+[`lazor-kit/portal-v2` README](https://github.com/lazor-kit/portal-v2#compatibility)), for
+the coming portal update. It describes the portal's side only; whether an action then
+lands depends on the program, as above.
+
+| SDK | Connect | Transactions | Wallet changes (sessions, keys) | `signMessage` |
+| --- | ------- | ------------ | ------------------------------- | ------------- |
+| web 2.0.1, 2.1.0 | signs in | shown with a preview | generic confirmation | refused |
+| web 3.0.0 to 3.3.0 | signs in | shown | generic confirmation | refused |
+| web 3.3.1 to 3.4.x | signs in, with the ownership proof signed at sign-in | shown | generic confirmation | shown as text |
+| web 4.0 (`next`) | as 3.3.1 | shown | creating or revoking a session and removing a key shown in full (creating and removing tested above); adding a key: generic confirmation | shown as text |
+| mobile 1.5.x | signs in through the redirect | shown | generic confirmation | refused |
+| mobile 2.0.0 to 2.3.0 | signs in through the redirect | shown | generic confirmation | refused |
+| mobile 2.3.1 and later | signs in through the redirect | shown | generic confirmation (3.0: as web 4.0) | shown as text |
+
+Web 2.0.x and mobile 1.5.x target the closed `Gsuz…` program (see
+[Retired programs](#retired-programs)), so they do not work whatever the portal does.

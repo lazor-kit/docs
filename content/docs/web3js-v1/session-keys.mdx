@@ -4,8 +4,10 @@ description: Create, use, and revoke session keys with the low-level web3.js v1 
 ---
 
 Session keys let an app or agent execute on a wallet's behalf without passkey
-re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` **1.x** API
-(`npm install @lazorkit/sdk-legacy@next`) — see
+re-authentication. This page covers the low-level `@lazorkit/sdk-legacy` **2.x** API
+(`npm install @lazorkit/sdk-legacy@next`, 2.1.0), where session time is Unix seconds; 1.x
+took slots, which devnet's v2 refuses for a session (3008). Rent refunds to the recorded
+payer (`closeExpiredSession`, `RefundDestinationMismatchError`) are 2.1.0. See
 [Session Keys concept](/concepts/session-keys) for the protocol-level explanation and
 [React SDK](/react-sdk/use-wallet#createsession) / [React Native SDK](/react-native-sdk/use-wallet#createsession)
 for higher-level wrappers.
@@ -24,14 +26,14 @@ import { Keypair, SystemProgram } from '@solana/web3.js';
 import { Actions, ed25519 } from '@lazorkit/sdk-legacy';
 
 const sessionKp = Keypair.generate();
-const slot = await connection.getSlot();
+const { unixTimestamp } = await client.getClusterTime(); // the Clock sysvar the program reads
 
 const { instructions, sessionPda } = await client.createSession({
   payer: payer.publicKey,
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 216_000n,           // ~1 day
+  expiresAt: unixTimestamp + 86_400n,           // a day
   actions: [
     Actions.solMaxPerTx(1_000_000_000n),        // 1 SOL per tx
     Actions.solLimit(10_000_000_000n),          // 10 SOL lifetime
@@ -40,8 +42,13 @@ const { instructions, sessionPda } = await client.createSession({
 });
 ```
 
-`expiresAt` is an **absolute slot**, not a Unix timestamp: at most 6,480,000 slots ahead
-(about 30 days at 400 ms), or the program refuses it with `InvalidSessionDuration` (3008).
+`expiresAt` is a **Unix time in seconds**, by the cluster clock: after the cluster's time
+and at most `MAX_SESSION_SECONDS` (`2_592_000n`, 30 days) ahead, or the program refuses it
+with `InvalidSessionDuration` (3008). The session lives through its `expiresAt` second and
+is refused from the next (3009). `createSession` and `prepareCreateSession` throw before any
+read or prompt on an `expiresAt` below 2020-01-01: a slot passed by mistake, which is what
+1.x took. Read the time with `getClusterTime()` (`{ slot, unixTimestamp }`) rather than
+`Date.now()`: it is what the program compares against.
 
 </Tab>
 <Tab value="Passkey admin">
@@ -52,15 +59,16 @@ For Secp256r1 (passkey) admins, use the two-phase prepare / finalize flow:
 import { Actions } from '@lazorkit/sdk-legacy';
 
 // 1. Compute the challenge
+const { unixTimestamp } = await client.getClusterTime();
 const prepared = await client.prepareCreateSession({
   payer: payer.publicKey,
   walletPda,
   secp256r1: { credentialIdHash, publicKeyBytes, authorityPda },
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 432_000n,           // ~2 days
+  expiresAt: unixTimestamp + 2n * 86_400n,      // two days
   actions: [
-    // USDC only: no Sol* action, so from the program release that adds error 3037 it
-    // cannot spend SOL, rent for a new account included.
+    // USDC only: no Sol* action, so where error 3037 applies it cannot spend SOL, rent for
+    // a new account included.
     Actions.tokenLimit({ mint: USDC_MINT, remaining: 1_000_000_000n }),
     Actions.tokenMaxPerTx({ mint: USDC_MINT, max: 100_000_000n }),
   ],
@@ -78,7 +86,10 @@ const { instructions, sessionPda } = client.finalizeCreateSession(prepared, weba
 ```
 
 `getWebAuthnResponse` is the helper from
-[Passkey signing](/web3js-v1/passkey-signing#the-webauthnresponse-helper).
+[Passkey signing](/web3js-v1/passkey-signing#the-webauthnresponse-helper). Pass
+`secp256r1.credentialId` as well to get `prepared.request`, a typed request the approving
+page can show and check, and a size check before the prompt
+([Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests)).
 
 </Tab>
 <Tab value="Unrestricted">
@@ -94,7 +105,7 @@ const { instructions, sessionPda } = await client.createSession({
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionKey: sessionKp.publicKey,
-  expiresAt: BigInt(slot) + 9_000n,             // ~1 hour at 400 ms a slot
+  expiresAt: (await client.getClusterTime()).unixTimestamp + 3_600n, // an hour
   unrestricted: true,                           // required when there are no actions
 });
 ```
@@ -109,16 +120,17 @@ const { instructions, sessionPda } = await client.createSession({
 </Callout>
 
 **Name every asset the session may spend.** From the v2 program release that adds errors
-3037 and 3038, a session's actions (and a Delegate's policy) name what may leave the
+3037 and 3038 (on devnet since 2026-10-03), a session's actions (and a Delegate's policy) name what may leave the
 vault, and nothing else may: with no `Sol*` action the vault's SOL may not fall (3037),
 rent the vault pays for a new account included, and a mint with no `Token*` action may not
 leave the vault's token accounts (3038). Both are net over one Execute, inflows always
 pass, and wSOL is a mint, not SOL. A program whitelist names programs, not assets. For a
 swap, name the mint it sells, and create its output token account in a top-level
 instruction the fee payer funds, before the Execute, or give the session a `solLimit` that
-covers the rent. That release is not deployed yet: until it is, an asset the actions do not
-name is not bounded at all. With a passkey admin, keep the actions within about 244 bytes
-so they fit beside its response. See
+covers the rent. On a program without that release, an asset the actions do not name is
+not bounded at all. Whatever the actions, a session cannot change who controls the vault or
+its token accounts (3030–3032): only an Owner can. With a passkey admin, keep the actions
+within 224 bytes so they fit beside its response. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 
 ---
@@ -260,8 +272,9 @@ const { instructions } = client.reclaimDeferred({
 });
 ```
 
-Only the original payer can reclaim, only to itself (`UnauthorizedReclaim`, 3017), and only
-after the window has passed (`DeferredAuthorizationNotExpired`, 3018).
+Only the original payer can reclaim (`UnauthorizedReclaim`, 3017), only to itself, and only
+after the window has passed (`DeferredAuthorizationNotExpired`, 3018). Since 2026-10-13
+devnet's v2 reports a refund to any other account as `RefundDestinationMismatch` (3039).
 
 ---
 
@@ -275,16 +288,35 @@ const { instructions } = await client.revokeSession({
   walletPda,
   adminSigner: ed25519(ownerKp.publicKey),
   sessionPda,
-  refundDestination: payer.publicKey,
+  // refundDestination left out: 2.1.0 uses the payer the session records
 });
 ```
 
-Closes the session PDA and refunds rent. Works on active or already-expired sessions.
+Closes the session PDA and refunds its rent. Works on active or already-expired sessions.
 Owner or Admin only.
 
-After a session expires, **anyone** may close it with `CloseExpiredSession` (instruction
-18) and keep the rent; before that the program refuses with `SessionNotExpired` (3036).
-1.4.0 has no public builder for it; `@lazorkit/sdk` exports `createCloseExpiredSessionIx`.
+**Where the rent goes.** A session created on devnet's v2 since 2026-10-13 (layout revision
+2) records the account that paid its rent, usually the paymaster's fee payer, and the
+program refunds only to it: any other `refundDestination` is refused with
+`RefundDestinationMismatch` (3039). 2.1.0 reads the session and uses that account when you
+leave `refundDestination` out, and throws `RefundDestinationMismatchError` before sending
+if you pass another. A session from before revision 2 records no payer: its rent goes to
+`refundDestination`, by default `payer`. `client.rentRefundDestination(sessionPda,
+fallback)` returns where it will go.
+
+After a session expires, **anyone** may close it with `CloseExpiredSession`; before that the
+program refuses with `SessionNotExpired` (3036). The rent goes to the recorded payer, not to
+the caller (a session from before revision 2: wherever the caller says).
+
+```typescript
+const { instructions } = await client.closeExpiredSession({
+  caller: payer.publicKey, // signs and pays the fee
+  sessionPda,
+});
+```
+
+`closeExpiredSession` is 2.1.0; 2.0.0 had no client method for it. `@lazorkit/sdk` exports
+`closeExpiredSession` on its client and the `createCloseExpiredSessionIx` builder.
 
 ---
 
@@ -302,8 +334,8 @@ const { instructions, newAuthorityPda } = await client.addAuthority({
   adminSigner: ed25519(ownerKp.publicKey),
   newAuthority: { type: 'ed25519', publicKey: sessionKp.publicKey },
   role: ROLE_SPENDER,
-  // SOL only: from the program release that adds error 3038, this Delegate cannot lower
-  // the vault's balance of any token. Add a Token* action for each mint it may spend.
+  // SOL only: where error 3038 applies, this Delegate cannot lower the vault's balance
+  // of any token. Add a Token* action for each mint it may spend.
   policy: serializeActions([Actions.solLimit(10_000_000_000n), Actions.solMaxPerTx(1_000_000_000n)]),
 });
 ```
@@ -319,17 +351,21 @@ A Delegate without a policy is refused (3033), and a policy on an Owner or Admin
 | Type                     | Fields                                               | Builder                                                     |
 | ------------------------ | ---------------------------------------------------- | ----------------------------------------------------------- |
 | `SolLimit`               | `remaining`                                          | `Actions.solLimit(remaining, expiresAt?)`                   |
-| `SolRecurringLimit`      | `limit`, `window`                                    | `Actions.solRecurringLimit({ limit, window, expiresAt? })`  |
+| `SolRecurringLimit`      | `limit`, `windowSeconds`                             | `Actions.solRecurringLimit({ limit, windowSeconds, expiresAt? })` |
 | `SolMaxPerTx`            | `max`                                                | `Actions.solMaxPerTx(max, expiresAt?)`                      |
 | `TokenLimit`             | `mint`, `remaining`                                  | `Actions.tokenLimit({ mint, remaining, expiresAt? })`       |
-| `TokenRecurringLimit`    | `mint`, `limit`, `window`                            | `Actions.tokenRecurringLimit({ mint, limit, window, … })`    |
+| `TokenRecurringLimit`    | `mint`, `limit`, `windowSeconds`                     | `Actions.tokenRecurringLimit({ mint, limit, windowSeconds, … })` |
 | `TokenMaxPerTx`          | `mint`, `max`                                        | `Actions.tokenMaxPerTx({ mint, max, expiresAt? })`          |
 | `ProgramWhitelist`       | `programId`                                          | `Actions.programWhitelist(programId, expiresAt?)`           |
 | `ProgramBlacklist`       | `programId`                                          | `Actions.programBlacklist(programId, expiresAt?)`           |
 
-All SOL/token amounts are **bigint** (lamports for SOL; base units for tokens). Max 16
-actions per session, 2048-byte total buffer; with a passkey admin, about 244 bytes fit
-beside its response ([How many actions fit](/concepts/session-keys#how-many-actions-fit)).
+All SOL/token amounts are **bigint** (lamports for SOL; base units for tokens). Times are
+Unix seconds: `windowSeconds` (`86_400n` is a day) and an action's own `expiresAt` (0 or
+unset: none of its own). `serializeActions` throws on an `expiresAt` that looks like a slot
+and on a window of 0, so a Delegate policy is checked as well as a session's. In 1.x the
+field was `window`, in slots; code that passes it no longer compiles. Max 16 actions per
+session, 2048-byte total buffer; with a passkey admin, 224 bytes fit beside its response
+([How many actions fit](/concepts/session-keys#how-many-actions-fit)).
 
 See [Session Keys concept](/concepts/session-keys#actions-reference) for semantics and
 edge cases (expired actions, gross outflow tracking, etc.).
@@ -342,11 +378,13 @@ edge cases (expired actions, gross outflow tracking, etc.).
 | --------- | ----------------------------------- | ------------------------------------------------------------------ |
 | `0xbd0`   | `ActionSolLimitExceeded`            | Lifetime cap hit. Revoke + recreate with higher `solLimit`.         |
 | `0xbd1`   | `ActionSolRecurringLimitExceeded`   | Window cap hit. Wait for reset or raise the limit.                 |
-| `0xbc1`   | `SessionExpired`                    | Past `expiresAtSlot`. Close and create a new session.              |
+| `0xbc0`   | `InvalidSessionDuration`            | `expiresAt` not after the cluster's time, more than 30 days ahead, or a slot from a 1.x SDK. |
+| `0xbc1`   | `SessionExpired`                    | Past `expiresAt`. Close and create a new session.                  |
 | `0xbcd`   | `ActionProgramNotWhitelisted`       | CPI target isn't in the whitelist. Add it or drop the filter.      |
 | `0xbc6`   | `DeferredAuthorizationExpired`      | TX2 after the window (or an inner program's 3014: check the logs).  |
 | `0xbc7`   | `DeferredHashMismatch`              | TX2 instructions, accounts or sender differ from TX1's authorization. |
 | `0xbd9`   | `DelegateRequiresPolicy`            | `ROLE_SPENDER` added without a `policy`.                            |
 | `0xbdc`   | `SessionNotExpired`                 | `CloseExpiredSession` on a live session.                            |
+| `0xbdf`   | `RefundDestinationMismatch`         | The refund destination is not the session's recorded rent payer. Leave `refundDestination` out (2.1.0). |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

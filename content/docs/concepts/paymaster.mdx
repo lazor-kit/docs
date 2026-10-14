@@ -154,8 +154,13 @@ This is a direct growth incentive: LazorKit does not take a cut from your app-le
 ## Using a paymaster with the SDKs
 
 The React and React Native SDKs send every transaction to a Kora-compatible JSON-RPC
-endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
-`https://kora.devnet.lazorkit.com`.
+endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile). LazorKit's devnet relayer,
+which sponsors protocol v2, is **`https://kora-devnet-production.up.railway.app`**. It is
+the built-in default from `@lazorkit/wallet` 4.0.0-next.1 and
+`@lazorkit/wallet-mobile-adapter` 3.0.0-next.1 (`DEFAULTS.PAYMASTER_URL`). Earlier
+releases, the `latest` 3.4.1 / 2.4.0 included, default to `https://kora.devnet.lazorkit.com`,
+which still reaches an earlier relayer that sponsors only v1: with them, set the Railway
+URL explicitly.
 
 - **Requests.** `getPayerSigner` for the fee payer, then `signAndSendTransaction` with
   `{ transaction, signer_key }`, where `signer_key` is the fee payer the transaction names.
@@ -170,12 +175,20 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
   answers. Kora confirms before it answers by default, so this costs one status read; a
   relayer configured to answer early (`respond_after` "sent") makes the wallet poll.
 - **Failures** reject with `PaymasterError` (`code`, `data`, `httpStatus`, `signature`,
-  `maybeSent`). The web SDK resends a failed send with the same signed bytes, up to 3
-  attempts in all, so the transaction can land at most once; it does not resend
-  LazorKit's 3006 or 3014, nor a 4018 (since 3.3.0), nor a 3037 or 3038 (since 3.4.0). The React Native SDK never resends. When the relayer may have
-  sent the transaction but no answer came back (on web, from any attempt), the call
-  rejects with `TransactionOutcomeUnknownError`. A send request may take 90 s, other
-  calls 30 s.
+  `maybeSent`). When the relayer may have sent the transaction but no answer came back,
+  the call rejects with `TransactionOutcomeUnknownError`. Every resend uses the same
+  signed bytes, so the transaction can land at most once.
+- **Retries in 4.0.0-next.1 / 3.0.0-next.1** (web and mobile alike): a refusal that would
+  come back the same is sent once (any program error, a relayer's allowlist refusal,
+  insufficient funds, a failed simulation, any other 4xx); a 429 is waited out, honouring
+  `Retry-After` up to 10 s, while the send has time left; a network error, timeout or 5xx
+  is sent again, at most 3 attempts in all, only while the blockhash is still valid. One
+  attempt waits at most 30 s for the relayer, and the whole send at most 60 s. A device
+  that reports it is offline makes no request (`PaymasterError` with `offline: true`).
+- **Retries in 3.4.1 / 2.4.0** (`latest`): the web SDK resends a failed send up to 3
+  attempts in all; it does not resend LazorKit's 3006 or 3014, nor a 4018 (since 3.3.0), nor
+  a 3037 or 3038 (since 3.4.0). The React Native SDK never resends. A send request may take
+  90 s, other calls 30 s.
 - **v1 wallets** need a relayer that sponsors the v1 program: `v1PaymasterConfig` (web) /
   `v1ConfigPaymaster` (mobile). LazorKit's v2 relayer does not, by design: sponsoring the
   full v1 program lets any v1 transaction pull the fee payer into its inner calls.

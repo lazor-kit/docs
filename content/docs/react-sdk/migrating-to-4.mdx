@@ -1,0 +1,342 @@
+---
+title: Migrating to 4.0
+description: "Moving @lazorkit/wallet from 3.x to the 4.0 pre-release: install @next, the required mode prop, session expiry and recurring windows in seconds, the 224-byte limit, typed approval requests, plain-language errors, retries, the new hooks, and what changed on devnet."
+---
+
+<Callout type="warn" title="Pre-release">
+  `@lazorkit/wallet` **4.0.0-next.1** and `@lazorkit/wallet-mobile-adapter` **3.0.0-next.1**
+  are published on the npm `next` tag. Their API can still change before the final
+  release. The stable releases (`latest`) are still **3.4.1** and **2.4.0**, and the other
+  React SDK pages describe them unless they say otherwise. Full notes: the package
+  [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react/CHANGELOG.md).
+</Callout>
+
+4.0 brings two changes together:
+
+- **Embedded mode** (`mode="embedded"`): the passkey lives on your app's own domain and
+  every ceremony runs in your page, with no portal, iframe or popup. With it come the Easy
+  tier (`status`, `address`, `signAndSend` with `onSubmitted`, `<ConnectButton>`) and the
+  `/core` and `/hooks` entry points. See [Embedded mode](/react-sdk/embedded-mode).
+- **Typed approval requests, and session time in seconds**: `createSession`,
+  `revokeSession` and `removeAuthority` send the portal the operation itself, so it shows
+  exactly what the passkey approves ("Let MyApp spend up to 0.002 SOL per payment and 5
+  USDC in total, until about 6:50 PM") and recomputes the challenge from it. Sessions
+  expire by the cluster clock instead of by slot.
+
+A 3.x app that adds `mode="portal"` keeps its users' wallets, and its connect, send and
+message flows are unchanged.
+
+What changes for apps on each SDK version when the LazorKit portal is updated, on devnet and
+on mainnet: [Upcoming changes for integrators](/upgrade-notice).
+
+## Devnet runs the time-based program
+
+<Callout type="error" title="3.4.1 can no longer create sessions on devnet">
+  Since 2026-10-11, devnet's v2 program (`57bTNW…`) reads session expiries, action
+  expiries and recurring windows as **Unix seconds** of the cluster clock. `@lazorkit/wallet`
+  3.4.1 and earlier, and `@lazorkit/wallet-mobile-adapter` 2.4.0 and earlier, still compute
+  a session's expiry as a slot, so `createSession` on a v2 wallet is refused with
+  `InvalidSessionDuration` (3008) there, after the user approved. Use 4.0 (or adapter 3.0)
+  for sessions on devnet. See [Networks & versions](/networks).
+</Callout>
+
+What else changed for an app on devnet:
+
+- **Sessions created before the upgrade have expired.** Their expiry was a slot, which the
+  program now reads as a time decades past: `Execute` refuses them (`SessionExpired`,
+  3009), and anyone may close them with `CloseExpiredSession`. Create new sessions with 4.0.
+- **A recurring window written in slots** (a Delegate policy built with a 3.x
+  `Actions.solRecurringLimit({ window })`) is read as that many seconds: a longer window.
+  Its first spend after the upgrade opens a fresh window. An action expiry written as a slot
+  reads as long past: that limit is exhausted, and a whitelist with one denies everything.
+- Connecting, passkey sends, messages, deferred execution (whose window is still counted in
+  slots) and `addAuthority` work in 3.4.1 as before; only the time values above change
+  meaning.
+- **Mainnet** has no v2 program yet, and v1 wallets keep measuring sessions in slots, in
+  every release: 3.4.1 sessions on a v1 wallet are unaffected.
+
+Since 2026-10-13 devnet's v2 runs a later build (`e7930c8b…`): a new authority or session
+records the account that paid its rent, and `revokeSession` and `removeAuthority` must
+refund the rent to that account (`RefundDestinationMismatch`, 3039, otherwise). 4.0.0-next.1
+depends on `@lazorkit/sdk-legacy` ^2.1.0, which reads these accounts and fills in the right
+destination. Neither wallet package passes a refund destination of its own, so nothing
+changes in your code. See [Versions & compatibility › Layout revision 2](/versions#layout-revision-2).
+
+## Install
+
+```bash
+npm install @lazorkit/wallet@next @solana/web3.js@^1.99.0   # 4.0.0-next.1
+```
+
+4.0.0-next.1 depends on `@lazorkit/sdk-legacy` **^2.1.0**: 2.0.0 measures sessions in
+seconds, and 2.1.0 reads the accounts devnet's v2 has written since 2026-10-13
+(4.0.0-next.0 depends on ^2.0.0; 3.x on ^1.3.0). The peers are the same as 3.x (`@solana/web3.js` ^1.99,
+`zustand` ^5, `@solana/wallet-adapter-base`, the `@wallet-standard` packages), and `react` /
+`react-dom` are now optional peers, for apps that use only `@lazorkit/wallet/core`.
+
+## Checklist
+
+1. **`mode` is required.** `LazorkitProvider` has no default mode. Add `mode="portal"` to
+   keep your users' wallets:
+
+   ```tsx
+   <LazorkitProvider mode="portal" paymasterConfig={{ paymasterUrl: PAYMASTER_URL }}>
+     {children}
+   </LazorkitProvider>
+   ```
+
+   Without `mode` the app does not compile, and from JavaScript it throws
+   `LazorkitConfigError` (`problem: 'no-mode'`). To add it everywhere at once:
+
+   ```bash
+   perl -0777 -pi -e 's/<LazorkitProvider(?![\w-])(?![^>]*\bmode=)/<LazorkitProvider mode="portal"/g' \
+     $(grep -rl '<LazorkitProvider' src)
+   ```
+
+   It skips a tag that already sets `mode`, and running it twice changes nothing.
+   `createLazorkitClient` (new) takes the same `mode`.
+
+2. **Session expiry is in seconds.** `createSession` takes `expiresInSeconds` (more than 0,
+   at most 30 days: `MAX_SESSION_SECONDS`, `2_592_000n`) or `expiresAt` (a Unix time in seconds, after the
+   cluster's time and at most 30 days ahead of it). Both are checked against the cluster
+   clock before the passkey is asked. With neither, a session lasts 5 hours
+   (`DEFAULTS.SESSION_EXPIRY_SECONDS`, 18,000).
+
+   ```ts
+   // 3.x
+   await createSession({ expiresInSlots: 216_000n, spendingLimits });
+   // 4.0
+   await createSession({ expiresInSeconds: 86_400, spendingLimits }); // a day
+   ```
+
+   `expiresInSlots` is deprecated and still accepted: on a v2 wallet it is converted to
+   seconds with the cluster's measured slot time (recent performance samples), with a
+   warning, and it throws when the slot time cannot be read. Give at most one of the three.
+
+3. **Recurring windows are in seconds.** `SpendingLimits.solRecurring` and a `tokens`
+   entry's `recurring` take `windowSeconds` (`86_400n` is a day) instead of `windowSlots`.
+   A `windowSlots` throws before anything is read or prompted, rather than being read as
+   seconds:
+
+   ```ts
+   // 3.x
+   solRecurring: { limit: 1_000_000_000n, windowSlots: 216_000n },
+   // 4.0
+   solRecurring: { limit: 1_000_000_000n, windowSeconds: 86_400n },
+   ```
+
+   The `Actions` builders this package re-exports from `@lazorkit/sdk-legacy` 2.x change
+   the same way: `Actions.solRecurringLimit({ limit, windowSeconds })` and
+   `Actions.tokenRecurringLimit({ mint, limit, windowSeconds })`, so code that passes
+   `window` no longer compiles. An action's own `expiresAt` is a Unix time in seconds, and
+   `serializeActions` throws on one that looks like a slot. Parsed actions carry
+   `windowSeconds`, and `WalletFacts.liveSessions[].expiresAt` replaces `expiresAtSlot`.
+
+4. **A session's actions fit in 224 bytes**, down from 244, and so must a Delegate's
+   `policy`. `@lazorkit/sdk-legacy` 2.x sizes the passkey's `clientDataJSON` at 320
+   bytes, and `createSession` refuses a larger `SpendingLimits` before the passkey is
+   asked. `solPerTxMax` with `perTxMax` and `lifetimeCap` for 2 mints (223 bytes), or with
+   `perTxMax` for 4 (223), still fits. `addAuthority` still does not check a policy's size.
+   See [How many actions fit](/concepts/session-keys#how-many-actions-fit).
+
+5. **The user sees what they approve.** On a v2 wallet, `createSession`, `revokeSession` and
+   `removeAuthority` send a typed request to the portal, which shows the operation and
+   computes the challenge itself at the slot and counter it reads when the user taps
+   Approve. The portal waits up to **10 minutes** for these three (60 seconds for other
+   signing, as before). Before anything is sent, the wallet checks the reply against the
+   request. New errors, all exported:
+   `PortalReplyMismatchError` (nothing was sent), `RequestOutOfDateError` (`retryable:
+   true`: offer to try again), `PortalRefusedError` (with the portal's `code`) and
+   `TypedRequestTooLargeError` (nothing was opened). On a refusal the passkey signed
+   nothing. See [What the user approves](/react-sdk/use-wallet#what-the-user-approves-40)
+   and [Errors › Typed approval requests](/errors#typed-approval-requests-40). Wallets made
+   before LazorKit v2 send no typed request.
+
+6. **A user rejection no longer sets `error`.** A closed portal or sheet, "Not now" and
+   "None of these" still reject the promise and still call `onFail`, but leave the store's
+   `error` alone. `PortalCancelledError` and `WalletConfirmationDeclinedError` now extend
+   the new `UserRejectedError`, so they carry `code: 'USER_REJECTED'` and a `reason`; their
+   names and messages are unchanged. Branch on `errorKind(e) === 'rejected'`, or keep your
+   `instanceof` checks.
+
+7. **A passkey whose key cannot be recovered** at connect rejects with `KeyRecoveryError`
+   (`code: 'KEY_RECOVERY'`) instead of a plain `Error`. The message is unchanged.
+
+8. **The root and `/hooks` entries are client modules** (`'use client'`). Server code, such
+   as a route handler that calls `verifyWalletMessage`, imports from
+   `@lazorkit/wallet/core`.
+
+9. **The first render can already be connected**: the stored wallet is read synchronously
+   when the provider first renders. `connect()` on mount still works and returns the stored
+   wallet. The stored config is never read back: the provider's props are the config.
+
+10. **A refusal is not resent.** A send the relayer refused in a way that would come back
+    the same is sent once: any program error (LazorKit's 3007, 3008, 3009, 3023, 3024 and
+    3025 included), a relayer's allowlist refusal, insufficient funds, a failed simulation,
+    any other 4xx. 3.x resent most of these up to 3 times. See
+    [Retries and time limits](#retries-and-time-limits).
+
+11. **Kept session keys expire by the clock.** A session key the SDK keeps is deleted once
+    the cluster clock is past its session's expiry, and the call rejects with "No session
+    key found: the stored session … expired at …". A key kept by 3.x, or a v1 wallet's, is
+    still compared with the slot. The built-in chooser's `approxExpiresAt` reads a v2
+    session's expiry as a Unix time.
+
+## Showing errors to users
+
+`describeError(error)` (4.0.0-next.1) turns any error the SDK throws into plain English for
+someone who has never used a crypto wallet, and never calls a transaction that may still
+land "failed". It returns `{ title, message, action?, retryable, maybeSent, code,
+programError? }`; `sendStatusOf(error)` says where a rejected send stands: `'cancelled'`,
+`'checking'` (it may still land) or `'failed'`.
+
+```tsx
+import { describeError, sendStatusOf, type SendStatus } from '@lazorkit/wallet';
+
+try {
+  await signAndSend({ instructions });
+} catch (error) {
+  const status: SendStatus = sendStatusOf(error); // 'cancelled' | 'checking' | 'failed'
+  const { title, message, action, retryable, maybeSent } = describeError(error);
+  // 'checking' / maybeSent: show it as pending and do not offer to pay again.
+}
+```
+
+Every `code` it returns, with its title: [Errors › Plain-language errors](/errors#plain-language-errors-describeerror).
+`errorKind` and `userMessage` are unchanged.
+
+## Retries and time limits
+
+From 4.0.0-next.1 a send is tried again only when trying again can change the answer, and
+always with the same signed bytes, so it lands at most once:
+
+- **Refusals that would come back the same are sent once:** any program error, a relayer's
+  allowlist refusal, insufficient funds, a failed simulation, any other 4xx.
+- **A rate limit (429)** is waited out, honouring `Retry-After` up to 10 s, for as long as
+  the send's time allows.
+- **A network error, a timeout or a 5xx** is sent again, at most 3 attempts in all, and only
+  while the transaction's blockhash is still valid.
+- **Time limits:** one attempt waits at most 30 s for the relayer, and the whole send at
+  most 60 s. A relayer that never answers ends the send as `TransactionOutcomeUnknownError`
+  (it may still land) instead of holding it for minutes.
+- **Offline:** a device that reports it is offline makes no request. The call rejects with a
+  `PaymasterError` whose `offline` is `true`; nothing was sent.
+- **After an unknown outcome**, a new call for the same passkey waits at most 20 s for the
+  previous send to settle, then rejects with `PreviousTransactionPendingError`.
+
+**"Approval took too long" (3007).** LazorKit accepts a passkey approval for 150 slots,
+about 35 s at today's slot times, including the time the portal takes to load and the user
+takes to approve. A later approval is refused with `InvalidSignatureAge` (3007), now thrown
+as `SignatureTooOldError` (`isSignatureTooOldError`, `SIGNATURE_TOO_OLD_CODE`); nothing was
+sent. It is never resent or re-signed on its own: offer "Try again", which calls the same
+action and asks for a new approval. For `signAndSend` the wallet now reads the slot for the
+challenge last, right before the portal opens.
+
+**Connect does not create a second wallet.** If the paymaster's answer to a wallet creation
+is lost, the next `connect` with the same passkey reuses the same seed, and adopts that
+wallet once it finds it on chain.
+
+## Compute unit limit
+
+`transactionOptions.computeUnitLimit` is now honoured on web (3.x ignored it). It puts a
+`SetComputeUnitLimit` instruction first in the transaction, before the secp256r1
+precompile, and must be a whole number from 1 to 1,400,000: anything else is refused before
+the passkey is asked. None is set by default.
+
+```ts
+await signAndSend({ instructions, transactionOptions: { computeUnitLimit: 200_000 } });
+```
+
+## Default devnet paymaster
+
+From 4.0.0-next.1 the default paymaster (`DEFAULTS.PAYMASTER_URL`) is LazorKit's devnet
+relayer for v2, `https://kora-devnet-production.up.railway.app`. 3.x and 4.0.0-next.0 default
+to `https://kora.devnet.lazorkit.com`, which still reaches an earlier relayer that sponsors
+only v1. `paymasterConfig` still overrides the default.
+
+## Deprecated
+
+- `isLoading`, `isConnecting` and `isSigning`: use `status`
+  (`'disconnected' | 'connecting' | 'connected' | 'signing'`). They warn once when read.
+- The session, authority and deferred functions on `useWallet`: use `useSessions()`
+  (`createSession`, `revokeSession`, `signAndSendWithSession`), `useAuthorities()`
+  (`addAuthority`, `removeAuthority`, `signAndSendWithAuthority`) and `useDeferred()`
+  (`authorizeAndExecute`, `authorizeDeferred`, `executeDeferred`) from
+  `@lazorkit/wallet/hooks` (4.0.0-next.1), with the same names and parameters. They still
+  work on `useWallet` until 5.0, and warn once each when first called:
+
+  ```tsx
+  // before
+  const { createSession } = useWallet();
+  // 4.0.0-next.1
+  import { useSessions } from '@lazorkit/wallet/hooks';
+  const { createSession } = useSessions();
+  ```
+- `createSession`'s `expiresInSlots`: use `expiresInSeconds`.
+
+## New
+
+- `status` and `address` on `useWallet()`; `signAndSend` (the same function as
+  `signAndSendTransaction`) with `onSubmitted`, called as soon as the transaction is sent.
+- `<ConnectButton>`, `useWalletStatus()`, `useLazorkitClient()`; `createLazorkitClient()` and
+  `getLazorkitClient()`, one client per page.
+- `UserRejectedError`, `PasskeyMismatchError`, `KeyRecoveryError`,
+  `PasskeyUnavailableError`, `LazorkitConfigError`, `NetworkError`,
+  `WalletVerificationError`, with `errorKind()` and `userMessage()`.
+- The typed-request errors above, `MAX_SESSION_SECONDS`, `DEFAULTS.SESSION_EXPIRY_SECONDS`.
+- 4.0.0-next.1: `describeError`, `sendStatusOf` and the `SendStatus` and `ErrorDescription`
+  types; `SignatureTooOldError`; `useSessions`, `useAuthorities` and `useDeferred` in
+  `/hooks`; `PaymasterError.offline` and `retryAfterMs`.
+- Embedded mode: `mode="embedded"`, `forgetEmbeddedDevice()`, `passkeyCapabilities()`,
+  `onEvent` (experimental). See [Embedded mode](/react-sdk/embedded-mode).
+- `LazorkitProviderProps` is exported.
+
+## Unchanged
+
+- Portal mode's connect, sign and message flows, and what it stores.
+- The `signMessage` format (changed in 3.3.1) and `addAuthority`'s required `role`.
+- `LazorkitWalletAdapter` and the Wallet Standard wallet, which stay portal-only. Their
+  disconnect still disconnects the page's store, in either mode.
+- v1 wallets: sessions still count in slots. With no expiry a v1 session lasts
+  `DEFAULTS.SESSION_EXPIRY_SLOTS` (50,000 slots), `expiresInSlots` is used as given, and
+  `expiresInSeconds`, `expiresAt` and a recurring `windowSeconds` are converted to slots
+  with the measured slot time.
+
+## React Native: wallet-mobile-adapter 3.0
+
+`@lazorkit/wallet-mobile-adapter` **3.0.0-next.1** ships the same typed requests and
+seconds-based expiry (no Embedded mode): `createSession` takes `expiresInSeconds` or
+`expiresAt` instead of `expiresAtSlot`, and refuses more than 16 actions or more than 224
+bytes of them before the portal opens. 3.0.0-next.1 also brings `describeError` and
+`sendStatusOf`, the same retry policy and default devnet paymaster as web (2.x never
+resent a send), `SignatureTooOldError`, and:
+
+- **`browserOptions.timeoutMs`** on `LazorKitProvider` (default 2 minutes; at least 10
+  minutes for a typed approval): a portal trip that never comes back closes the browser
+  and rejects with `PortalTimeoutError`.
+- **`browserOptions.preferEphemeralSession`**, default `true` (iOS): no "wants to use … to
+  sign in" alert before each approval. The session shares no cookies with Safari, which the
+  portal does not need. Pass `false` for a shared session.
+- **iOS: one trip to create a wallet.** A passkey the portal has just registered gets its
+  wallet without a second trip for an ownership proof.
+- A `refundDestination` other than the recorded rent payer is refused before the passkey
+  prompt (`RefundDestinationMismatchError`).
+
+```tsx
+<LazorKitProvider browserOptions={{ timeoutMs: 180_000, preferEphemeralSession: true }}>
+  <App />
+</LazorKitProvider>
+```
+
+See [React Native › Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
+
+## Contract SDKs
+
+`@lazorkit/sdk-legacy` **2.0.0** and `@lazorkit/sdk` **1.0.0-rc.7** and later take
+`expiresAt` in Unix seconds (`getClusterTime()` reads the cluster clock) and
+`windowSeconds`, and sdk-legacy adds the `@lazorkit/sdk-legacy/approval` subpath for typed
+requests. The current releases, `@lazorkit/sdk-legacy` **2.1.0** (`next`) and
+`@lazorkit/sdk` **1.0.0-rc.8**, also send a closed authority's or session's rent back to
+the account that paid it (`rentRefundDestination`, `closeExpiredSession`,
+`RefundDestinationMismatchError`). See [Session Keys (web3.js v1)](/web3js-v1/session-keys) and
+[Passkey signing › Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests).

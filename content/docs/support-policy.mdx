@@ -1,0 +1,57 @@
+---
+title: Support policy
+description: Which SDK releases are supported and for how long, how much notice breaking changes get, how programs that hold user assets are retired, where changes are announced, and how to report a security issue.
+---
+
+## Versioning
+
+Every LazorKit package follows [semantic versioning](https://semver.org): a patch release
+fixes bugs, a minor release adds features without breaking existing code, and a major
+release may break it. Pre-releases (`4.0.0-next.1`, `1.0.0-rc.8`) are published on the npm
+`next` tag and may change before they are stable.
+
+## Supported versions
+
+- **Supported:** the current major version and the previous one.
+- When a new major version is stable, the previous major gets **security fixes for 6
+  months**.
+- Older versions are marked **deprecated on npm** with a message that says what to upgrade
+  to. `npm install` prints it.
+
+A release that targets a program that has been closed cannot be fixed by any update of its
+own. Those releases are listed on
+[Versions & compatibility › Retired programs](/versions#retired-programs).
+
+## Notice before changes
+
+| Change | Notice |
+| ------ | ------ |
+| A breaking change to the LazorKit portal, the programs or the relayers (paymasters) LazorKit runs | At least **30 days** ahead |
+| Retiring a mainnet program | At least **90 days** ahead |
+| A security fix | May ship immediately, with notice as early as possible |
+
+**Programs that hold user assets are never closed.** A retired program moves to a
+**sunset build** that only allows withdrawing funds and migrating the wallet to the current
+protocol, so every user keeps a way out. Protocol v1 will be retired this way: see
+[Migrating from v1](/v1-to-v2).
+
+## Where changes are announced
+
+- [Upcoming changes for integrators](/upgrade-notice): what is about to change and what to do.
+- [Changelog](/changelog): what changed, by date.
+- [Versions & compatibility](/versions): what is deployed, with build hashes and status.
+- GitHub releases of [`lazor-kit/lazor-kit`](https://github.com/lazor-kit/lazor-kit/releases)
+  (`@lazorkit/wallet`, `@lazorkit/wallet-mobile-adapter`) and
+  [`lazor-kit/lazorkit-protocol`](https://github.com/lazor-kit/lazorkit-protocol/releases)
+  (`@lazorkit/sdk-legacy`, `@lazorkit/sdk`).
+- npm deprecation messages on releases that are no longer supported.
+
+## Reporting a security issue
+
+Do not open a public issue. Report it privately:
+
+- through GitHub's private vulnerability reporting on the affected repository (its
+  **Security** tab, **Report a vulnerability**), following the repository's `SECURITY.md`
+  where it has one, such as
+  [`lazor-kit/lazorkit-protocol`](https://github.com/lazor-kit/lazorkit-protocol/blob/main/SECURITY.md);
+- or by contacting **[SECURITY CONTACT]**.

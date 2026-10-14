@@ -85,7 +85,7 @@ import type { PublicKey } from '@solana/web3.js';
 await createSession(
   {
     sessionKey: sessionKp.publicKey,
-    expiresAtSlot: currentSlot + 9_000n,
+    expiresInSeconds: 3_600,            // 3.0; with 2.4: expiresAtSlot (refused on devnet's v2)
     actions: [Actions.solMaxPerTx(100_000_000n)],
   },
   {
@@ -120,7 +120,7 @@ its own: ask the user to approve again.
 | `transactionOptions` field | On mobile (2.4.0) |
 | -------------------------- | ----------------- |
 | `addressLookupTableAccounts` | Used for the transaction, and for the portal preview when the preview would be over 1232 bytes without them. |
-| `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). |
+| `computeUnitLimit` | Adds a compute-unit-limit instruction (costs about 40 bytes). From 3.0.0-next.1 it must be a whole number from 1 to 1,400,000, checked before the portal opens. |
 | `clusterSimulation` | Passed to the portal's preview. |
 | `feeToken` | Forwarded to the paymaster as `fee_token`. Whether it is honoured is up to the relayer. |
 
@@ -175,3 +175,14 @@ authorized. See [Session keys › Deferred execution](/web3js-v1/session-keys#de
   refusal, 3006 and 3014 included, rejects at once too. A session send's 3037 or 3038
   rejects as `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` (2.4.0).
 - v1 wallets go to `v1ConfigPaymaster`. See [Migrating from v1](/v1-to-v2).
+
+<Callout type="info" title="Changed in 3.0.0-next.1 (pre-release)">
+  The adapter retries a send the way the web SDK 4.0.0-next.1 does: a refusal that would
+  come back the same is sent once; a 429 is waited out (`Retry-After`, up to 10 s); a
+  network error, timeout or 5xx is sent again with the same bytes, only while the
+  blockhash is still valid. One attempt waits at most 30 s, the whole send at most 60 s. A
+  device that reports it is offline makes no request (`PaymasterError` with `offline:
+  true`), and a 3007 rejects with `SignatureTooOldError`. The default devnet paymaster is
+  LazorKit's v2 relayer. See
+  [Upgrading to 3.0](/react-native-sdk/upgrading#upgrading-to-300-pre-release).
+</Callout>

@@ -3,7 +3,8 @@ title: Types
 description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-The public types and helpers of `@lazorkit/sdk-legacy` **1.4.0** (`@next`; protocol v2).
+The public types and helpers of `@lazorkit/sdk-legacy` **2.1.0** (`@next`; protocol v2).
+Where 2.0.0 or 1.x differs, the page says so.
 
 ## Signer helpers
 
@@ -48,10 +49,17 @@ interface Secp256r1Params {
   minContextSlot?: number;
   /** 1.3.0+: commitment for those reads. Default 'confirmed'. */
   commitment?: Commitment;
+  /**
+   * 2.0.0+: the raw credential id (its SHA-256 must be credentialIdHash). On the
+   * devnet or mainnet v2 program, prepareCreateSession / prepareRevokeSession /
+   * prepareRemoveAuthority then also return `request`, a typed approval request.
+   */
+  credentialId?: Uint8Array;
 }
 ```
 
 Only `credentialIdHash` is required: the client reads the public key and derives the PDA.
+`credentialId`: [Passkey signing › Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests).
 `minContextSlot` and `commitment` are explained in
 [Passkey signing › Two passkey transactions in a row](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
 
@@ -124,14 +132,20 @@ enum SessionActionType {
 
 type SessionAction =
   | { type: SessionActionType.SolLimit; remaining: bigint; expiresAt?: bigint }
-  | { type: SessionActionType.SolRecurringLimit; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.SolRecurringLimit; limit: bigint; windowSeconds: bigint; expiresAt?: bigint }
   | { type: SessionActionType.SolMaxPerTx; max: bigint; expiresAt?: bigint }
   | { type: SessionActionType.TokenLimit; mint: PublicKey; remaining: bigint; expiresAt?: bigint }
-  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; window: bigint; expiresAt?: bigint }
+  | { type: SessionActionType.TokenRecurringLimit; mint: PublicKey; limit: bigint; windowSeconds: bigint; expiresAt?: bigint }
   | { type: SessionActionType.TokenMaxPerTx; mint: PublicKey; max: bigint; expiresAt?: bigint }
   | { type: SessionActionType.ProgramWhitelist; programId: PublicKey; expiresAt?: bigint }
   | { type: SessionActionType.ProgramBlacklist; programId: PublicKey; expiresAt?: bigint };
 ```
+
+Times are Unix seconds (2.0.0): `windowSeconds` (`86_400n` is a day), and `expiresAt`, the
+action's own expiry (0 or unset: none of its own). `serializeActions` throws on an
+`expiresAt` below 2020-01-01 (a slot) and on a window of 0. In 1.x the recurring field was
+`window` and every time was a slot. `parseActions` returns `windowSeconds` and `lastReset`
+(the Unix time of the spend that opened the current window) for a recurring action.
 
 ### `Actions` builders
 
@@ -144,23 +158,23 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 const mint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 const actions = [
   Actions.solLimit(10_000_000_000n),                          // (remaining, expiresAt?)
-  Actions.solRecurringLimit({ limit: 1_000_000_000n, window: 216_000n }),
+  Actions.solRecurringLimit({ limit: 1_000_000_000n, windowSeconds: 86_400n }), // a day
   Actions.solMaxPerTx(500_000_000n),                          // (max, expiresAt?)
   Actions.tokenLimit({ mint, remaining: 100_000_000n }),
-  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, window: 216_000n }),
+  Actions.tokenRecurringLimit({ mint, limit: 10_000_000n, windowSeconds: 86_400n }),
   Actions.tokenMaxPerTx({ mint, max: 5_000_000n }),
   Actions.programWhitelist(SystemProgram.programId),          // (programId, expiresAt?)
 ];
 const policy = serializeActions(actions);                     // a Delegate's policy bytes
 ```
 
-From the v2 program release that adds errors 3037 and 3038 (not deployed yet), an asset no
-action names cannot leave the vault: SOL needs a `Sol*` action, rent the vault pays
+From the v2 program release that adds errors 3037 and 3038 (on devnet since 2026-10-03), an
+asset no action names cannot leave the vault: SOL needs a `Sol*` action, rent the vault pays
 included, and each mint a `Token*` action; wSOL is a mint. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). When a
-passkey approves the transaction that registers the actions, keep them within about 244
-bytes ([How many actions fit](/concepts/session-keys#how-many-actions-fit)): the list above
-is 301.
+passkey approves the transaction that registers the actions, keep them within 224 bytes
+(`MAX_PASSKEY_SESSION_ACTIONS_BYTES` in `@lazorkit/sdk-legacy/approval`;
+[How many actions fit](/concepts/session-keys#how-many-actions-fit)): the list above is 301.
 
 ---
 
@@ -190,7 +204,8 @@ interface WalletAuthorityRecord {
 
 <Callout type="warn" title="Version note">
   Everything in this section is in `@lazorkit/sdk-legacy` **1.2.0** and later (`next` is
-  1.4.0), except `createTaggedOwnershipChallenge` and `OWNERSHIP_PROOF_DOMAIN` (1.4.0).
+  2.1.0), except `createTaggedOwnershipChallenge` and `OWNERSHIP_PROOF_DOMAIN` (1.4.0), and
+  `WalletFacts.unixTimestamp` / `liveSessions[].expiresAt` (2.0.0).
   `0.3.x` (`latest`) and `1.1.x` do not have it.
 </Callout>
 
@@ -311,7 +326,8 @@ type AuthorityRoleName = 'owner' | 'admin' | 'spender' | 'unknown'; // 'spender'
 
 interface WalletFacts extends PasskeyWalletCandidate {
   lamports: number;                // vault balance
-  slot: bigint;                    // slot the reads were made at
+  slot: bigint;                    // the cluster clock's slot, read before the scans
+  unixTimestamp: bigint;           // 2.0.0: that clock's Unix time
   otherAuthorities: {              // every authority except this passkey's
     authorityPda: PublicKey;
     type: 'ed25519' | 'secp256r1';
@@ -320,10 +336,11 @@ interface WalletFacts extends PasskeyWalletCandidate {
     sameRelyingParty?: boolean;    // Secp256r1 only: created under the same rpId
     trusted: boolean;              // Ed25519 key in trustedKeys; a passkey never is
   }[];
-  liveSessions: {                  // expiry at or after `slot`
+  liveSessions: {                  // expiry at or after unixTimestamp (v2) / slot (v1)
     sessionPda: PublicKey;
     sessionKey: PublicKey;
-    expiresAtSlot: bigint;
+    expiresAt: bigint;             // 2.0.0 (was expiresAtSlot): Unix seconds for a v2 session,
+                                   // a slot for a v1 one (or a v2 one written before seconds)
     trusted: boolean;
   }[];
   pendingDeferred: {               // expiry at or after `slot`
@@ -415,6 +432,11 @@ console.log(authority.role, authority.counter, authority.policyLen, authority.wa
 const session = await SessionAccount.fromAccountAddress(connection, sessionPda);
 console.log(session.sessionKey.toBase58(), session.expiresAt);
 
+// 2.1.0: who paid the rent (layout revision 2), or null for an older account
+console.log(authority.rentPayer?.toBase58(), authority.policyOffset, session.rentPayer?.toBase58());
+// Where closing an account must send its rent: the recorded payer, else the fallback
+const destination = await client.rentRefundDestination(sessionPda, payer.publicKey);
+
 // Every authority on a wallet, with rank, counter and policy:
 const authorities = await client.findAuthoritiesByWallet(walletPda);
 // Whether the wallet has an Owner left to manage it:
@@ -422,7 +444,17 @@ const { ownerCount, isRecoverable } = await client.getRecoveryStatus(walletPda);
 ```
 
 Both classes also have `fromBuffer(data)`. There is no exported reader for the wallet or
-`DeferredExec` accounts. `readAuthorityCounter` / `readAuthorityPubkey` (and
+`DeferredExec` accounts.
+
+**Layout revision 2** (2.1.0). An authority or session created on devnet's v2 since
+2026-10-13 stores the 32-byte account that paid its rent after its fixed part, so its
+policy (an authority's) or actions (a session's) start 32 bytes later. `AuthorityAccount`
+has `rentPayer` and `policyOffset`, `SessionAccount` has `rentPayer` and `actions`;
+`rentPayer` is `null` for an older account. Module helpers: `recordedRentPayer(data)`,
+`authorityPolicyOffset(authorityType, version)`, `sessionActionsOffset(version)`,
+`authorityKeyEnd(authorityType)`, and the constants `RENT_PAYER_LAYOUT_VERSION` (2) and
+`RENT_PAYER_LEN` (32). 2.0.0 does not know this revision and reads such an account's policy
+or actions 32 bytes early. See [Layout revision 2](/versions#layout-revision-2). `readAuthorityCounter` / `readAuthorityPubkey` (and
 `client.readCounter`) read one field and take the
 [challenge-read options](/web3js-v1/passkey-signing#two-passkey-transactions-in-a-row).
 
@@ -447,7 +479,13 @@ Program ids: `PROGRAM_ID_MAINNET`, `PROGRAM_ID_DEVNET` (v2), `PROGRAM_ID_MAINNET
 ## Error utilities
 
 ```typescript
-import { ERROR_NAMES, MinContextSlotNotReachedError, errorFromCode, extractErrorCode } from '@lazorkit/sdk-legacy';
+import {
+  ERROR_NAMES,
+  MinContextSlotNotReachedError,
+  RefundDestinationMismatchError,
+  errorFromCode,
+  extractErrorCode,
+} from '@lazorkit/sdk-legacy';
 
 // From a thrown SendTransactionError (reads the error's text):
 const code = extractErrorCode(err);          // e.g. 3024, or null
@@ -457,12 +495,19 @@ console.log(code, name, ERROR_NAMES[3006]);
 if (err instanceof MinContextSlotNotReachedError) {
   console.log(err.minContextSlot, err.waitedMs, err.commitment);
 }
+
+// 2.1.0: a close asked to refund rent to an account other than the recorded payer.
+// Thrown before anything is sent; the program would refuse it with 3039.
+if (err instanceof RefundDestinationMismatchError) {
+  console.log(err.account.toBase58(), err.rentPayer.toBase58(), err.requested.toBase58());
+}
 ```
 
 `extractErrorCode` returns `null` for a `{ InstructionError: … }` object, and both read only
 the number: an inner program can return the same code. Since 1.4.0 `ERROR_NAMES` names
 3036 (`SessionNotExpired`), 3037 (`ActionUnlistedSolOutflow`), 3038
 (`ActionUnlistedTokenOutflow`) and 4018 (`RetiredDeployment`); 1.3.1 has no entry for them.
+2.1.0 adds 3039 (`RefundDestinationMismatch`).
 
 Error ranges:
 
@@ -470,10 +515,11 @@ Error ranges:
 | ----------- | ------------------------------------------------- |
 | 3001–3019   | Authentication and permission failures            |
 | 3020–3029   | Spending-limit (action) violations                |
-| 3030–3032   | Vault and token-authority invariants              |
+| 3030–3032   | Vault and token-authority invariants: any signer but an Owner |
 | 3033–3035   | Ranks and policies                                |
 | 3036        | `SessionNotExpired`                               |
-| 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). From the v2 program release that adds them, not deployed yet |
+| 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). On devnet's v2 since 2026-10-03 |
+| 3039        | `RefundDestinationMismatch`: a close refunds only to the recorded rent payer. On devnet's v2 since 2026-10-13 |
 | 4001–4018   | Protocol fee and deployment errors, including 4018 `RetiredDeployment` |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

@@ -1,6 +1,9 @@
 {
     "pages": [
         "index",
+        "upgrade-notice",
+        "versions",
+        "support-policy",
         "protocol",
         "networks",
         "v1-to-v2",

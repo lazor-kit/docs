@@ -21,10 +21,19 @@ carry a policy. This page describes v2 (devnet today; see [Networks & versions](
 | Rank | Value | SDK constant | May add | May remove | Spends |
 | --- | --- | --- | --- | --- | --- |
 | Owner | 0 | `ROLE_OWNER` | Owner, Admin, Delegate | Owner (not the last, not itself), Admin, Delegate | without limits |
-| Admin | 1 | `ROLE_ADMIN` | Delegate | Delegate | without limits |
+| Admin | 1 | `ROLE_ADMIN` | Delegate | Delegate | without limits, but cannot change who controls the vault |
 | Delegate | 2 | `ROLE_SPENDER` | nothing | nothing | only within its policy |
 
 The SDK constant for a Delegate is still called `ROLE_SPENDER`.
+
+Only an Owner may change who controls the vault or its token accounts. An `Execute` signed
+by an Admin, a Delegate or any session that reassigns the vault (`System::Assign`,
+`Allocate`), changes a vault token account's authority, delegate or close authority, closes
+or freezes one, or hands the vault a token account that still has a delegate or close
+authority, fails with 3030–3032, policy or not. Spending without a limit and changing who
+controls the vault are separate powers: such a change would outlive the signer, which
+`RemoveAuthority` does not undo. See
+[Session Keys › Who controls the vault](/concepts/session-keys#who-controls-the-vault).
 
 ## What each instruction allows
 
@@ -68,15 +77,16 @@ session's ([Session Keys › Actions](/concepts/session-keys#actions-reference))
   `DelegateRequiresPolicy` (3033); a policy on an Owner or Admin fails with
   `PolicyRankMismatch` (3035).
 - **A policy names what may leave the wallet.** From the v2 program release that adds
-  errors 3037 and 3038, nothing it does not name may: SOL leaves only with a `Sol*` action,
-  rent the vault pays for a new account included, and a token only with a `Token*` action
-  for its mint. That release is not deployed yet; on the program deployed today a policy
-  bounds only what it names, so a whitelist without a SOL cap leaves SOL uncapped and a SOL
-  cap leaves tokens uncapped. Either way, give every asset the Delegate should spend a
-  limit. See [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
+  errors 3037 and 3038 (on devnet since 2026-10-03), nothing it does not name may: SOL
+  leaves only with a `Sol*` action, rent the vault pays for a new account included, and a
+  token only with a `Token*` action for its mint. Give every asset the Delegate should spend
+  a limit. See [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
 - **A policy must fit in its transaction.** At most 16 actions, and when a passkey approves
-  the `AddAuthority`, within about 244 bytes beside its response
+  the `AddAuthority`, within about 224 bytes beside its response
   ([How many actions fit](/concepts/session-keys#how-many-actions-fit)).
+- **Its times are Unix seconds** on devnet's v2: an action's own `expiresAt` and a recurring
+  window (`windowSeconds` with `@lazorkit/sdk-legacy` 2.x). A window built in slots by an
+  older SDK is read as that many seconds.
 - Policies cannot be changed. Remove the authority and add it again with a new one.
 
 ## Adding authorities with the SDKs
@@ -175,7 +185,10 @@ AuthorityAccountHeader (48 bytes, v2)
 
 ## Enforcement notes
 
-- **Admin cannot self-escalate** — adding an Owner or Admin requires an Owner signature.
+- **Admin cannot self-escalate** — adding an Owner or Admin requires an Owner signature, and
+  an Admin's `Execute` or `ExecuteDeferred` cannot reassign the vault or its token accounts
+  (3030–3032). `Authorize` records whether an Owner signed it, so a deferred execution an
+  Admin authorized is held to the same rule.
 - **Deferred execution (`Authorize`)** is restricted to passkey Owners and Admins without
   a policy.
 - **CPI reentrancy** is blocked: passkey authentication and `Execute` refuse to run below

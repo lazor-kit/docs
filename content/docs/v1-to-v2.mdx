@@ -24,7 +24,8 @@ today: [Networks & versions](/networks).
 | Ranks | Owner / Admin / Spender, but `Execute` never checked rank: any authority could spend the whole vault | Owner / Admin / **Delegate**; a Delegate must carry a spending policy. See [Ranks & policies](/concepts/rbac). |
 | Owners | one Owner, replaced with `TransferOwnership` | several Owners (one per device); the last one cannot be removed |
 | Passkey challenge | does not name the wallet | names the wallet (an assertion verifies only on the wallet it was made for) |
-| Expired sessions | closed by the wallet's Owner/Admin (`RevokeSession`); after the sunset, by anyone | anyone may close an expired one and keep its rent (`CloseExpiredSession`) |
+| Session expiry | a slot | a Unix time by the cluster clock, at most 30 days ahead (devnet's v2 since 2026-10-11; earlier v2 builds used slots); action expiries and recurring windows in seconds too |
+| Expired sessions | closed by the wallet's Owner/Admin (`RevokeSession`); after the sunset, by anyone | anyone may close an expired one (`CloseExpiredSession`); its rent goes back to the account that paid it (sessions created on devnet since 2026-10-13; an older one's goes to whoever closes it) |
 | Protocol fee | charged when enabled; tracked only for payers with a registered `FeeRecord` | skipped when not configured; capped at 0.01 SOL; `FeeRecord` created automatically |
 | Deferred payloads | unversioned | carry `version: 2`; refused across the boundary |
 

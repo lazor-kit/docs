@@ -4,7 +4,9 @@ description: Create a wallet, execute a transaction, find a returning passkey us
 ---
 
 Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
-`TransactionInstruction[]` — you wrap them into a `Transaction`, sign, and submit.
+`TransactionInstruction[]` — you wrap them into a `Transaction`, sign, and submit. This
+page submits them through LazorKit's devnet paymaster, which signs as the fee payer and
+pays the fees and rent ([step 1](#1-initialize-the-client)).
 
 <Callout type="info" title="Vault PDA holds funds">
   `createWallet` returns `vaultPda` — the address where SOL and tokens live. Send/receive
@@ -14,7 +16,9 @@ Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
 ## Prerequisites
 
 - Node.js 18+, or a browser / React Native bundle (no Node polyfills needed)
-- `@lazorkit/sdk-legacy` **1.x** and `@solana/web3.js` installed
+- `@lazorkit/sdk-legacy` **2.x** (2.1.0 on `next`; 1.x sends session expiries as slots,
+  which devnet's v2 refuses, and 2.0.0 does not read the accounts devnet's v2 has written
+  since 2026-10-13) and `@solana/web3.js` installed
 
 ```bash
 npm install @lazorkit/sdk-legacy@next @solana/web3.js
@@ -22,6 +26,9 @@ npm install @lazorkit/sdk-legacy@next @solana/web3.js
 
 `@next` matters: the `latest` tag is 0.3.2, the protocol v1 line, which has none of the
 APIs on this page. Protocol v2 runs on devnet today; see [Networks & versions](/networks).
+
+The snippets use top-level `await`: run them as an ES module (`"type": "module"` in
+`package.json`, or a `.mts` file).
 
 ---
 
@@ -38,6 +45,57 @@ const client = new LazorKitClient(connection);
 The program id comes from the RPC URL; for a URL that does not name its cluster, pass it:
 `new LazorKitClient(connection, PROGRAM_ID_DEVNET)`.
 
+### The fee payer, and submitting through the paymaster
+
+Every call takes a `payer`: the account that signs the transaction as its fee payer and
+pays the fees and any rent (a new wallet's accounts, the protocol fee). On devnet,
+LazorKit's paymaster is that payer: a [Kora](https://github.com/solana-foundation/kora)
+relayer at `https://kora-devnet-production.up.railway.app` that sponsors LazorKit v2
+transactions for free. Ask it for its fee payer, build each transaction with it as
+`feePayer`, sign with your own signers, and send it there: the relayer adds its signature
+and submits.
+
+```typescript
+import { Keypair, PublicKey, Transaction, type TransactionInstruction } from '@solana/web3.js';
+
+const PAYMASTER_URL = 'https://kora-devnet-production.up.railway.app';
+
+async function paymaster(method: string, params: unknown) {
+  const res = await fetch(PAYMASTER_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const body = await res.json();
+  if (body.error) throw new Error(`${method}: ${JSON.stringify(body.error)}`);
+  return body.result;
+}
+
+// The relayer's fee payer: pass it as `payer` to every client call.
+const { signer_address } = await paymaster('getPayerSigner', []);
+const payer = { publicKey: new PublicKey(signer_address) };
+
+/** Signs with `signers` (never the fee payer), then has the relayer sign as fee payer and send. */
+async function sendViaPaymaster(instructions: TransactionInstruction[], signers: Keypair[] = []) {
+  const tx = new Transaction().add(...instructions);
+  tx.feePayer = payer.publicKey;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
+  if (signers.length) tx.partialSign(...signers);
+  const { signature } = await paymaster('signAndSendTransaction', {
+    transaction: tx.serialize({ requireAllSignatures: false }).toString('base64'),
+    signer_key: payer.publicKey.toBase58(),
+  });
+  await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+  return signature as string;
+}
+```
+
+To pay yourself instead, make `payer` a funded `Keypair` of yours and send with
+`sendAndConfirmTransaction(connection, tx, [payer, ...signers])`. On mainnet, use a relayer
+you run or contract (LazorKit's devnet relayer is devnet only); see
+[Paymaster](/concepts/paymaster).
+
 ---
 
 ## 2. Create a wallet
@@ -46,10 +104,9 @@ The program id comes from the RPC URL; for a URL that does not name its cluster,
 <Tab value="Ed25519 owner">
 
 ```typescript
-import { Keypair } from '@solana/web3.js';
 import * as crypto from 'crypto';
 
-const ownerKp = Keypair.generate();
+const ownerKp = Keypair.generate(); // Keypair: imported in step 1
 
 const { instructions, walletPda, vaultPda, authorityPda } = await client.createWallet({
   payer: payer.publicKey,
@@ -85,9 +142,15 @@ A wallet created for the wrong key can never sign.
 </Tab>
 </Tabs>
 
-Send the returned `instructions` as a single transaction. `vaultPda` (also returned as
-`depositAddress`) is the address your users send funds to; `walletPda` is their metadata
-PDA anchor — never send funds there.
+Send the returned `instructions` as a single transaction. No other signature is needed:
+the fee payer pays for the new accounts.
+
+```typescript
+await sendViaPaymaster(instructions);
+```
+
+`vaultPda` (also returned as `depositAddress`) is the address your users send funds to;
+`walletPda` is their metadata PDA anchor — never send funds there.
 
 When the protocol fee is configured, the first fee-paying transaction of a payer also
 carries a permissionless `RegisterPayer` instruction that the client prepends (about
@@ -96,6 +159,21 @@ carries a permissionless `RegisterPayer` instruction that the client prepends (a
 ---
 
 ## 3. Execute a transaction
+
+`execute` moves funds **from the vault**, so the vault must hold them first: the fee payer
+pays the fees, never the amount sent. On devnet, send it SOL from a funded wallet, or
+airdrop some (the public faucet is rate-limited; [faucet.solana.com](https://faucet.solana.com)
+also takes the vault's address):
+
+```typescript
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+
+const sig = await connection.requestAirdrop(vaultPda, 0.01 * LAMPORTS_PER_SOL);
+await connection.confirmTransaction(sig, 'confirmed');
+// or: solana transfer <vaultPda> 0.01 --allow-unfunded-recipient --url devnet
+
+const recipient = new PublicKey('...'); // any address; a new account needs at least ~0.00089 SOL
+```
 
 <Tabs items={['Ed25519 signer', 'Secp256r1 (passkey) signer']}>
 <Tab value="Ed25519 signer">
@@ -118,7 +196,11 @@ const { instructions } = await client.execute({
 });
 ```
 
-`ownerKp` signs at transaction level alongside the `fee_payer`.
+`ownerKp` signs at transaction level alongside the fee payer:
+
+```typescript
+await sendViaPaymaster(instructions, [ownerKp]);
+```
 
 </Tab>
 <Tab value="Secp256r1 (passkey) signer">
@@ -150,8 +232,9 @@ const webauthnResponse = await getWebAuthnResponse(
   credentialId,
 );
 
-// 3. Build the final transaction
+// 3. Build the final transaction, and send it: the passkey's signature is inside it
 const { instructions } = client.finalizeExecute(prepared, webauthnResponse);
+await sendViaPaymaster(instructions);
 ```
 
 `getWebAuthnResponse` turns the browser's assertion into the SDK's `WebAuthnResponse`
@@ -170,7 +253,7 @@ can fail with `SignatureReused` (3006) — see
 
 <Callout type="warn" title="Version note">
   This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (protocol v2; `next`
-  is 1.4.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
+  is 2.1.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
   below applies to every version.
 </Callout>
 
@@ -363,7 +446,8 @@ including any a stranger added it to. Check `role` and the wallet's other author
 
 ## 5. Transfer SOL (shorthand)
 
-`transferSol` wraps `execute` with a `SystemProgram.transfer` from the vault:
+`transferSol` wraps `execute` with a `SystemProgram.transfer` from the vault (which must
+hold the amount; send with `sendViaPaymaster(instructions, [ownerKp])`):
 
 ```typescript
 import { ed25519 } from '@lazorkit/sdk-legacy';

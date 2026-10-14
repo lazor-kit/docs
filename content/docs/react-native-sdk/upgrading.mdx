@@ -1,6 +1,6 @@
 ---
-title: Upgrading to 2.x
-description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
+title: Upgrading to 2.x and 3.0
+description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release, and from 2.x to the 3.0 pre-release.
 ---
 
 `@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.4.0 is
@@ -14,7 +14,8 @@ npm install @lazorkit/wallet-mobile-adapter@^2.4.0
 
 <Callout type="warn" title="Do not install @beta">
   The npm `beta` tag still points at `2.0.0-beta.4`, a pre-v2 build from April 2026. Use
-  `latest` (2.4.0).
+  `latest` (2.4.0), or `next` for the 3.0 pre-release
+  ([below](#upgrading-to-300-pre-release)).
 </Callout>
 
 The adapter depends on `expo-web-browser` `^14.2.0 || ^15.0.0` (Expo SDK 53 / 54) and
@@ -58,7 +59,7 @@ Expo SDKs have not been tested.
 11. **Check message signatures with `verifyWalletMessage`** (2.3.1), which reads the
     passkey's key from chain. See [below](#upgrading-to-231).
 12. **Name every mint a session or Delegate spends** (2.4.0), with an `Actions.token*`
-    action. From the v2 program release that adds errors 3037 and 3038, an asset the
+    action. Where errors 3037 and 3038 apply (devnet's v2 since 2026-10-03), an asset the
     actions do not name cannot leave the wallet. See [below](#upgrading-to-240).
 
 ## Release by release
@@ -72,6 +73,8 @@ Expo SDKs have not been tested.
 | **2.3.0** (2026-10-02) | **Breaking:** `addAuthorityEd25519` needs a `role`. `connect` and `disconnect` follow the callback contract, on the hook and the store; `transferSol` with no wallet calls `onFail`. The `is*Error` predicates recognise the adapter's own errors through wrappers. See [below](#upgrading-to-230). |
 | **2.3.1** (2026-10-02) | **Security:** message signatures are domain-separated, so they can no longer be confused with transaction approvals; `signMessage` resolves with a `SignMessageResult` (two new fields); new `verifyWalletMessage` and `verifySignedMessage`. Ownership-proof challenges are domain-separated too. See [below](#upgrading-to-231). |
 | **2.4.0** (2026-10-03) | `UnlistedSolOutflowError` / `UnlistedTokenOutflowError` for the program's 3037 / 3038 (a session moving SOL, or a token, its actions do not name), with predicates and codes. `ERROR_NAMES` names 3036–3038 and 4018. Docs: name each mint, keep actions within 244 bytes. No disconnect change: the adapter keeps no session key. See [below](#upgrading-to-240). |
+| **3.0.0-next.0** (2026-10-10, `next`) | Pre-release. Session expiry in seconds (`expiresInSeconds`, `expiresAt`; `expiresAtSlot` deprecated), recurring windows in seconds (`windowSeconds`), actions checked against 224 bytes before the portal opens, typed approval requests and their errors. Requires `@lazorkit/sdk-legacy` 2.0.0. See [below](#upgrading-to-300-pre-release). |
+| **3.0.0-next.1** (2026-10-13, `next`) | Pre-release. `describeError` and `sendStatusOf`; LazorKit's v2 relayer as the default devnet paymaster; sends retried only when trying again can change the answer (2.x and 3.0.0-next.0 never resent); `SignatureTooOldError` for 3007; offline sends are not "maybe sent"; `connect` never creates a second wallet; `computeUnitLimit` validated; `browserOptions.timeoutMs` (`PortalTimeoutError`) and `preferEphemeralSession` (default `true` on iOS); one portal trip to create a wallet on iOS; rent refunds to the recorded payer (3039). Requires `@lazorkit/sdk-legacy` 2.1.0. See [below](#upgrading-to-300-pre-release). |
 
 ## Keys
 
@@ -88,6 +91,116 @@ expired. The package README's
 [Session keys](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/README.md#session-keys)
 section (2.3.0) shows this with `expo-secure-store`.
 
+## Upgrading to 3.0.0 (pre-release)
+
+<Callout type="warn" title="Pre-release on next">
+  `@lazorkit/wallet-mobile-adapter` **3.0.0-next.1** is on the npm `next` tag, released with
+  `@lazorkit/wallet` 4.0.0-next.1. Its API can still change before 3.0.0. Full notes: the
+  package
+  [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md).
+</Callout>
+
+```bash
+npm install @lazorkit/wallet-mobile-adapter@next   # 3.0.0-next.1
+```
+
+3.0.0-next.1 depends on `@lazorkit/sdk-legacy` ^2.1.0 (3.0.0-next.0 on ^2.0.0, 2.x on
+^1.3.0). It has no Embedded mode and
+no `mode` prop: the provider is unchanged.
+
+**Why now.** Since 2026-10-11 devnet's v2 program reads session expiries, action expiries
+and recurring windows as Unix seconds of the cluster clock. 2.4.0 sends `expiresAtSlot`, a
+slot, so its `createSession` on a v2 wallet is refused there with `InvalidSessionDuration`
+(3008), after the user approved. Every v2 session created on devnet before the upgrade
+reads as expired (3009). Mainnet has no v2 program yet, and v1 wallets keep counting in
+slots. See [Migrating to 4.0](/react-sdk/migrating-to-4#devnet-runs-the-time-based-program).
+
+1. **Session expiry is in seconds.** `createSession` takes `expiresInSeconds` (more than 0,
+   at most 30 days, `MAX_SESSION_SECONDS`) or `expiresAt` (a Unix time in seconds, after the
+   cluster's time and at most 30 days ahead of it), checked against the cluster clock before
+   the portal opens. With neither, a session lasts 5 hours
+   (`DEFAULTS.SESSION_EXPIRY_SECONDS`, 18,000).
+
+   ```ts
+   // 2.4
+   await createSession({ sessionKey, expiresAtSlot: currentSlot + 216_000n, actions }, options);
+   // 3.0
+   await createSession({ sessionKey, expiresInSeconds: 86_400, actions }, options); // a day
+   ```
+
+   `expiresAtSlot` is deprecated and no longer required. On a v2 wallet the slots left
+   until it are converted to seconds with the cluster's measured slot time, with a warning;
+   it throws when the slot time cannot be read. Give at most one of the three.
+2. **Recurring windows and action expiries are in seconds.** The `Actions` builders, from
+   `@lazorkit/sdk-legacy` 2.x, take `windowSeconds` instead of `window`
+   (`Actions.solRecurringLimit({ limit, windowSeconds: 86_400n })` is a day), so code that
+   passes `window` no longer compiles. An action's own `expiresAt` is a Unix time, and
+   `serializeActions` throws on one that looks like a slot, a Delegate policy's included.
+   Parsed actions carry `windowSeconds`, and `WalletFacts.liveSessions[].expiresAt`
+   replaces `expiresAtSlot`.
+3. **Actions fit in 224 bytes, and are checked.** `createSession` refuses more than 16
+   actions, or more than 224 bytes of them, with a `RangeError` before the portal opens, so
+   the user is never asked to approve a session that cannot be sent. Keep a Delegate's
+   `policy` within the same 224 bytes: nothing checks it.
+4. **Typed approval requests.** On a v2 wallet, `createSession`, `revokeSession` and
+   `removeAuthority` send the portal the operation itself, which it shows and computes the
+   challenge from. The adapter checks the redirect against the request before anything is
+   sent. New errors: `PortalReplyMismatchError` (nothing was sent; a forged deep link
+   included), `RequestOutOfDateError` (`retryable: true`), `PortalRefusedError` (with the
+   portal's `code`) and `TypedRequestTooLargeError` (nothing was opened). On a refusal the
+   passkey signed nothing. See
+   [useWallet › What the user approves](/react-native-sdk/use-wallet#what-the-user-approves-30).
+5. **Keeping a session key.** Store the session's `expiresAt` (Unix seconds) with the key
+   instead of `expiresAtSlot`, and compare it with the cluster's time
+   (`new LazorKitClient(connection).getClusterTime()`) before using the key. The wallet
+   chooser's `approxExpiresAt` reads a v2 session's expiry as a Unix time.
+6. **Unchanged:** v1 wallets still count in slots: with no expiry a session ends
+   `DEFAULTS.SESSION_EXPIRY_SLOTS` (50,000) slots ahead, `expiresAtSlot` is used as given,
+   and `expiresInSeconds`, `expiresAt` and `windowSeconds` are converted to slots with the
+   measured slot time. Every other call is as in 2.4.0, apart from the 3.0.0-next.1
+   changes below.
+
+**New in 3.0.0-next.1:**
+
+7. **Plain-language errors.** `describeError(error)` returns `{ title, message, action?,
+   retryable, maybeSent, code, programError? }`, the same answers as the web SDK, and
+   `sendStatusOf(error)` returns `'cancelled'`, `'checking'` (it may still land) or
+   `'failed'`. See [Errors › Plain-language errors](/errors#plain-language-errors-describeerror).
+8. **Default devnet paymaster.** `DEFAULTS.PAYMASTER_URL` is
+   `https://kora-devnet-production.up.railway.app`, LazorKit's devnet relayer for v2 (2.x
+   used `kora.devnet.lazorkit.com`, which sponsors only v1). `configPaymaster` still
+   overrides it.
+9. **Retries.** 2.x sent each transaction once. 3.0.0-next.1 follows the web SDK's policy: a
+   refusal that would come back the same (any program error, an allowlist refusal,
+   insufficient funds, a failed simulation, a 4xx) is sent once; a 429 is waited out
+   (`Retry-After`, up to 10 s); a network error, timeout or 5xx is sent again with the same
+   bytes, only while the blockhash is valid. One attempt waits at most 30 s, the whole send
+   at most 60 s. An offline device makes no request (`PaymasterError` with `offline: true`).
+10. **"Approval took too long" (3007)** rejects with `SignatureTooOldError`: nothing was
+    sent. Offer "Try again", which asks for a new approval.
+11. **The portal trip is bounded.** `LazorKitProvider`'s `browserOptions.timeoutMs` (default
+    2 minutes; at least 10 for a typed approval): a trip that never comes back closes the
+    browser and rejects with `PortalTimeoutError`. On iOS,
+    `browserOptions.preferEphemeralSession` (default `true`) skips the "wants to use … to
+    sign in" alert before each approval; pass `false` for a session that shares cookies with
+    Safari.
+12. **iOS: one trip to create a wallet.** A passkey the portal has just registered gets its
+    wallet with no second trip for an ownership proof. A deep-link reply (Android) is still
+    proven first.
+13. **`connect` does not create a second wallet** when the paymaster's answer to a creation
+    was lost: the next `connect` with the same passkey reuses the seed and adopts the wallet.
+14. **Rent refunds.** `revokeSession` and `removeAuthority` refund the rent to the payer the
+    closed account records, which devnet's v2 requires since 2026-10-13 (3039 otherwise). A
+    `refundDestination` other than that payer is refused before the passkey prompt with
+    `RefundDestinationMismatchError`. See
+    [Layout revision 2](/versions#layout-revision-2).
+
+```tsx
+<LazorKitProvider browserOptions={{ timeoutMs: 180_000 }}>
+  <App />
+</LazorKitProvider>
+```
+
 ## Upgrading to 2.4.0
 
 From 2.3.1. Nothing was removed, and no call changes shape. Full notes: the package
@@ -97,12 +210,11 @@ From 2.3.1. Nothing was removed, and no call changes shape. Full notes: the pack
    and 3038, a session's `actions` (and a Delegate's `policy`) name what may leave the
    wallet, and nothing else may: SOL leaves only with an `Actions.sol*` action, rent the
    vault pays for a new account included, and a token only with an `Actions.token*` action
-   for its mint. wSOL is a mint of its own. That release is not deployed yet; until it is,
-   an asset the actions do not name is not bounded at all, so a session with token actions
-   only can spend all the wallet's SOL. See
+   for its mint. wSOL is a mint of its own. Devnet's v2 has run that release since
+   2026-10-03; on a program without it, an asset the actions do not name is not bounded at
+   all, so a session with token actions only can spend all the wallet's SOL. See
    [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
-2. **Sessions and Delegates that name SOL only** move no token once that release is
-   deployed. Revoke them (`revokeSession`, or `removeAuthority` for a Delegate) and
+2. **Sessions and Delegates that name SOL only** move no token under that release. Revoke them (`revokeSession`, or `removeAuthority` for a Delegate) and
    register ones whose actions name the mints they spend. The program does not create a
    second session for a key while the first exists: revoke first, or use a new key.
 3. **Keep actions within 244 bytes.** A session's actions, and a Delegate's policy, must

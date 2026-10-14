@@ -115,7 +115,7 @@ LazorKit is the layer that makes this possible.
 <Steps>
   <Step>
     ### User creates a session key
-    An Owner or Admin creates a session key and assigns it to an agent or app. The session specifies an expiry slot and its actions: allowed programs and spending limits (SOL cap, token cap, per-tx max). The SDKs refuse a session with no actions unless the caller asks for an unrestricted one explicitly.
+    An Owner or Admin creates a session key and assigns it to an agent or app. The session specifies an expiry time (Unix seconds by the cluster clock, at most 30 days ahead) and its actions: allowed programs and spending limits (SOL cap, token cap, per-tx max). The SDKs refuse a session with no actions unless the caller asks for an unrestricted one explicitly.
   </Step>
   <Step>
     ### Agent holds the session keypair
@@ -135,7 +135,7 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### LazorKit program validates on-chain
-    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? From the v2 program release that adds errors 3037 and 3038 (not deployed yet), does it move SOL or a token the session's actions do not name ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds))? Any failing check rejects the transaction.
+    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? From the v2 program release that adds errors 3037 and 3038 (on devnet since 2026-10-03), does it move SOL or a token the session's actions do not name ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds))? Any failing check rejects the transaction.
   </Step>
   <Step>
     ### Protocol fee is collected
@@ -185,7 +185,7 @@ An on-chain agent needs to execute recurring actions on behalf of a user (e.g. r
 1. User creates a session key with a defined scope: program address, max value per tx, expiry date
 2. Agent holds the session key and triggers execution on its own schedule
 3. Each execution passes RBAC validation before the Paymaster funds it
-4. Session expires at its slot and can no longer sign. After expiry anyone may close the account and keep its rent (`CloseExpiredSession`), so revoke it yourself if you want the rent back
+4. Session expires at its expiry time and can no longer sign. After expiry anyone may close the account (`CloseExpiredSession`); its rent goes back to the account that paid it, the Paymaster on a sponsored flow (sessions created on devnet since 2026-10-13, and on mainnet once v2 is deployed; an older session's rent goes to whoever closes it)
 
 **Who pays:** The agent operator pre-funds the Paymaster, or the user configures a self-funded execution budget.
 
@@ -231,7 +231,7 @@ LazorKit **protocol v1** is live on Solana mainnet. In production:
 
 - **[Seedless](https://www.seedlesslabs.xyz)** — a passkey wallet built on LazorKit, with gasless onboarding. Users create a smart wallet with biometrics in under 10 seconds.
 
-**Protocol v2** — ranks and policies, several Owners per wallet, a passkey challenge that names the wallet, `CloseExpiredSession`, and `MigrateWallet` for moving v1 wallets — runs on devnet at its own program id. It also carries the fixes from the 2026 audit of the program: fee collection that can no longer freeze funds, passkey authentication that refuses to run through another program, rank checked separately from spending, and a fee payer that inner calls cannot conscript. Its mainnet program is not deployed yet. After it is, the v1 program will be retired to a sunset binary that only lets wallets move out. See [Networks & versions](/networks) and [Migrating from v1](/v1-to-v2).
+**Protocol v2** — ranks and policies, several Owners per wallet, a passkey challenge that names the wallet, `CloseExpiredSession`, and `MigrateWallet` for moving v1 wallets — runs on devnet at its own program id. It also carries the fixes from the 2026 audit of the program: fee collection that can no longer freeze funds, passkey authentication that refuses to run through another program, rank checked separately from spending, and a fee payer that inner calls cannot conscript. On devnet, session time is measured in Unix seconds, a policy bounds every asset the vault holds, and only an Owner may change who controls the vault. Its mainnet program is not deployed yet. After it is, the v1 program will be retired to a sunset binary that only lets wallets move out. See [Networks & versions](/networks) and [Migrating from v1](/v1-to-v2).
 
 ---
 

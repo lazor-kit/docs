@@ -20,22 +20,55 @@ For application code, reach for the [React SDK](/react-sdk) or
 [React Native SDK](/react-native-sdk) — both build on this SDK and handle the portal,
 paymaster, confirmation and sequencing for you.
 
+## Which package do I use?
+
+| You are building | Package | Install | Version |
+| ---------------- | ------- | ------- | ------- |
+| A **React** web app | [`@lazorkit/wallet`](/react-sdk) | `npm i @lazorkit/wallet` | 3.4.1 (`latest`). 4.0.0-next.1 on `@next`, which creating a session on devnet needs |
+| A **React Native** or Expo app | [`@lazorkit/wallet-mobile-adapter`](/react-native-sdk) | `npm i @lazorkit/wallet-mobile-adapter` | 2.4.0 (`latest`). 3.0.0-next.1 on `@next`, which creating a session on devnet needs |
+| Program-level code on **`@solana/web3.js` v1**: your own UI, a backend, a relayer, an agent | [`@lazorkit/sdk-legacy`](/web3js-v1) | `npm i @lazorkit/sdk-legacy@next` | 2.1.0, protocol v2. Without `@next` you get `latest`, 0.3.2, the protocol v1 line |
+| The same on **`@solana/kit`** (web3.js v2) | [`@lazorkit/sdk`](/web3js-v2) | `npm i @lazorkit/sdk @solana/kit` | 1.0.0-rc.8, release candidate, protocol v2 only |
+
 ## Install
 
 Two lines of this package are published, one per protocol version:
 
 | npm | Version | Protocol | Where it works |
 | --- | ------- | -------- | -------------- |
-| `@lazorkit/sdk-legacy@next` | **1.4.0** | v2 | devnet today; mainnet once v2 is deployed there |
+| `@lazorkit/sdk-legacy@next` | **2.1.0** | v2 | devnet today; mainnet once v2 is deployed there |
 | `@lazorkit/sdk-legacy` (`latest`) | 0.3.2 | v1 | mainnet today, and devnet v1 |
 
 ```bash
-npm install @lazorkit/sdk-legacy@next @solana/web3.js   # 1.x — protocol v2, what these pages document
+npm install @lazorkit/sdk-legacy@next @solana/web3.js   # 2.x — protocol v2, what these pages document
 ```
 
 A plain `npm install @lazorkit/sdk-legacy` installs **0.3.2**, the protocol v1 line, which
-has none of the 1.x APIs below. The two are not wire-compatible: the same `userSeed`
-derives a different wallet on each. See [Networks & versions](/networks).
+has none of the APIs below. The two are not wire-compatible: the same `userSeed` derives a
+different wallet on each. See [Networks & versions](/networks).
+
+<Callout type="warn" title="2.0.0: session time in seconds (breaking)">
+  2.0.0 measures session expiry, action expiries and recurring windows in **Unix seconds**
+  of the cluster clock, as devnet's v2 program does since 2026-10-11. `createSession`'s
+  `expiresAt` is a Unix time (`getClusterTime()` reads the clock the program compares
+  against; at most `MAX_SESSION_SECONDS`, 30 days, ahead), and the recurring builders take
+  `windowSeconds` instead of `window`. 1.4.0 and earlier send slots, which devnet's v2
+  refuses for a session (3008). 2.0.0 also adds the
+  [`@lazorkit/sdk-legacy/approval`](/web3js-v1/passkey-signing#typed-approval-requests)
+  subpath. Full notes: the protocol
+  [CHANGELOG](https://github.com/lazor-kit/lazorkit-protocol/blob/develop/CHANGELOG.md).
+</Callout>
+
+<Callout type="info" title="2.1.0: rent goes back to whoever paid it">
+  Devnet's v2 records the rent payer of every authority and session it has created since
+  2026-10-13 (layout revision 2), and refunds a closed one only to that account
+  (`RefundDestinationMismatch`, 3039). 2.1.0 reads it: `revokeSession`, `removeAuthority`,
+  `transferOwnership` and their `prepare*` halves use the recorded payer when you leave
+  `refundDestination` out (2.0.0 used `payer`), and throw `RefundDestinationMismatchError`
+  for another account. New: `rentRefundDestination`, `closeExpiredSession`, and `rentPayer` /
+  `policyOffset` on `AuthorityAccount`, `rentPayer` / `actions` on `SessionAccount`. 2.0.0
+  reads a revision-2 Delegate's policy and a session's actions 32 bytes early. See
+  [Versions & compatibility › Layout revision 2](/versions#layout-revision-2).
+</Callout>
 
 ## What it covers
 
@@ -43,17 +76,20 @@ derives a different wallet on each. See [Networks & versions](/networks).
 | ------------------- | --------------------------------------------------------------------------------------------- |
 | Wallet management   | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` (+ `prepare*` / `finalize*` for passkeys) |
 | Execution           | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute`                                 |
-| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`, `prepareRevokeSession` |
+| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`, `prepareRevokeSession`; `getClusterTime`, `MAX_SESSION_SECONDS` (2.0.0); `closeExpiredSession` (2.1.0) |
 | Deferred execution  | `authorize`, `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
+| Rent refunds        | `rentRefundDestination` (2.1.0): where closing an authority or session must send its rent |
 | Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findAuthoritiesByWallet`, `getRecoveryStatus`, `readCounter`; `findWalletsByAuthority` (raw) |
 | Passkey keys        | `resolvePasskeyPublicKey`, `recoverPasskeyPublicKeys` (1.3.0+, module functions)              |
 | Passkey challenges  | `createTaggedOwnershipChallenge`, `signedMessageChallenge`, `OWNERSHIP_PROOF_DOMAIN`, `SIGNED_MESSAGE_DOMAIN` (1.4.0+); see [Passkey signing](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge) |
+| Typed approval requests | `@lazorkit/sdk-legacy/approval` (2.0.0): `withApprovalFragment`, `verifyApprovalReply`, `describeApproval`, `approvalChallenge`, …; `rebindSecp256r1`. See [Passkey signing › Typed approval requests](/web3js-v1/passkey-signing#typed-approval-requests) |
 | v1 migration        | `migrateV1Wallet`, `findV1WalletsByOwner`, `vetMigrationDestination` (1.2.0+)                 |
 | Protocol            | `registerPayer` (permissionless; added for you), `initializeProtocol`, `updateProtocol`, `initializeTreasuryShard`, `withdrawTreasury` (admin) |
 
-`CloseExpiredSession` (anyone may close an expired session and keep its rent) has no
-client method, and 1.4.0 does not export its instruction builder; `@lazorkit/sdk` (kit)
-exports `createCloseExpiredSessionIx`.
+`closeExpiredSession` (2.1.0) closes a session past its expiry; anyone may call it. The rent
+goes to the session's recorded rent payer, or, for a session from before layout revision
+2, to `refundDestination` (by default the caller). 2.0.0 had no client method for it;
+`@lazorkit/sdk` (kit) also exports `createCloseExpiredSessionIx`.
 
 <Callout type="warn" title="Finding a returning passkey user's wallet">
   Use `findOwnPasskeyWallet` (1.2.0 and later; not in 0.3.x or 1.1.x). Never adopt the

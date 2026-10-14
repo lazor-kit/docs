@@ -8,8 +8,11 @@ the same `useWallet` hook.
 
 <Callout type="info" title="Zero-config defaults">
   All provider props are optional. With nothing set, the SDK targets Solana **devnet**
-  through `portal.lazor.sh` and LazorKit's devnet Kora paymaster, which is set up for
-  protocol v2 — perfect for demos and local dev.
+  through `portal.lazor.sh` and a devnet paymaster — perfect for demos and local dev. The
+  default paymaster of 3.4.1 is `kora.devnet.lazorkit.com`, which still reaches an earlier
+  relayer that sponsors only v1, so set LazorKit's devnet relayer for protocol v2 yourself:
+  `paymasterConfig={{ paymasterUrl: 'https://kora-devnet-production.up.railway.app' }}`.
+  From 4.0.0-next.1 that relayer is the default.
 </Callout>
 
 <Callout type="warn" title="Mainnet">
@@ -17,6 +20,14 @@ the same `useWallet` hook.
   `@lazorkit/wallet` 3.x, existing v1 wallets work on mainnet (through a relayer that
   sponsors v1: `v1PaymasterConfig`), but a new user cannot get a wallet there until v2 is
   deployed. See [Networks & versions](/networks).
+</Callout>
+
+<Callout type="info" title="This page: 3.4.1 (latest)">
+  The steps below install `@lazorkit/wallet` 3.4.1. The 4.0 pre-release
+  (`npm install @lazorkit/wallet@next`) needs `mode="portal"` on `LazorkitProvider` for the
+  same setup, or `mode="embedded"` for passkeys on your own domain
+  ([Embedded mode](/react-sdk/embedded-mode)). Creating a session on devnet needs 4.0:
+  [Migrating to 4.0](/react-sdk/migrating-to-4).
 </Callout>
 
 ## Prerequisites
@@ -116,7 +127,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-That's the minimum. Override defaults via props:
+That's the minimum. With 4.0 it is `<LazorkitProvider mode="portal">`: `mode` is required
+there, with no default. Override defaults via props:
 
 ```tsx
 <LazorkitProvider
