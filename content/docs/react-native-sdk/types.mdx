@@ -28,7 +28,7 @@ interface WalletInfo {
   /** Authority PDA (base58) tied to this passkey credential. */
   walletDevice: string;
 
-  /** 1 = made before LazorKit v2, 2 = since. Absent on records saved before 2.0.0 (= v1). */
+  /** 1 = made before LazorKit Enterprise, 2 = since. Absent on records saved before 2.0.0 (= v1). */
   protocolVersion?: 1 | 2;
 }
 ```
@@ -44,7 +44,7 @@ interface WalletInfo {
 ```ts
 interface WalletConfig {
   portalUrl: string;
-  configPaymaster: { paymasterUrl: string; apiKey?: string };   // v2 wallets
+  configPaymaster: { paymasterUrl: string; apiKey?: string };   // Enterprise wallets
   v1ConfigPaymaster?: { paymasterUrl: string; apiKey?: string }; // v1 wallets (2.0.0+)
   rpcUrl?: string;
   cluster?: 'mainnet' | 'devnet';                                // when rpcUrl does not say (2.0.0+)
@@ -101,7 +101,7 @@ user. Show the vault address; the order is not a recommendation.
 interface WalletChoice {
   wallet: string;                         // wallet PDA
   vault: string;                          // vault PDA — where the funds are. Show this one.
-  version: 1 | 2;                         // 1 = made before LazorKit v2, not migrated yet
+  version: 1 | 2;                         // 1 = made before LazorKit Enterprise, not migrated yet
   lamports: number;                       // vault balance
   signatureCount: number;                 // 0 = not used with this passkey yet
   vaultIsSystemAccount: boolean;          // false: vault handed to another program
@@ -407,7 +407,7 @@ was `{ signature, signedPayload }`).
 
 Actions are **immutable policies** attached to a session at creation — or, serialized with
 `serializeActions`, to a Delegate authority. The on-chain program enforces them on every
-`Execute` signed by that key. From the v2 program release that adds errors 3037 and 3038,
+`Execute` signed by that key. From the Enterprise program release that adds errors 3037 and 3038,
 an asset no action names cannot leave the wallet: SOL needs a `sol*` action (rent the vault
 pays counts) and each token a `token*` action for its mint. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds).
@@ -539,7 +539,7 @@ interface DeferredFailureContext { deferredExecPda?: PublicKey; authorizeSignatu
 class V1WalletRetiredError extends Error { readonly code: 4018 }
 class V1WalletMigratedError extends Error {}
 
-// A session send moving an asset its actions do not name (2.4.0+), from the v2 program
+// A session send moving an asset its actions do not name (2.4.0+), from the Enterprise program
 // release that adds errors 3037 and 3038. Nothing in it ran.
 type PolicySigner = 'session' | 'authority';  // always 'session' from this adapter
 class UnlistedSolOutflowError extends Error {   // "This session is not allowed to spend SOL"

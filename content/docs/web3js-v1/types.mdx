@@ -3,7 +3,7 @@ title: Types
 description: Signer helpers, PDA derivation, account decoders, and error utilities.
 ---
 
-The public types and helpers of `@lazorkit/sdk-legacy` **1.4.0** (`@next`; protocol v2).
+The public types and helpers of `@lazorkit/sdk-legacy` **1.4.0** (`@next`; LazorKit Enterprise).
 
 ## Signer helpers
 
@@ -154,7 +154,7 @@ const actions = [
 const policy = serializeActions(actions);                     // a Delegate's policy bytes
 ```
 
-From the v2 program release that adds errors 3037 and 3038 (not deployed yet), an asset no
+From the Enterprise program release that adds errors 3037 and 3038 (not deployed yet), an asset no
 action names cannot leave the vault: SOL needs a `Sol*` action, rent the vault pays
 included, and each mint a `Token*` action; wSOL is a mint. See
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). When a
@@ -292,7 +292,7 @@ interface OwnershipProof {
 
 ```typescript
 interface PasskeyWalletCandidate {
-  version: 1 | 2;                  // 1 = pre-v2 wallet on the paired v1 deployment
+  version: 1 | 2;                  // 1 = pre-Enterprise wallet on the paired v1 deployment
   programId: PublicKey;
   walletPda: PublicKey;
   vaultPda: PublicKey;
@@ -473,7 +473,7 @@ Error ranges:
 | 3030–3032   | Vault and token-authority invariants              |
 | 3033–3035   | Ranks and policies                                |
 | 3036        | `SessionNotExpired`                               |
-| 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). From the v2 program release that adds them, not deployed yet |
+| 3037–3038   | An asset the policy does not name: SOL (3037), a mint (3038). From the Enterprise program release that adds them, not deployed yet |
 | 4001–4018   | Protocol fee and deployment errors, including 4018 `RetiredDeployment` |
 
 Full map in [Errors › Program error codes](/errors#program-error-codes).

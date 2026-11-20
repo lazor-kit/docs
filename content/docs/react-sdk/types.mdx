@@ -33,7 +33,7 @@ interface WalletInfo {
   readonly vaultPda?: string;
   readonly walletDevice: string;        // this passkey's authority PDA
   readonly accountName?: string;
-  /** 1 = made before LazorKit v2, 2 = since. Absent on records saved by 2.x (= v1). */
+  /** 1 = made before LazorKit Enterprise, 2 = since. Absent on records saved by 2.x (= v1). */
   readonly protocolVersion?: 1 | 2;
 }
 ```
@@ -53,7 +53,7 @@ interface LazorkitProviderProps {
   children: ReactNode;
   rpcUrl?: string;
   portalUrl?: string;
-  paymasterConfig?: PaymasterConfig;      // the relayer for v2 wallets
+  paymasterConfig?: PaymasterConfig;      // the relayer for Enterprise wallets
   v1PaymasterConfig?: PaymasterConfig;    // the relayer for v1 wallets (3.0.0+)
   cluster?: 'mainnet' | 'devnet';         // when rpcUrl does not say (3.0.0+)
   onConfirmWallet?: OnConfirmWallet;      // default 'builtin'
@@ -99,7 +99,7 @@ A wallet the passkey is proven to hold, offered for the user to recognise.
 interface WalletChoice {
   wallet: string;                      // wallet PDA — an internal account
   vault: string;                       // vault PDA — where the funds are. Show this one.
-  version: 1 | 2;                      // 1 = made before LazorKit v2, not migrated yet
+  version: 1 | 2;                      // 1 = made before LazorKit Enterprise, not migrated yet
   lamports: number;                    // vault balance
   signatureCount: number;              // 0 = not used with this passkey yet
   vaultIsSystemAccount: boolean;       // false: vault handed to another program
@@ -228,7 +228,7 @@ class KeyWalletMismatchError extends Error {
 type KeyWalletMismatchReason = 'no-wallet' | 'other-wallet' | 'unbound' | 'disconnected';
 
 // A session or Delegate send moving an asset its policy does not name (3.4.0+), from the
-// v2 program release that adds errors 3037 and 3038. Nothing in it ran.
+// Enterprise program release that adds errors 3037 and 3038. Nothing in it ran.
 type PolicySigner = 'session' | 'authority';           // exported type
 class UnlistedSolOutflowError extends Error {          // "This session is not allowed to spend SOL"
   readonly code: 3037;                                 // ActionUnlistedSolOutflow
@@ -467,7 +467,7 @@ interface TokenSpendingLimit {
 }
 ```
 
-An asset the limits do not name cannot leave the wallet, from the v2 program release that
+An asset the limits do not name cannot leave the wallet, from the Enterprise program release that
 adds errors 3037 and 3038 (not deployed yet; until then it is not bounded at all): with no
 SOL limit the session spends no SOL, rent the vault pays for a new account included, and
 it spends a token only with a `tokens` entry for its mint. wSOL is a mint of its own. See

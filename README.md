@@ -35,7 +35,7 @@ content/docs/
   index.mdx               Landing page
   protocol.mdx            Protocol overview (for investors and builders)
   networks.mdx            Program ids, package versions, what is deployed where
-  v1-to-v2.mdx            Protocol v1 and v2 side by side, the v1 sunset, MigrateWallet
+  v1-to-v2.mdx            Protocol and Enterprise compatibility (retains the existing URL)
 
   concepts/               Protocol deep-dives
     smart-wallet.mdx

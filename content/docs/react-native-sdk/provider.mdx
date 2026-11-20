@@ -21,7 +21,7 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 <Callout type="info" title="Devnet defaults">
   With no props, the provider connects to Solana devnet through `portal.lazor.sh` and
   LazorKit's devnet Kora paymaster at `kora.devnet.lazorkit.com`. Perfect for demos and
-  local development. Mainnet runs protocol v1 today: see [Networks & versions](/networks).
+  local development. Mainnet runs LazorKit Protocol today: see [Networks & versions](/networks).
 </Callout>
 
 ## Production setup
@@ -66,8 +66,8 @@ import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
 
 - **`rpcUrl`** — Any Solana RPC. Falsy values fall back to the Devnet default.
 - **`portalUrl`** — The WebAuthn-enabled web page the SDK opens via `expo-web-browser`. Self-hosters can point this at their own portal.
-- **`configPaymaster`** — Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as `x-api-key` on every request; it ships in your app, so it is not a secret.
-- **`v1ConfigPaymaster`** (2.0.0+) — the relayer for users whose wallet is still on LazorKit v1: the one your app used before v2. LazorKit's v2 relayer does not sponsor v1. See [Migrating from v1](/v1-to-v2).
+- **`configPaymaster`** — Kora JSON-RPC endpoint for Enterprise wallets. `apiKey` is sent as `x-api-key` on every request; it ships in your app, so it is not a secret.
+- **`v1ConfigPaymaster`** (2.0.0+) — the relayer for users whose wallet is still on LazorKit v1: the one your app used before v2. LazorKit's Enterprise relayer does not sponsor v1. See [Protocol and Enterprise compatibility](/v1-to-v2).
 - **`cluster`** (2.0.0+) — which cluster `rpcUrl` serves. Read from the URL (`mainnet`, `devnet`, `localhost`) otherwise, and anything unrecognised is taken as **mainnet**.
 - **`isDebug`** — Enables verbose logs via the built-in `logger`.
 
@@ -144,4 +144,4 @@ const isProd = !__DEV__;
 - Migrates records from the store's own format v0 (before April 2026, when `smartWallet`
   held the wallet PDA) to v1, where `smartWallet` is the vault. This is a storage format
   version, unrelated to the protocol version. A stored wallet without `protocolVersion`
-  is treated as protocol v1.
+  is treated as LazorKit Protocol.

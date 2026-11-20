@@ -61,7 +61,7 @@ runs per call, once the action is over, right before the promise settles; see
   On the web SDK, `smartWalletPubkey` is the wallet PDA the program uses to resolve
   authorities. The SOL-holding account is **`vaultPubkey`**. (The React Native SDK names
   them the other way round; `vaultPubkey` is the vault in both.) Do not derive the vault
-  with `findVaultPda`: it derives a v2 mainnet address, wrong for v1 wallets and devnet.
+  with `findVaultPda`: it derives a Enterprise mainnet address, wrong for v1 wallets and devnet.
 </Callout>
 
 ---
@@ -79,7 +79,7 @@ const wallet = await connect();
 - **No stored wallet:** the portal opens. `connect` proves the passkey, looks up its
   wallet on v1 and v2, and uses it on its own only when it is the one wallet this passkey
   has signed for and nothing else can spend from it; otherwise it asks the user. A passkey
-  with no wallet gets a new v2 wallet.
+  with no wallet gets a new Enterprise wallet.
 - **An existing passkey with no wallet** (made on another device or browser) costs **one
   extra prompt** (3.1.0+): its public key is recovered from two of its signatures, so the
   new wallet is created for the right key.
@@ -422,7 +422,7 @@ const { sessionPda, sessionPublicKey } = await createSession({
 **What the limits bound.** Name every asset the session may spend: a SOL limit for SOL
 (rent the vault pays for a new account counts), and a `tokens` entry for each mint, with at
 least one of `lifetimeCap`, `perTxMax` and `recurring: { limit, windowSlots }`. wSOL is a
-mint of its own. From the v2 program release that adds errors 3037 and 3038, an asset the
+mint of its own. From the Enterprise program release that adds errors 3037 and 3038, an asset the
 limits do not name cannot leave the wallet: SOL limits alone let the session spend no
 token, and token limits alone no SOL. That release is not deployed yet; until it is, an
 asset the limits do not name is not bounded at all. See
@@ -539,7 +539,7 @@ import { Actions, PublicKey, ROLE_ADMIN, ROLE_SPENDER, serializeActions } from '
 
 const USDC = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 
-// A Delegate: spends only within its policy, which a v2 wallet requires.
+// A Delegate: spends only within its policy, which a Enterprise wallet requires.
 // Up to 0.1 SOL and 5 USDC a transaction; no other token can leave.
 const { authorityPda, authorityPublicKey } = await addAuthority({
   role: ROLE_SPENDER,
@@ -559,7 +559,7 @@ what each rank may do:
 
 | Rank | Constant | May add and remove | Spends |
 | ---- | -------- | ------------------ | ------ |
-| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
+| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. `addAuthority` does not pass `allowOwner`, so on a Enterprise wallet it refuses this rank before anything is read or prompted. On a v1 wallet it adds one. |
 | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit: no policy, no expiry, until `removeAuthority` |
 | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
 
@@ -568,7 +568,7 @@ For a key your app holds, use `ROLE_SPENDER` with a `policy`.
 | Field          | Type         | Notes |
 | -------------- | ------------ | ----- |
 | `role`         | `number`     | Required. `ROLE_SPENDER` (Delegate), `ROLE_ADMIN`, or `ROLE_OWNER` on a v1 wallet only. |
-| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a v2 wallet; refused for any other rank and on v1. It names what may leave the wallet ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Keep it within 244 bytes: `addAuthority` does not check its size, and a policy that does not fit fails after the user approved. |
+| `policy`       | `Uint8Array` | Required for `ROLE_SPENDER` on a Enterprise wallet; refused for any other rank and on v1. It names what may leave the wallet ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)). Keep it within 244 bytes: `addAuthority` does not check its size, and a policy that does not fit fails after the user approved. |
 | `unrestricted` | `boolean`    | Required to add a key to a **v1** wallet, where any added key can spend the whole vault. Ignored on v2. |
 
 **Returns** `Promise<{ authorityPda: string; authorityPublicKey: string }>`. See
@@ -614,13 +614,11 @@ Removing the authority whose key the SDK keeps also deletes that key.
 
 ---
 
-## v1 wallets
+## Protocol wallets
 
-`protocolVersion` is `1` for a wallet made before LazorKit v2. Every method routes to the
-v1 program for it, through `v1PaymasterConfig`. After LazorKit retires v1, its actions
-reject with `V1WalletRetiredError` (4018): the funds are safe and the wallet must move to
-v2. A stored v1 wallet that has been migrated rejects with `V1WalletMigratedError`; call
-`connect` again. See [Migrating from v1](/v1-to-v2).
+The SDK reports `protocolVersion: 1` for LazorKit Protocol wallets and routes their
+actions through `v1PaymasterConfig`. Existing Protocol wallets continue to use the Protocol
+program. See [Protocol and Enterprise compatibility](/v1-to-v2).
 
 ---
 
@@ -645,5 +643,5 @@ const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET);
 const authorities = await client.findAuthoritiesByWallet(new PublicKey('WALLET_PDA_BASE58'));
 ```
 
-The PDA helpers derive **v2** addresses (at the v2 mainnet id unless you pass a program
+The PDA helpers derive **v2** addresses (at the Enterprise mainnet id unless you pass a program
 id); never use them to derive a user's address.

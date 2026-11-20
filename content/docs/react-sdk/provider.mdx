@@ -43,7 +43,7 @@ Defaults: Solana devnet, `portal.lazor.sh`, LazorKit's devnet Kora paymaster.
 </LazorkitProvider>
 ```
 
-Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
+Mainnet runs LazorKit Protocol today and the Enterprise mainnet program is not deployed: see
 [Networks & versions](/networks) before you point an app at mainnet.
 
 ## Props
@@ -66,12 +66,12 @@ Mainnet runs protocol v1 today and the v2 mainnet program is not deployed: see
   credential id, passkey public key and wallet address to this URL's origin only, and
   posts nothing when it has none (3.3.1+; earlier releases posted them to whatever page
   the dialog's iframe showed).
-- **`paymasterConfig`** — the Kora JSON-RPC endpoint for v2 wallets. `apiKey` is sent as
+- **`paymasterConfig`** — the Kora JSON-RPC endpoint for Enterprise wallets. `apiKey` is sent as
   `x-api-key`; it ships in your bundle, so it is not a secret.
 - **`v1PaymasterConfig`** — the relayer for users whose wallet is still on LazorKit v1:
-  the one your app used before v2. LazorKit's v2 relayer does not sponsor v1, so set this
-  whenever `paymasterConfig` points at a v2 relayer and you have v1 users. See
-  [Migrating from v1](/v1-to-v2).
+  the one your app used before v2. LazorKit's Enterprise relayer does not sponsor v1, so set this
+  whenever `paymasterConfig` points at a Enterprise relayer and you have v1 users. See
+  [Protocol and Enterprise compatibility](/v1-to-v2).
 - **`cluster`** — which cluster `rpcUrl` serves. The SDK reads it from the URL
   (`mainnet`, `devnet`, `localhost`) and takes anything else as **mainnet**. Set it for your
   own RPC proxy or a keyed provider URL that does not name the cluster.

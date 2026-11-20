@@ -3,7 +3,7 @@ title: Upgrading to 2.x
 description: What changes when you move @lazorkit/wallet-mobile-adapter from 1.x or the 2.0.0 betas to 2.x, release by release.
 ---
 
-`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that speaks protocol v2. 2.4.0 is
+`@lazorkit/wallet-mobile-adapter` 2.0.0 is the release that supports LazorKit Enterprise. 2.4.0 is
 the current release. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md)
 and the [Changelog](/changelog) here.
@@ -32,10 +32,10 @@ Expo SDKs have not been tested.
    `unrestricted: true`.
 3. **Authorities need a role, and Delegates a policy.** `addAuthorityEd25519` has no
    default role (since 2.3.0: see [below](#upgrading-to-230)). `role: ROLE_SPENDER`
-   (Delegate) on a v2 wallet throws without `policy: serializeActions([...])`. On a v1
+   (Delegate) on a Enterprise wallet throws without `policy: serializeActions([...])`. On a v1
    wallet it requires `unrestricted: true` and refuses a policy.
 4. **v1 users need their relayer:** set `v1ConfigPaymaster` when `configPaymaster` points
-   at a v2 relayer. See [Migrating from v1](/v1-to-v2).
+   at a Enterprise relayer. See [Protocol and Enterprise compatibility](/v1-to-v2).
 5. **RPC URLs that do not name a cluster** need the `cluster` prop.
 6. **`connect` may ask the user**, with a chooser drawn as a React Native `Modal`. On iOS
    it cannot appear over another modal: see
@@ -58,14 +58,14 @@ Expo SDKs have not been tested.
 11. **Check message signatures with `verifyWalletMessage`** (2.3.1), which reads the
     passkey's key from chain. See [below](#upgrading-to-231).
 12. **Name every mint a session or Delegate spends** (2.4.0), with an `Actions.token*`
-    action. From the v2 program release that adds errors 3037 and 3038, an asset the
+    action. From the Enterprise program release that adds errors 3037 and 3038, an asset the
     actions do not name cannot leave the wallet. See [below](#upgrading-to-240).
 
 ## Release by release
 
 | Release | What changes for you |
 | ------- | -------------------- |
-| **2.0.0** (2026-09-29) | Protocol v2 beside v1, routed per wallet: `protocolVersion`, `v1ConfigPaymaster`, `cluster`, `V1WalletRetiredError`, `V1WalletMigratedError`. Wallet confirmation: `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints`, `<WalletChooser />`, `WalletChooserNotShownError`, `PortalCancelledError`. A signing action always rejects on failure (it could resolve `undefined`). The breaking items above. |
+| **2.0.0** (2026-09-29) | LazorKit Enterprise beside v1, routed per wallet: `protocolVersion`, `v1ConfigPaymaster`, `cluster`, `V1WalletRetiredError`, `V1WalletMigratedError`. Wallet confirmation: `onConfirmWallet`, `confirmWallet`, `trustedAuthorities`, `watchMints`, `<WalletChooser />`, `WalletChooserNotShownError`, `PortalCancelledError`. A signing action always rejects on failure (it could resolve `undefined`). The breaking items above. |
 | **2.1.0** (2026-09-30) | Sends resolve once confirmed (polling, no websocket); new errors `TransactionFailedError`, `TransactionExpiredError`, `TransactionOutcomeUnknownError`, `ConfirmationTimeoutError`, `PreviousTransactionPendingError`, `SignatureReusedError`, `PaymasterError`. Passkey transactions are sequenced. A passkey with no wallet can connect (key recovered from two signatures, one extra prompt). Large previews use the lookup tables instead of failing before the portal. `expo-web-browser` 15 accepted. |
 | **2.2.0** (2026-09-30) | Callbacks run after `isSigning` clears; a send from `onSuccess` runs. Deferred window: `expiryOffset` 10–9000, default 1500 (was 300). `DeferredExpiredError` and its helpers. |
 | **2.2.1** (2026-10-01) | An inner program's 3014 is no longer reported as `DeferredExpiredError`; `isDeferredExpiredError` is true for every `DeferredExpiredError`; `DeferredFailureContext`. |
@@ -93,7 +93,7 @@ section (2.3.0) shows this with `expo-secure-store`.
 From 2.3.1. Nothing was removed, and no call changes shape. Full notes: the package
 [CHANGELOG](https://github.com/lazor-kit/lazor-kit/blob/main/packages/react-native/CHANGELOG.md#240).
 
-1. **Name every mint a session spends.** From the v2 program release that adds errors 3037
+1. **Name every mint a session spends.** From the Enterprise program release that adds errors 3037
    and 3038, a session's `actions` (and a Delegate's `policy`) name what may leave the
    wallet, and nothing else may: SOL leaves only with an `Actions.sol*` action, rent the
    vault pays for a new account included, and a token only with an `Actions.token*` action
@@ -153,7 +153,7 @@ From 2.2.x. Full notes: the package
 1. **`addAuthorityEd25519` needs a `role` (breaking).** There is no default any more. A
    call without `role` does not compile, and at runtime a missing role, or one that is
    not `ROLE_OWNER`, `ROLE_ADMIN` or `ROLE_SPENDER`, throws before the portal opens. So
-   does `ROLE_OWNER` on a v2 wallet, where the adapter never adds an Owner.
+   does `ROLE_OWNER` on a Enterprise wallet, where the adapter never adds an Owner.
    Migration: `addAuthorityEd25519({ newEd25519Pubkey, role: ROLE_SPENDER, policy }, options)`
    keeps 2.2.1's behaviour. Ranks:
    [useWallet › addAuthorityEd25519](/react-native-sdk/use-wallet#addauthorityed25519).
