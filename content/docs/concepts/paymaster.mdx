@@ -15,7 +15,7 @@ The Paymaster is the entity that sponsors gas for LazorKit transactions. It acts
   The developer's `fee_payer` pubkey is tracked in `FeeRecord` — that's the basis for early contributor rewards at token launch. **If you sponsor your users' fees, you earn.**
 </Callout>
 
-This page describes protocol v2 (devnet today; see [Networks & versions](/networks)).
+This page describes LazorKit Enterprise (devnet today; see [Networks & versions](/networks)).
 
 ---
 
@@ -51,7 +51,7 @@ fee is deducted from the transaction's `fee_payer` — the Paymaster, not the en
   fee-paying transaction: the SDK prepends a permissionless `RegisterPayer` instruction
   (about 0.00112 SOL of rent, paid by the payer, once), and the program also creates the
   canonical record inline when a client passes it uncreated. A record at any other address
-  is refused (`InvalidFeeRecord`, 4011). In protocol v1, only payers registered beforehand
+  is refused (`InvalidFeeRecord`, 4011). In LazorKit Protocol, only payers registered beforehand
   were tracked.
 - **The fee accounts are mandatory.** The three instructions must carry the four fee
   accounts even when no fee is charged; without them the program answers
@@ -123,7 +123,7 @@ Future: a parallel tracking mechanism may be added for end users, so that users 
 
 8-byte account. SOL accumulates as lamport balance. Created once per shard via `InitializeTreasuryShard`.
 
-Protocol v1 used the same seeds without the `lk2:` prefix.
+LazorKit Protocol used the same seeds without the `lk2:` prefix.
 
 ---
 
@@ -177,7 +177,7 @@ endpoint: `paymasterConfig` (web) / `configPaymaster` (mobile), default
   rejects with `TransactionOutcomeUnknownError`. A send request may take 90 s, other
   calls 30 s.
 - **v1 wallets** need a relayer that sponsors the v1 program: `v1PaymasterConfig` (web) /
-  `v1ConfigPaymaster` (mobile). LazorKit's v2 relayer does not, by design: sponsoring the
+  `v1ConfigPaymaster` (mobile). LazorKit's Enterprise relayer does not, by design: sponsoring the
   full v1 program lets any v1 transaction pull the fee payer into its inner calls.
 
 `feeToken` is forwarded to the relayer as `fee_token` by the React Native SDK only; the
@@ -185,25 +185,23 @@ web SDK (3.4.0) ignores it. LazorKit's relayer sponsors for free.
 
 ### Running your own Kora
 
-Configuration for the v2 programs, with the reasoning for each value, is in
-[`deploy/kora`](https://github.com/lazor-kit/lazorkit-protocol/tree/develop/deploy/kora)
-in the protocol repo. In short:
+Configuration for the Enterprise programs, with the reasoning for each value, is in
+`deploy/kora` in the Enterprise repository. In short:
 
-- `allowed_programs` must include the LazorKit v2 program id **and** the Secp256r1
+- `allowed_programs` must include the LazorKit Enterprise program id **and** the Secp256r1
   precompile (`Secp256r1SigVerify1111111111111111111111111`), plus whatever your users'
   transactions call.
 - `require_one_of_programs` set to the LazorKit program, so the relayer refuses
   transactions that never touch it.
 - `system.allow_transfer` and `system.allow_create_account` stay `true`: the program pays
   rent and the protocol fee through System CPIs with the fee payer as source.
-- Add the v1 id only once it runs the sunset binary.
 
 ---
 
 ## Current Status
 
-- Protocol v1's fee system is live on Solana mainnet.
-- Protocol v2's fee system is deployed on devnet, with no fee configured yet; the v2
+- LazorKit Protocol's fee system is live on Solana mainnet.
+- LazorKit Enterprise's fee system is deployed on devnet, with no fee configured yet; the v2
   mainnet program is not deployed.
 - Fee collection operates in native SOL.
 - Protocol token for governance and fee settlement is not yet deployed.

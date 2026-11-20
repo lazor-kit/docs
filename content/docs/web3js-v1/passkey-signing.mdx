@@ -3,7 +3,7 @@ title: Passkey signing
 description: The prepare / finalize flow, turning a WebAuthn assertion into a WebAuthnResponse, challenge-read options (minContextSlot, commitment), one flow per authority, and recovering a passkey's public key.
 ---
 
-Everything here is `@lazorkit/sdk-legacy` **1.x** (protocol v2): install it with
+Everything here is `@lazorkit/sdk-legacy` **1.x** (LazorKit Enterprise): install it with
 `npm install @lazorkit/sdk-legacy@next`. The challenge-read options and key recovery are
 in **1.3.0** and later, the tagged message and ownership challenges in **1.4.0**.
 `@lazorkit/sdk` (kit) has the same API with kit types (the tagged challenges since
@@ -192,7 +192,7 @@ to sign again.
 
 ## A passkey with no wallet, whose key you do not hold
 
-Every passkey starts without a v2 wallet. Signing in gives you an assertion, which carries
+Every passkey starts without a Enterprise wallet. Signing in gives you an assertion, which carries
 no public key, and `createWallet` needs one. A key taken from anywhere else (a portal's
 storage, a deep link) may be another passkey's, and a wallet created for it can never sign:
 whatever is sent to its vault is stuck.

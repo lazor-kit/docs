@@ -22,7 +22,7 @@ import {
 function describe(e: unknown): string {
   if (e instanceof TransactionOutcomeUnknownError) return 'Not sure it landed: check before sending again';
   if (e instanceof SignatureReusedError) return 'Please approve again';
-  if (e instanceof V1WalletRetiredError) return 'Move this wallet to v2';
+  if (e instanceof V1WalletRetiredError) return 'Check the wallet program and network';
   return 'Something went wrong';
 }
 ```
@@ -86,7 +86,7 @@ How sends are confirmed and sequenced:
 
 ## Assets a policy does not name
 
-From the v2 program release that adds errors 3037 and 3038, a session's actions and a
+From the Enterprise program release that adds errors 3037 and 3038, a session's actions and a
 Delegate's policy name what may leave the wallet, and nothing else may. That release is not
 deployed yet ([Networks & versions](/networks)); see
 [Session Keys › What a policy bounds](/concepts/session-keys#what-a-policy-bounds). Exported
@@ -190,8 +190,8 @@ kept and when they are deleted:
 
 | Error | Thrown when | What to do |
 | ----- | ----------- | ---------- |
-| `V1WalletRetiredError` (`code: 4018`) | The wallet is on LazorKit v1, which has been retired to its sunset binary. Its funds are safe. | Move it with `migrateV1Wallet` or the LazorKit migration page. See [Migrating from v1](/v1-to-v2). |
-| `V1WalletMigratedError` | The stored v1 wallet no longer exists: it was migrated (or closed). | Call `connect` again; it picks up the passkey's v2 wallet. |
+| `V1WalletRetiredError` (`code: 4018`) | The program returned a retired-deployment response. | Check the program ID and network against [Protocol and Enterprise compatibility](/v1-to-v2). |
+| `V1WalletMigratedError` | The stored v1 wallet no longer exists: it was migrated (or closed). | Call `connect` again; it picks up the passkey's Enterprise wallet. |
 
 A 4018 is never resent: the call fails on the paymaster's first answer. Both SDKs report
 a v1 wallet's 4018 as `V1WalletRetiredError`, with the original error as its `cause`. A web `Paymaster` you call directly throws
@@ -210,8 +210,8 @@ a v1 wallet's 4018 as `V1WalletRetiredError`, with the original error as its `ca
 | --------- | ----- | ----- |
 | `createSession` (all SDKs) | `Error` | No limits and no `unrestricted: true`. A session without actions can spend the whole vault. |
 | `createSession` (web, 3.4.0+) | `Error`, `TypeError`, `RangeError` | `spendingLimits` it cannot register: a `tokens` entry with no limit, or whose `mint` is not an address; a mint named twice; an amount outside a u64; a window of 0 slots; more than 16 actions; more than 244 bytes of actions, which would not fit in the transaction beside the passkey's response. Checked before anything is read, also for a `sessionKey` that already has a session. |
-| `addAuthority` / `addAuthorityEd25519` | `Error` | No `role`, or one that is not `ROLE_OWNER` (0), `ROLE_ADMIN` (1) or `ROLE_SPENDER` (2); `ROLE_OWNER` on a v2 wallet, where neither method adds an Owner (on v1 they do). The message says what each rank may do. Checked before anything is read. |
-| `addAuthority` / `addAuthorityEd25519` | `Error` | `ROLE_SPENDER` (Delegate) on a v2 wallet without a `policy`; a `policy` on a v1 wallet; a v1 wallet without `unrestricted: true`. |
+| `addAuthority` / `addAuthorityEd25519` | `Error` | No `role`, or one that is not `ROLE_OWNER` (0), `ROLE_ADMIN` (1) or `ROLE_SPENDER` (2); `ROLE_OWNER` on a Enterprise wallet, where neither method adds an Owner (on v1 they do). The message says what each rank may do. Checked before anything is read. |
+| `addAuthority` / `addAuthorityEd25519` | `Error` | `ROLE_SPENDER` (Delegate) on a Enterprise wallet without a `policy`; a `policy` on a v1 wallet; a v1 wallet without `unrestricted: true`. |
 | `authorizeAndExecute` / `authorizeDeferred` | `RangeError` | `expiryOffset` outside 10–9000 slots. |
 | `new LazorKitClient(connection)` (sdk-legacy) | `Error` | The RPC URL names no cluster. Pass a program id. |
 | `migrateV1Wallet` | `Error` | The client was built at a v1 id, or the destination failed its vet. |
@@ -301,7 +301,7 @@ These apply to session keys and to Delegate authorities, which run the same acti
 | 3034 | `0xbda` | `PolicyBearingAuthorityCannotDelegate` | An authority with a policy tried to add an authority. |
 | 3035 | `0xbdb` | `PolicyRankMismatch` | A policy was attached to an Owner or Admin. Only Delegates carry one. |
 | 3036 | `0xbdc` | `SessionNotExpired` | `CloseExpiredSession` on a session that is still live. |
-| 3037 | `0xbdd` | `ActionUnlistedSolOutflow` | The vault's SOL would fall, rent for a new account included, and the policy has no `Sol*` action. From the v2 program release that adds it, not deployed yet. See `UnlistedSolOutflowError`. |
+| 3037 | `0xbdd` | `ActionUnlistedSolOutflow` | The vault's SOL would fall, rent for a new account included, and the policy has no `Sol*` action. From the Enterprise program release that adds it, not deployed yet. See `UnlistedSolOutflowError`. |
 | 3038 | `0xbde` | `ActionUnlistedTokenOutflow` | The vault's balance of a mint would fall, and no `Token*` action names that mint (wSOL is a mint). From the same release. See `UnlistedTokenOutflowError`. |
 
 ### Protocol and deployment (4001–4018)

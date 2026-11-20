@@ -338,7 +338,7 @@ when the prompt opened. Prepare again.
 
 "This session is not allowed to spend SOL" ("This key …" for a Delegate). The transaction
 would have lowered the wallet's SOL balance, and the session's limits (the Delegate's
-policy) name no SOL. Only the v2 program release that adds errors 3037 and 3038 returns it;
+policy) name no SOL. Only the Enterprise program release that adds errors 3037 and 3038 returns it;
 that release is not deployed yet ([Networks & versions](/networks)). Nothing in the
 transaction ran, and the SDK does not resend it. Causes:
 
@@ -436,7 +436,7 @@ a non-success HTTP status.
 - **Unauthorized / 401**: the relayer requires an API key (`apiKey`, sent as
   `x-api-key`) or another check (reCAPTCHA) your app does not pass.
 - **Program not allowed**: the relayer's `allowed_programs` lacks the LazorKit program for
-  this wallet's protocol, or the Secp256r1 precompile. LazorKit's v2 relayer does not
+  this wallet's protocol, or the Secp256r1 precompile. LazorKit's Enterprise relayer does not
   sponsor v1 wallets: set `v1PaymasterConfig` / `v1ConfigPaymaster`.
 - **Simulation failed**: the instruction set reverts. `data` usually holds the program
   logs; see [Errors › Program error codes](/errors#program-error-codes).
@@ -497,14 +497,12 @@ await signAndSendTransaction(
 
 ### `V1WalletRetiredError` / `0xfb2` (4018)
 
-The wallet is on LazorKit v1, and v1 has been retired to its sunset binary. The funds are
-safe; the wallet must move to v2 with `migrateV1Wallet` or the LazorKit migration page.
-See [Migrating from v1](/v1-to-v2).
+This error means the program endpoint explicitly reported a retired deployment. Check the selected network, program ID, and wallet. See [Protocol and Enterprise compatibility](/v1-to-v2).
 
 ### `V1WalletMigratedError`
 
 The stored v1 wallet was migrated (or closed). Call `connect` again; it finds the
-passkey's v2 wallet.
+passkey's Enterprise wallet.
 
 ### `FeeAccountsRequired` / `0xfa8` (4008)
 
@@ -515,7 +513,7 @@ the v2 release, or building instructions by hand: use the `LazorKitClient` metho
 
 ### `InvalidMessageHash` / `0xbbd` (3005) on every passkey transaction
 
-The v2 program names the wallet in the passkey challenge. A client that builds the
+The Enterprise program names the wallet in the passkey challenge. A client that builds the
 challenge without it (an SDK from before that change, or a hand-built flow without the
 `wallet` argument) fails every passkey transaction with 3005. Upgrade to the current
 packages.
@@ -528,7 +526,7 @@ SDKs take the `cluster` prop instead (they treat an unknown URL as mainnet).
 
 ### A new user cannot get a wallet on mainnet
 
-New wallets are created on protocol v2, whose mainnet program is not deployed yet. See
+New wallets are created on LazorKit Enterprise, whose mainnet program is not deployed yet. See
 [Networks & versions](/networks).
 
 ---

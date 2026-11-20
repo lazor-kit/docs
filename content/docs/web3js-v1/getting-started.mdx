@@ -20,8 +20,8 @@ Ship the core flows with `@lazorkit/sdk-legacy`. Every `client.*` call returns
 npm install @lazorkit/sdk-legacy@next @solana/web3.js
 ```
 
-`@next` matters: the `latest` tag is 0.3.2, the protocol v1 line, which has none of the
-APIs on this page. Protocol v2 runs on devnet today; see [Networks & versions](/networks).
+`@next` matters: the `latest` tag is 0.3.2, the LazorKit Protocol line, which has none of the
+APIs on this page. LazorKit Enterprise runs on devnet today; see [Networks & versions](/networks).
 
 ---
 
@@ -169,7 +169,7 @@ can fail with `SignatureReused` (3006) — see
 ## 4. Look up a returning user
 
 <Callout type="warn" title="Version note">
-  This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (protocol v2; `next`
+  This section describes `@lazorkit/sdk-legacy` **1.2.0** and later (LazorKit Enterprise; `next`
   is 1.4.0). `0.3.x` (`latest`) and `1.1.x` have no `findOwnPasskeyWallet`. The warning
   below applies to every version.
 </Callout>
@@ -293,7 +293,7 @@ that mint to the vault's address lands in it. The SDK checks the canonical accou
 wSOL, USDC, USDT and devnet USDC, plus every mint in `watchMints` — pass the mints your app
 receives. For any other mint such a wallet looks spotless.
 
-Why "the one": the v2 program names the wallet in the passkey challenge, so a signature
+Why "the one": the Enterprise program names the wallet in the passkey challenge, so a signature
 made now verifies only on the wallet it was made for. v1 never did, nor did v2 before that
 change: whoever planted a wallet for a passkey could take the signature from the user's
 first `CreateSession`, `AddAuthority`, `TransferOwnership` or `Authorize` and submit it
@@ -309,9 +309,9 @@ have been signed for, neither is adopted and the user chooses.
   included. Either way they are ignored — so both lists empty means no wallet is
   **proven**, and you create one only once the proof verifies against the new wallet's key,
   as above.
-- `version: 1` is a pre-v2 wallet on the v1 deployment paired with your program id
+- `version: 1` is a pre-Enterprise wallet on the v1 deployment paired with your program id
   (`includeV1: false` skips it); its funds have not been migrated yet — move them with
-  `migrateV1Wallet` ([Migrating from v1](/v1-to-v2)). It gets no precedence of its own: when exactly one wallet has been
+  `migrateV1Wallet` ([Protocol and Enterprise compatibility](/v1-to-v2)). It gets no precedence of its own: when exactly one wallet has been
   signed for and nothing untrusted can spend from it, that one is adopted, v1 or v2.
 - `needsConfirmation` is ordered signed-for first, then — among wallets equally signed
   for, or not — v1 before v2, then the fuller vault, then the wallet address. Anyone can
@@ -384,7 +384,7 @@ const { instructions } = await client.transferSol({
 ```typescript
 import {
   PROGRAM_ID_DEVNET,     // v2 devnet:  57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv
-  PROGRAM_ID_MAINNET,    // v2 mainnet: LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8 (not deployed yet)
+  PROGRAM_ID_MAINNET,    // Enterprise mainnet: LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8 (not deployed yet)
   PROGRAM_ID_DEVNET_V1,  // v1 devnet:  4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS
   PROGRAM_ID_MAINNET_V1, // v1 mainnet: LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi
 } from '@lazorkit/sdk-legacy';

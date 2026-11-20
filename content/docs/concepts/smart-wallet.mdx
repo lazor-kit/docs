@@ -7,8 +7,8 @@ A LazorKit smart wallet is a cluster of on-chain accounts controlled by the Lazo
 program. The owner authenticates via WebAuthn (passkey) or Ed25519 — no seed phrase,
 no browser extension, no private key storage in your app.
 
-This page describes protocol v2 (devnet today; mainnet pending — see
-[Networks & versions](/networks)). Where v1 differs, it says so.
+This page describes LazorKit Enterprise (devnet today; mainnet undeployed — see
+[Networks & SDK compatibility](/networks)). Where v1 differs, it says so.
 
 <Callout type="warn" title="Two PDAs — and the SDKs name them differently">
   The **vault PDA** holds SOL and tokens. It is the address users see, share and receive
@@ -229,7 +229,7 @@ That includes the user's own wallet before its first transaction: it has never b
 signed for, so **the user confirms it once**, and after its first transaction it is used
 without asking.
 
-Why "the one": the v2 program names the wallet in the passkey challenge, so a signature
+Why "the one": the Enterprise program names the wallet in the passkey challenge, so a signature
 made now verifies only on the wallet it was made for. v1 never did, nor did v2 before that
 change, and counters raised then are still on chain — a user's signature could have been
 replayed onto a planted wallet. When two wallets have been signed for, neither is adopted.
@@ -263,8 +263,8 @@ session expires, **anyone** may close it with `CloseExpiredSession` and keep its
 
 ### Move from v1
 
-A v1 wallet moves its funds to a v2 wallet with one Owner-signed `MigrateWallet`. See
-[Migrating from v1](/v1-to-v2).
+A v1 wallet moves its funds to a Enterprise wallet with one Owner-signed `MigrateWallet`. See
+[Protocol and Enterprise compatibility](/v1-to-v2).
 
 ---
 
@@ -277,7 +277,7 @@ A v1 wallet moves its funds to a v2 wallet with one Owner-signed `MigrateWallet`
 | Execute (per tx)               | 0.000005 SOL  |
 | Session setup (one-time)       | 0.001453 SOL  |
 
-Network fees and rent, measured on protocol v1 and not re-measured on v2. In v2, a fee
+Network fees and rent, measured on LazorKit Protocol and not re-measured on v2. In v2, a fee
 payer's first fee-paying transaction also creates its `FeeRecord` (about 0.00112 SOL of
 rent, once), and each `CreateWallet` / `Execute` / `ExecuteDeferred` pays the protocol fee
 when one is configured (none on devnet today). A Delegate's policy adds its bytes to the

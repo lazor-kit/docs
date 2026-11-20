@@ -11,11 +11,10 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   Start with the [Protocol Overview](/protocol) to understand how the system works end-to-end, then pick the SDK that fits your stack.
 </Callout>
 
-<Callout type="warn" title="Where things stand (2026-10-02)">
-  Mainnet runs **protocol v1**. Protocol v2 — what the current SDK releases speak — is
-  live on **devnet**; the v2 mainnet program is not deployed yet. Existing v1 wallets keep
-  working through the current React and React Native SDKs. Program ids, package versions
-  and what works where: [Networks & versions](/networks).
+<Callout type="info" title="Choose your deployment">
+  **LazorKit Protocol** powers production wallets on Solana mainnet.
+  **LazorKit Enterprise** is a separate program available on devnet.
+  See [Networks & SDK compatibility](/networks) for program IDs and SDK versions.
 </Callout>
 
 ---
@@ -68,14 +67,14 @@ LazorKit is an execution layer for Solana. It handles **passkey authentication**
   />
   <Card
     icon={<Network />}
-    title="Networks & versions"
+    title="Networks & SDK compatibility"
     description="Program ids, which package speaks which protocol, and which address is the user's wallet."
     href="/networks"
   />
   <Card
     icon={<ArrowRightLeft />}
-    title="Migrating from v1"
-    description="v1 and v2 side by side, the v1 sunset, and moving a wallet with MigrateWallet."
+    title="Protocol and Enterprise"
+    description="Choose the right product, integration, and deployment."
     href="/v1-to-v2"
   />
   <Card

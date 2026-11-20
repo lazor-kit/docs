@@ -15,7 +15,7 @@ A permissioned execution layer that defines who can execute, how execution happe
 - **Session keys** — scoped, time-bound delegation keys that let apps or agents act on a user's behalf without repeated signing prompts
 - **Paymaster** — a gas abstraction service that sponsors or routes transaction fees, so users never need to hold SOL to interact
 - **Programmable execution** — ranks define who can manage a wallet; spending policies and session actions define what a delegated key can do, to which programs, up to what value, and for how long
-- **Live on Solana** — protocol v1 runs on mainnet, with Seedless (passkey onboarding) in production; protocol v2 runs on devnet, and its mainnet deployment is pending (see [Networks & versions](/networks))
+- **Live on Solana** — LazorKit Protocol serves production wallets on mainnet. Enterprise is a separate devnet deployment. See [Networks & SDK compatibility](/networks).
 
 ---
 
@@ -74,6 +74,10 @@ LazorKit is the layer that makes this possible.
 ---
 
 ## How LazorKit Works
+
+The instruction and account examples below describe the Enterprise implementation.
+For a production Protocol integration, use the client and program ID listed in
+[Networks & SDK compatibility](/networks).
 
 ### Path A — Direct execution (user)
 
@@ -135,7 +139,7 @@ LazorKit is the layer that makes this possible.
   </Step>
   <Step>
     ### LazorKit program validates on-chain
-    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? From the v2 program release that adds errors 3037 and 3038 (not deployed yet), does it move SOL or a token the session's actions do not name ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds))? Any failing check rejects the transaction.
+    The program checks: is the session key registered on this wallet? Has it expired? Does the instruction target an allowed program? Does it exceed any spending limit? From the Enterprise program release that adds errors 3037 and 3038 (not deployed yet), does it move SOL or a token the session's actions do not name ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds))? Any failing check rejects the transaction.
   </Step>
   <Step>
     ### Protocol fee is collected
@@ -215,7 +219,7 @@ LazorKit does not take a cut from app-level revenue. The developer keeps everyth
 - One Paymaster configuration, fixed fee schedule
 - Fees charged on `CreateWallet`, `Execute` and `ExecuteDeferred` when the protocol fee is configured; when it is not, collection is skipped rather than failing the transaction
 - Each fee is capped at 0.01 SOL on chain
-- In protocol v2 every paying `fee_payer` gets a `FeeRecord` automatically: the SDK prepends a permissionless `RegisterPayer` to its first fee-paying transaction (protocol v1 tracked only payers registered beforehand)
+- In LazorKit Enterprise every paying `fee_payer` gets a `FeeRecord` automatically: the SDK prepends a permissionless `RegisterPayer` to its first fee-paying transaction (LazorKit Protocol tracked only payers registered beforehand)
 
 ### Future model
 
@@ -227,11 +231,11 @@ LazorKit does not take a cut from app-level revenue. The developer keeps everyth
 
 ## Current Status
 
-LazorKit **protocol v1** is live on Solana mainnet. In production:
+LazorKit **LazorKit Protocol** is live on Solana mainnet. In production:
 
 - **[Seedless](https://www.seedlesslabs.xyz)** — a passkey wallet built on LazorKit, with gasless onboarding. Users create a smart wallet with biometrics in under 10 seconds.
 
-**Protocol v2** — ranks and policies, several Owners per wallet, a passkey challenge that names the wallet, `CloseExpiredSession`, and `MigrateWallet` for moving v1 wallets — runs on devnet at its own program id. It also carries the fixes from the 2026 audit of the program: fee collection that can no longer freeze funds, passkey authentication that refuses to run through another program, rank checked separately from spending, and a fee payer that inner calls cannot conscript. Its mainnet program is not deployed yet. After it is, the v1 program will be retired to a sunset binary that only lets wallets move out. See [Networks & versions](/networks) and [Migrating from v1](/v1-to-v2).
+**LazorKit Enterprise** is a separate program, currently on devnet. Its authorization model and SDK compatibility are documented separately in [Networks & SDK compatibility](/networks).
 
 ---
 

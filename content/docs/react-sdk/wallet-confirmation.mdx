@@ -29,7 +29,7 @@ keeping a way into its vault.
    [`onConfirmWallet`](#onconfirmwallet).
 4. **Creates a new (v2) wallet** only when the passkey holds none, for the passkey's own
    key ([below](#a-passkey-that-has-no-wallet-yet)). A wallet it just created is saved as
-   it is, never looked up again. Until the v2 program is deployed on mainnet, this step
+   it is, never looked up again. Until the Enterprise program is deployed on mainnet, this step
    fails there ([Networks & versions](/networks)).
 
 A stored wallet is used as stored; none of this runs for it, or for signing. If the chain
@@ -38,7 +38,7 @@ a wallet by mistake. The lookup uses `getProgramAccounts`, so `rpcUrl` must allo
 
 ### A passkey that has no wallet yet
 
-Every passkey starts without a v2 wallet, including one the user made long ago on another
+Every passkey starts without a Enterprise wallet, including one the user made long ago on another
 device or browser. Signing in never reveals a passkey's public key, so the portal reports
 the key it has stored for that passkey: none for a passkey made elsewhere, and possibly
 another passkey's. A wallet created for a key the passkey does not hold could never sign,
@@ -70,7 +70,7 @@ is never used without asking — even when it is the only one, and even with
 - after the wallet's first transaction, it is used on its own.
 
 The user is also asked whenever the passkey has signed for **two** wallets: signatures
-made before the v2 program bound the wallet into the passkey challenge could be replayed
+made before the Enterprise program bound the wallet into the passkey challenge could be replayed
 onto a planted copy, so either count may be the copy.
 
 Why a never-used wallet cannot be trusted by looking at it: its earlier holder could have

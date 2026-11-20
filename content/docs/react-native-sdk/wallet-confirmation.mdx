@@ -29,7 +29,7 @@ on" at face value.
    [`onConfirmWallet`](#onconfirmwallet).
 4. **Creates a new (v2) wallet** only when the passkey is proven on no live wallet, for the
    passkey's own key ([below](#a-passkey-that-has-no-wallet-yet)). It is saved as created,
-   never looked up again. Until the v2 program is deployed on mainnet, this step fails
+   never looked up again. Until the Enterprise program is deployed on mainnet, this step fails
    there ([Networks & versions](/networks)).
 
 This runs only on a fresh `connect`; a stored wallet and sign actions never come through
@@ -40,7 +40,7 @@ a failed read fails `connect` rather than counting as "no wallet".
 
 ### A passkey that has no wallet yet
 
-Every passkey starts without a v2 wallet, including one the user made on another device.
+Every passkey starts without a Enterprise wallet, including one the user made on another device.
 Signing in never reveals a passkey's public key, so the portal's reply carries the key it
 has stored for it: none for a passkey made elsewhere, and possibly another passkey's. A
 wallet for a key the passkey does not hold could never sign, so the new wallet's key is
@@ -81,7 +81,7 @@ is never used without asking — even when it is the only one, and even with
 - after the wallet's first transaction, it is used on its own.
 
 The user is also asked whenever the passkey has signed for **two** wallets: signatures
-made before the v2 program bound the wallet into the passkey challenge could be replayed
+made before the Enterprise program bound the wallet into the passkey challenge could be replayed
 onto a planted copy.
 
 Why a never-used wallet cannot be trusted by looking at it: its earlier holder could have

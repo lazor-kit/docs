@@ -312,9 +312,9 @@ Checklists: [React › Upgrading to 3.3.0](/react-sdk/upgrading#upgrading-to-330
 
 ---
 
-## 2026-09-29 — wallet 3.0.0–3.0.2, wallet-mobile-adapter 2.0.0, sdk-legacy 1.2.0, sdk 1.0.0-rc.3: protocol v2 support
+## 2026-09-29 — wallet 3.0.0–3.0.2, wallet-mobile-adapter 2.0.0, sdk-legacy 1.2.0, sdk 1.0.0-rc.3: Enterprise support
 
-The UI SDKs speak protocol v2 beside v1, by building on `@lazorkit/sdk-legacy` 1.x (and
+The UI SDKs support Enterprise and existing Protocol wallets, by building on `@lazorkit/sdk-legacy` 1.x (and
 0.3.2 for v1 wallets). Upgrade guides: [React](/react-sdk/upgrading),
 [React Native](/react-native-sdk/upgrading).
 
@@ -324,7 +324,7 @@ The UI SDKs speak protocol v2 beside v1, by building on `@lazorkit/sdk-legacy` 1
   either protocol; only a passkey with none gets a new (v2) wallet. New:
   `protocolVersion`, `v1PaymasterConfig` (web) / `v1ConfigPaymaster` (mobile) for the
   relayer that still sponsors v1, `cluster` for RPC URLs that do not name one,
-  `V1WalletRetiredError` (4018), `V1WalletMigratedError`. See [Migrating from v1](/v1-to-v2).
+  `V1WalletRetiredError` (4018), `V1WalletMigratedError`. See [Protocol and Enterprise compatibility](/v1-to-v2).
 - **Wallet confirmation.** `connect` uses a wallet on its own only when it is the one
   wallet the passkey has signed for and nothing else can spend from it; otherwise it asks
   the user: `onConfirmWallet` (built-in chooser, your handler, or `'throw'`),
@@ -371,13 +371,11 @@ The UI SDKs speak protocol v2 beside v1, by building on `@lazorkit/sdk-legacy` 1
 
 ---
 
-## Protocol v2 (program 2.0.0) — devnet now, mainnet pending
+## Enterprise devnet (program 2.0.0, formerly called protocol v2)
 
 Deployed on devnet at `57bTNWqtYTJbWuLWASKo6GqUTAK6oFDUR5c6hEc6V8nv`; the mainnet id
 `LazorFroiVuAjcwwQ2me83vTr5nc5NRxSaTg3pmEXC8` is not deployed yet. v2 runs **at its own
-program id**; v1 keeps running until it is retired to a sunset binary that serves only
-`ReclaimDeferred`, `MigrateWallet` and `CloseExpiredSession` and answers everything else
-with `RetiredDeployment` (4018). See [Networks & versions](/networks).
+program id**. The production Protocol program continues on its own release line. See [Networks & SDK compatibility](/networks).
 
 - **Ranks and policies.** Owner / Admin / Delegate; a Delegate must carry a spending
   policy (3033–3035); several Owners per wallet. v1's `Execute` never checked rank.

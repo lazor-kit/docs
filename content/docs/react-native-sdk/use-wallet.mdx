@@ -373,7 +373,7 @@ section has a worked example.
 `unrestricted: true` for a session that can spend the whole vault through any program until
 it expires. The program allows at most 6,480,000 slots of expiry.
 
-**Name every asset the session may spend.** From the v2 program release that adds errors
+**Name every asset the session may spend.** From the Enterprise program release that adds errors
 3037 and 3038, SOL leaves the wallet only with an `Actions.sol*` action (`solMaxPerTx`,
 `solLimit`, `solRecurringLimit`), rent the vault pays for a new account included, and a
 token only with an `Actions.token*` action (`tokenMaxPerTx`, `tokenLimit`,
@@ -473,11 +473,11 @@ each rank may do:
 
 | Rank | Constant | May add and remove | Spends |
 | ---- | -------- | ------------------ | ------ |
-| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a v2 wallet it refuses this rank before anything is read or the portal opens. On a v1 wallet it adds one. |
+| Owner | `ROLE_OWNER` (0) | any authority, other Owners included (never the last Owner, never itself) | without limit. The adapter does not pass `allowOwner`, so on a Enterprise wallet it refuses this rank before anything is read or the portal opens. On a v1 wallet it adds one. |
 | Admin | `ROLE_ADMIN` (1) | Delegates only | without limit |
 | Delegate | `ROLE_SPENDER` (2) | nothing | only within its `policy`, which v2 requires |
 
-For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a v2 wallet a
+For a key your app or backend holds, use `ROLE_SPENDER` with a `policy`. On a Enterprise wallet a
 Delegate **throws without a `policy`** (on chain: 3033), and a policy on any other rank is
 refused (3035). A policy names what may leave the wallet, as a session's actions do, and
 must fit in the same 244 bytes; see
@@ -621,7 +621,7 @@ doesn't cover (admin protocol ops, manual prepare/finalize, custom signer layout
 import {
   LazorKitClient,
   PROGRAM_ID_DEVNET,
-  // PDAs (v2 addresses, at the v2 mainnet id unless you pass one)
+  // PDAs (v2 addresses, at the Enterprise mainnet id unless you pass one)
   findWalletPda, findVaultPda, findAuthorityPda,
   findSessionPda, findDeferredExecPda,
   // On-chain readers
@@ -648,10 +648,8 @@ floor.
 
 ---
 
-## v1 wallets
+## Protocol wallets
 
-`protocolVersion` is `1` for a wallet made before LazorKit v2; every method routes to the
-v1 program for it, through `v1ConfigPaymaster`. After LazorKit retires v1, its actions
-reject with `V1WalletRetiredError` (4018): the funds are safe and the wallet must move to
-v2. A stored v1 wallet that has been migrated rejects with `V1WalletMigratedError`; call
-`connect` again. See [Migrating from v1](/v1-to-v2).
+The SDK reports `protocolVersion: 1` for LazorKit Protocol wallets and routes their
+actions through `v1ConfigPaymaster`. Existing Protocol wallets continue to use the Protocol
+program. See [Protocol and Enterprise compatibility](/v1-to-v2).

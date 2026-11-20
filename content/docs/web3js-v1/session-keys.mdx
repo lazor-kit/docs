@@ -108,7 +108,7 @@ const { instructions, sessionPda } = await client.createSession({
   exists: revoke first, or use a new key.
 </Callout>
 
-**Name every asset the session may spend.** From the v2 program release that adds errors
+**Name every asset the session may spend.** From the Enterprise program release that adds errors
 3037 and 3038, a session's actions (and a Delegate's policy) name what may leave the
 vault, and nothing else may: with no `Sol*` action the vault's SOL may not fall (3037),
 rent the vault pays for a new account included, and a mint with no `Token*` action may not

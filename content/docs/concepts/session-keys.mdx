@@ -58,7 +58,7 @@ prompt per transaction**.
 </Callout>
 
 Sessions are the **cheapest** execution path: no Secp256r1 precompile runs. Measured in
-April 2026 on protocol v1, a session `Execute` took about 4,105 CU against about 9,495 CU
+April 2026 on LazorKit Protocol, a session `Execute` took about 4,105 CU against about 9,495 CU
 for a passkey `Execute`; v2 adds a hash input and runs the policy engine, and has not been
 re-measured.
 
@@ -72,7 +72,7 @@ it expires. (Since `@lazorkit/wallet` 3.0.0, `@lazorkit/wallet-mobile-adapter` 2
 `@lazorkit/sdk-legacy` 1.0.0.)
 
 Name every asset the session may spend: SOL with a `Sol*` action, and each token by its
-mint. From the v2 program release that adds errors 3037 and 3038, an asset the actions do
+mint. From the Enterprise program release that adds errors 3037 and 3038, an asset the actions do
 not name cannot leave the wallet; see [What a policy bounds](#what-a-policy-bounds).
 
 ### From the React Native hook
@@ -195,7 +195,7 @@ in [244 bytes](#how-many-actions-fit).
 </Callout>
 
 <Callout type="warn" title="Name every asset the key may spend">
-  On the v2 program deployed today, a list bounds only what it names: a whitelist with no
+  On the Enterprise program deployed today, a list bounds only what it names: a whitelist with no
   `SolLimit` leaves SOL uncapped, and a SOL cap leaves tokens uncapped. From the v2
   program release that adds errors 3037 and 3038, an asset the list does not name cannot
   leave at all ([below](#what-a-policy-bounds)). Either way, give every asset the key
@@ -242,11 +242,11 @@ Actions have their own `expiresAt` independent of session expiry.
 ## What a policy bounds
 
 A session's actions, and a Delegate's policy, name what may leave the wallet. From the
-**v2 program release that adds errors 3037 and 3038**, nothing they do not name may.
+**Enterprise program release that adds errors 3037 and 3038**, nothing they do not name may.
 
 <Callout type="warn" title="Not deployed yet">
   That program release is not deployed on devnet or mainnet yet
-  ([Networks & versions](/networks)). Until it is, an asset the actions do not name is not
+  ([Networks & SDK compatibility](/networks)). Until it is, an asset the actions do not name is not
   bounded at all: a session with token limits only can spend all the wallet's SOL, and one
   with SOL limits only any token. Write the limits you want now. That release also
   tightens how named token limits are measured, so until it is deployed, treat the token
@@ -524,7 +524,7 @@ came to 1846 bytes there without Jupiter's lookup tables and 1111 with them, and
 split route did not fit even with them (1328). Pass the lookup tables, and cap the route with
 Jupiter's `maxAccounts` when you quote. Measured 2026-09-29 with `@lazorkit/sdk-legacy` 1.2.0.
 
-² Measured in April 2026 on protocol v1; not re-measured on v2.
+² Measured in April 2026 on LazorKit Protocol; not re-measured on v2.
 
 Only a passkey Owner or Admin can call `Authorize` (TX1). TX2 can be submitted by any
 signer — but if an inner instruction pays the TX1 payer or TX2's payer back, TX2 must come
@@ -555,7 +555,7 @@ await revokeSession({ sessionPda: 'SESSION_PDA_BASE58' });
 wallet.
 
 After expiry, **anyone** may close the session with `CloseExpiredSession` (instruction
-18, protocol v2) and keep the rent: the account authorises nothing any more. A session is
+18, LazorKit Enterprise) and keep the rent: the account authorises nothing any more. A session is
 closable only once the slot is strictly past its expiry; before that the program refuses
 with `SessionNotExpired` (3036). `@lazorkit/sdk` exports `createCloseExpiredSessionIx`;
 `@lazorkit/sdk-legacy` 1.4.0 has no public builder for it.

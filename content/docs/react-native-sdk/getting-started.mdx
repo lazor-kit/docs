@@ -9,15 +9,14 @@ the provider, call the hook.
 <Callout type="info" title="Zero-config defaults">
   Every provider prop is optional. If you leave them blank the SDK uses devnet defaults
   (`api.devnet.solana.com`, `portal.lazor.sh`, and `kora.devnet.lazorkit.com`, LazorKit's
-  devnet relayer, set up for protocol v2). Ship to production by overriding `rpcUrl` +
+  devnet relayer, set up for LazorKit Enterprise). Ship to production by overriding `rpcUrl` +
   `configPaymaster`.
 </Callout>
 
-<Callout type="warn" title="Mainnet">
-  Mainnet still runs protocol v1, and the v2 mainnet program is not deployed yet. With
-  adapter 2.x, existing v1 wallets work on mainnet (through a relayer that sponsors v1:
-  `v1ConfigPaymaster`), but a new user cannot get a wallet there until v2 is deployed. See
-  [Networks & versions](/networks).
+<Callout type="info" title="Production and Enterprise">
+  The onboarding flow on this page creates Enterprise wallets on devnet. Existing
+  Protocol wallets on mainnet use a Protocol-compatible paymaster configuration.
+  See [Networks & SDK compatibility](/networks) before configuring production endpoints.
 </Callout>
 
 ## Prerequisites
@@ -168,7 +167,7 @@ That's the minimum. To override defaults:
 ```
 
 If your app already has users on LazorKit v1, also set `v1ConfigPaymaster`; see
-[Migrating from v1](/v1-to-v2).
+[Protocol and Enterprise compatibility](/v1-to-v2).
 
 </Step>
 

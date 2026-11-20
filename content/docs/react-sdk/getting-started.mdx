@@ -9,14 +9,13 @@ the same `useWallet` hook.
 <Callout type="info" title="Zero-config defaults">
   All provider props are optional. With nothing set, the SDK targets Solana **devnet**
   through `portal.lazor.sh` and LazorKit's devnet Kora paymaster, which is set up for
-  protocol v2 — perfect for demos and local dev.
+  LazorKit Enterprise — perfect for demos and local dev.
 </Callout>
 
-<Callout type="warn" title="Mainnet">
-  Mainnet still runs protocol v1, and the v2 mainnet program is not deployed yet. With
-  `@lazorkit/wallet` 3.x, existing v1 wallets work on mainnet (through a relayer that
-  sponsors v1: `v1PaymasterConfig`), but a new user cannot get a wallet there until v2 is
-  deployed. See [Networks & versions](/networks).
+<Callout type="info" title="Production and Enterprise">
+  The onboarding flow on this page creates Enterprise wallets on devnet. Existing
+  Protocol wallets on mainnet use a Protocol-compatible paymaster configuration.
+  See [Networks & SDK compatibility](/networks) before configuring production endpoints.
 </Callout>
 
 ## Prerequisites
@@ -133,7 +132,7 @@ That's the minimum. Override defaults via props:
 ```
 
 If your app already has users on LazorKit v1, also set `v1PaymasterConfig`; see
-[Migrating from v1](/v1-to-v2).
+[Protocol and Enterprise compatibility](/v1-to-v2).
 
 </Step>
 
@@ -176,7 +175,7 @@ export function ConnectButton() {
   `vaultPubkey` (the same address as `wallet.vaultPda`) is the SOL-holding account — show
   it to users, fund it, and use it as `fromPubkey`. `smartWalletPubkey` /
   `wallet.smartWallet` is the **internal** wallet PDA: funds sent there cannot be spent.
-  Do not derive the vault with `findVaultPda`: it derives a v2 mainnet address, wrong for
+  Do not derive the vault with `findVaultPda`: it derives a Enterprise mainnet address, wrong for
   v1 wallets and for devnet. Records saved by older releases get `vaultPda` on the next
   `connect`.
 </Callout>

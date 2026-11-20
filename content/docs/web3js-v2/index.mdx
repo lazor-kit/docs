@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: "@lazorkit/sdk — the LazorKit client for @solana/kit (web3.js v2). Release candidate, protocol v2."
+description: "@lazorkit/sdk — the LazorKit client for @solana/kit (web3.js v2). Release candidate, LazorKit Enterprise."
 ---
 
 `@lazorkit/sdk` is the LazorKit client for **Solana Kit** (`@solana/kit`, formerly
@@ -9,16 +9,16 @@ description: "@lazorkit/sdk — the LazorKit client for @solana/kit (web3.js v2)
 types (`Address`, `Instruction`, `Rpc`) and tree-shakable module functions, and produces
 the same transactions.
 
-<Callout type="warn" title="Release candidate, protocol v2 only">
+<Callout type="warn" title="Release candidate, LazorKit Enterprise only">
   - Current release **1.0.0-rc.6**, on both the `latest` and `next` npm tags. Its surface is
-    complete for protocol v2 and covered by unit tests and a local-validator suite; three
+    complete for LazorKit Enterprise and covered by unit tests and a local-validator suite; three
     public paths are not covered by tests yet (`revokeSession`, the one-shot
     `transferOwnership`, `signWithSecp256r1`).
-  - It speaks **protocol v2 only**, which runs on devnet today; the v2 mainnet program is
-    not deployed yet. For mainnet today, use `@lazorkit/sdk-legacy` 0.3.x (protocol v1).
-    See [Networks & versions](/networks).
+  - It speaks **LazorKit Enterprise only**, which runs on devnet today; the Enterprise mainnet program is
+    not deployed yet. For mainnet today, use `@lazorkit/sdk-legacy` 0.3.x (LazorKit Protocol).
+    See [Networks & SDK compatibility](/networks).
   - v1 wallets are not usable from it, except to move them: it has `findV1WalletsByOwner`
-    and `migrateV1Wallet` ([Migrating from v1](/v1-to-v2)).
+    and `migrateV1Wallet` ([Protocol and Enterprise compatibility](/v1-to-v2)).
 </Callout>
 
 ## Install
@@ -82,7 +82,7 @@ URL: pass `PROGRAM_ID_DEVNET` (or `PROGRAM_ID_MAINNET` once v2 is deployed there
   [Passkey signing › Messages and ownership proofs](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge).
 - Sessions (no actions throws without `unrestricted: true`), Delegate policies, deferred
   execution (`executor`, `feePayer`), protocol fees with automatic `RegisterPayer`. A
-  policy names what may leave the vault: from the v2 program release that adds errors 3037
+  policy names what may leave the vault: from the Enterprise program release that adds errors 3037
   and 3038 (not deployed yet), nothing it does not name may
   ([What a policy bounds](/concepts/session-keys#what-a-policy-bounds)).
 - `MinContextSlotNotReachedError` and the error codes on [Errors](/errors).
