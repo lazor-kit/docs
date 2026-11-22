@@ -22,20 +22,11 @@ paymaster, confirmation and sequencing for you.
 
 ## Install
 
-Two lines of this package are published, one per protocol version:
-
-| npm | Version | Protocol | Where it works |
-| --- | ------- | -------- | -------------- |
-| `@lazorkit/sdk-legacy@next` | **1.4.0** | v2 | devnet today; mainnet once v2 is deployed there |
-| `@lazorkit/sdk-legacy` (`latest`) | 0.3.2 | v1 | mainnet today, and devnet v1 |
+Install the published Protocol client:
 
 ```bash
-npm install @lazorkit/sdk-legacy@next @solana/web3.js   # 1.x — protocol v2, what these pages document
+npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js
 ```
-
-A plain `npm install @lazorkit/sdk-legacy` installs **0.3.2**, the protocol v1 line, which
-has none of the 1.x APIs below. The two are not wire-compatible: the same `userSeed`
-derives a different wallet on each. See [Networks & versions](/networks).
 
 ## What it covers
 
