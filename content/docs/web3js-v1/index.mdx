@@ -1,91 +1,25 @@
 ---
-title: Overview
-description: LazorKit SDK for @solana/web3.js v1 — direct contract access via LazorKitClient.
+title: Protocol SDK
+description: Use the published LazorKit Protocol SDK with @solana/web3.js v1.
 ---
 
-import { Rocket, KeyRound, Server, HelpCircle, Fingerprint } from 'lucide-react'
-
-`@lazorkit/sdk-legacy` is the TypeScript SDK for direct LazorKit contract interaction on
-`@solana/web3.js` v1. It ships `LazorKitClient` — a typed wrapper that builds every
-on-chain instruction without hiding the transaction flow.
-
-Use this SDK when you need:
-
-- Low-level contract access outside of React (a backend, a relayer, an agent)
-- Integration with existing `@solana/web3.js` v1 infrastructure
-- Protocol operations (`InitializeProtocol`, `RegisterPayer`, etc.)
-- Full control over signer rotation, prepare/finalize flows, and account indexing
-
-For application code, reach for the [React SDK](/react-sdk) or
-[React Native SDK](/react-native-sdk) — both build on this SDK and handle the portal,
-paymaster, confirmation and sequencing for you.
-
-## Install
-
-Install the published Protocol client:
+Install the public Protocol client for applications that build instructions directly.
 
 ```bash
-npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js
+npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js@^1.95.0
 ```
 
-## What it covers
+| Area | SDK 0.3.2 methods |
+| --- | --- |
+| Wallet and authority | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` |
+| Execute | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute` |
+| Sessions | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession` |
+| Deferred | `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
+| Accounts | `findWallet`, `findVault`, `findAuthority`, `findSession` |
 
-| Area                | Methods                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------- |
-| Wallet management   | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` (+ `prepare*` / `finalize*` for passkeys) |
-| Execution           | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute`                                 |
-| Session keys        | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession`, `prepareRevokeSession` |
-| Deferred execution  | `authorize`, `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
-| Lookups             | `findOwnPasskeyWallet`, `findPasskeyWalletCandidates`, `describeWalletCandidates` (1.2.0+); `findAuthoritiesByWallet`, `getRecoveryStatus`, `readCounter`; `findWalletsByAuthority` (raw) |
-| Passkey keys        | `resolvePasskeyPublicKey`, `recoverPasskeyPublicKeys` (1.3.0+, module functions)              |
-| Passkey challenges  | `createTaggedOwnershipChallenge`, `signedMessageChallenge`, `OWNERSHIP_PROOF_DOMAIN`, `SIGNED_MESSAGE_DOMAIN` (1.4.0+); see [Passkey signing](/web3js-v1/passkey-signing#messages-and-ownership-proofs-never-a-transaction-challenge) |
-| v1 migration        | `migrateV1Wallet`, `findV1WalletsByOwner`, `vetMigrationDestination` (1.2.0+)                 |
-| Protocol            | `registerPayer` (permissionless; added for you), `initializeProtocol`, `updateProtocol`, `initializeTreasuryShard`, `withdrawTreasury` (admin) |
+For a returning wallet, keep the wallet PDA your app established during onboarding and
+verify the wallet and authority against the selected Protocol program. A credential ID
+lookup alone does not prove ownership of a wallet. Use the vault PDA as the receive address.
 
-`CloseExpiredSession` (anyone may close an expired session and keep its rent) has no
-client method, and 1.4.0 does not export its instruction builder; `@lazorkit/sdk` (kit)
-exports `createCloseExpiredSessionIx`.
-
-<Callout type="warn" title="Finding a returning passkey user's wallet">
-  Use `findOwnPasskeyWallet` (1.2.0 and later; not in 0.3.x or 1.1.x). Never adopt the
-  first result of `findWalletsByAuthority(credentialIdHash)`: the credential-id hash is
-  public, and anyone can create a wallet that lists it. See
-  [Getting Started › Look up a returning user](/web3js-v1/getting-started#4-look-up-a-returning-user).
-</Callout>
-
-## Client setup
-
-```typescript
-import { Connection } from '@solana/web3.js';
-import { LazorKitClient, PROGRAM_ID_DEVNET } from '@lazorkit/sdk-legacy';
-
-const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-const client = new LazorKitClient(connection);                      // program id from the URL
-const explicit = new LazorKitClient(connection, PROGRAM_ID_DEVNET); // or explicit
-```
-
-Without a program id, the client reads the cluster from the RPC URL (`mainnet`, `devnet`,
-`localhost` / `127.0.0.1`) and **throws** for any other URL; pass the id for your own RPC
-proxy or a keyed provider URL. It picks the **v2** program for the cluster. The client
-keeps a small in-memory cache (the protocol config, payers it has seen registered); create
-one per connection and reuse it.
-
-## Explore
-
-<Cards>
-  <Card icon={<Rocket />} title="Getting Started"
-    description="Create a wallet, execute a transaction, look up returning users."
-    href="/web3js-v1/getting-started" />
-  <Card icon={<Fingerprint />} title="Passkey signing"
-    description="prepare / finalize, the WebAuthnResponse, minContextSlot, one flow per authority, key recovery."
-    href="/web3js-v1/passkey-signing" />
-  <Card icon={<KeyRound />} title="Session Keys"
-    description="Create, execute, and revoke sessions — including deferred execution."
-    href="/web3js-v1/session-keys" />
-  <Card icon={<Server />} title="Types"
-    description="Signer helpers, account readers, PDA derivation, error utilities."
-    href="/web3js-v1/types" />
-  <Card icon={<HelpCircle />} title="Errors"
-    description="Error classes and program error codes."
-    href="/errors" />
-</Cards>
+See [Getting started](/web3js-v1/getting-started), [Networks](/networks) and the
+[published SDK reference](https://github.com/lazor-kit/lazorkit-protocol/tree/release/sdk-legacy-0.3.2/sdk/sdk-legacy).

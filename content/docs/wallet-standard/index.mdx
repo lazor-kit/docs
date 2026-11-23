@@ -18,14 +18,15 @@ and friends.
 ## Install
 
 ```bash
-npm install @lazorkit/wallet @solana/web3.js@^1.99.0 \
+npm install @lazorkit/wallet@"$PROTOCOL_ADAPTER_VERSION" @solana/web3.js@^1.99.0 \
   @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
 ```
 
-This page describes `@lazorkit/wallet` 3.x (current: 3.4.0). The adapter speaks protocol
-v2, and v1 for wallets made before it; mainnet runs v1 today — see
-[Networks & versions](/networks). Since 3.3.1 the wallet declares no `@solana/kit` peer,
-so it installs in an app on `@solana/kit` 6, 7 or 8.
+Set `PROTOCOL_ADAPTER_VERSION` to the exact version you validated against the wallet's
+Protocol deployment. Use the same cluster for the RPC and paymaster and the portal
+registered for the existing passkey.
+See [Networks & SDK compatibility](/networks).
+
 
 ## Setup
 
@@ -51,8 +52,8 @@ import { registerLazorkitWallet } from '@lazorkit/wallet';
 
 const CONFIG = {
   RPC_URL: 'https://api.devnet.solana.com',
-  PORTAL_URL: 'https://portal.lazor.sh',
-  PAYMASTER: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  PORTAL_URL: process.env.NEXT_PUBLIC_PROTOCOL_PORTAL_URL!,
+  PAYMASTER: { paymasterUrl: process.env.NEXT_PUBLIC_PROTOCOL_PAYMASTER_URL! },
   CLUSTER: 'devnet' as const,
 };
 
@@ -63,7 +64,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
       cluster: CONFIG.CLUSTER,              // needed when the RPC URL does not say
       portalUrl: CONFIG.PORTAL_URL,
       paymasterConfig: CONFIG.PAYMASTER,
-      // v1PaymasterConfig: { paymasterUrl: '…' }, // the relayer for users still on LazorKit v1
       clusterSimulation: CONFIG.CLUSTER,    // the portal's transaction preview
     });
   }, []);
@@ -164,8 +164,8 @@ import { registerLazorkitWallet } from '@lazorkit/wallet';
 
 registerLazorkitWallet({
   rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
+  portalUrl: process.env.NEXT_PUBLIC_PROTOCOL_PORTAL_URL!,
+  paymasterConfig: { paymasterUrl: process.env.NEXT_PUBLIC_PROTOCOL_PAYMASTER_URL! },
   clusterSimulation: 'devnet',
   trustedAuthorities: [BACKEND_ADMIN_KEY], // optional: your own Ed25519 keys, base58
   watchMints: [MY_TOKEN_MINT],             // optional: SPL mints your app receives
@@ -183,7 +183,7 @@ The Wallet Standard `standard:disconnect` and `LazorkitWalletAdapter.disconnect(
 wallet-adapter UI's Disconnect, or `useWallet().disconnect()` from
 `@solana/wallet-adapter-react`, calls) clear the stored wallet and, since 3.3.1, delete
 the session key the SDK keeps for `signAndSendWithSession` — the one a `createSession` on
-the same page made through the [React SDK](/react-sdk/use-wallet#createsession) — as the
+the same page made through the [React SDK](/react-sdk/use-wallet) — as the
 React SDK's own `disconnect()` does. Before 3.3.1 they left it, and it signed again once
 its wallet was connected. The authority key is kept; `forgetStoredKeys()` deletes it.
 
@@ -215,7 +215,7 @@ await adapter.disconnect({ keepSessionKeys: true });  // keeps it (LazorkitAdapt
 `keepSessionKeys` decides only whether the session key is deleted: the store is
 disconnected either way. A key that IndexedDB fails to delete is logged, and the disconnect
 still succeeds. See
-[What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
+[What the SDK stores](/react-sdk/provider).
 
 ---
 
@@ -227,7 +227,7 @@ LazorKit address is a program account with no key to sign with, so the signer is
 wallet's passkey. Since 3.3.1 the passkey signs a domain-separated challenge,
 `signedMessageChallenge(message)`, never the message's bytes, so a message signature can
 no longer be confused with a transaction approval
-([React SDK › signMessage](/react-sdk/use-wallet#signmessage)). The portal gets the
+([React SDK › signMessage](/react-sdk/use-wallet)). The portal gets the
 challenge as `message` and the text to show the user as `displayMessage`, which is sent
 only when the message's bytes are valid UTF-8: for any other bytes the user sees no text,
 so pass text, `new TextEncoder().encode(...)`. The JSON carries the four fields a verifier
@@ -264,7 +264,7 @@ export function SignIn({ message }: { message: string }) {
 ```
 
 **Check it on your server with `verifyWalletMessage`**, which reads the passkey's key from
-chain: `verifyWalletMessage({ connection, wallet, credentialId, rpId: 'portal.lazor.sh',
+chain: `verifyWalletMessage({ connection, wallet, credentialId, rpId: protocolRpId,
 message, ...result })`. It is `true` only when the signature is over this message and
 verifies against the key stored on chain in an Owner authority of `wallet` for
 `credentialId`; a credential id that names another passkey simply fails. The Wallet
@@ -272,7 +272,7 @@ Standard account does not carry the credential id, so read it from the stored wa
 above (`StorageManager.getWallet()`, or `wallet.credentialId` from the React SDK's
 `useWallet()`). Never accept a public key from the client. Parameters and the offline
 `verifySignedMessage`:
-[React SDK › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+[React SDK › Verifying a message signature](/react-sdk/use-wallet).
 
 <Callout type="warn" title="Signatures from 3.3.0 and earlier">
   They were made over the message's bytes, carry only `signature` and `signedPayload`, and
