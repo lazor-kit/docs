@@ -1,82 +1,13 @@
 ---
-title: Overview
-description: LazorKit Wallet Mobile Adapter — passkey smart wallets for React Native & Expo.
+title: React Native
+description: Reconnect existing Protocol wallets with the React Native adapter.
 ---
 
-import { Rocket, Plug, Key, Coins, Shield, HelpCircle, UserCheck, Send, ArrowRightLeft, TriangleAlert } from 'lucide-react'
+Use `@lazorkit/wallet-mobile-adapter` to reconnect a wallet that your app already created on Protocol v1. The adapter opens the passkey portal and submits the approved transaction through your paymaster.
 
-React Native / Expo adapter for LazorKit smart wallets on Solana. Users authenticate with a
-device passkey (Face ID, Touch ID, screen lock) through the LazorKit portal — your app never
-touches private key material.
+- [Get started](/react-native-sdk/getting-started)
+- [Send a transaction](/react-native-sdk/sending-transactions)
+- [Confirm a returning wallet](/react-native-sdk/wallet-confirmation)
+- [Upgrade an integration](/react-native-sdk/upgrading)
 
-<Callout type="info" title="Package">
-  `@lazorkit/wallet-mobile-adapter` on [npm](https://www.npmjs.com/package/@lazorkit/wallet-mobile-adapter),
-  current release **2.4.0** (install `latest`; the `beta` tag is an old pre-v2 build).
-  Peers: `react` ≥ 18, `react-native` ≥ 0.70, `@solana/web3.js` ^1.98.2. It depends on
-  `expo-web-browser` (14.2 or 15) and `expo-crypto` 15, so it targets **Expo SDK 54**
-  (53 for `expo-web-browser` alone); older Expo SDKs are untested. Speaks protocol v2, and
-  v1 for wallets made before it — see [Networks & versions](/networks).
-</Callout>
-
-## Why this SDK
-
-- **No seed phrase.** Passkey-based WebAuthn, synced via iCloud Keychain / Google Password Manager.
-- **No gas.** A Kora paymaster sponsors every transaction — users don't need SOL.
-- **Programmable wallet.** Vault + authority PDAs, ranks (Owner / Admin / Delegate), on-chain spending limits.
-- **Confirmed sends.** Every send resolves once its transaction is confirmed.
-- **Session keys.** One prompt mints a scoped Ed25519 signer — subsequent sends are prompt-free.
-- **Deferred execution.** Sign a single challenge to authorise multi-instruction payloads that exceed the single-tx size limit.
-
-## How it fits together
-
-```
-┌──────────────┐    deep link     ┌────────────────┐   signs   ┌──────────────┐
-│  your app    │─────────────────▶│ LazorKit Portal│──────────▶│   passkey    │
-│  (RN/Expo)   │◀─────────────────│  (WebAuthn)    │           │ (OS / browser)│
-└──────┬───────┘    redirect URL  └────────────────┘           └──────────────┘
-       │
-       ▼ build tx / finalize
-┌──────────────┐    relay via    ┌──────────────┐
-│   SDK        │────paymaster───▶│   Solana     │
-└──────────────┘                 └──────────────┘
-```
-
-The adapter is a JavaScript package: it opens the LazorKit portal in the system browser
-(`expo-web-browser`), the portal runs the WebAuthn ceremony, and the result comes back to
-your app on its redirect URL. The SDK builds instructions, finalises the passkey
-signature, submits through the paymaster, and waits for confirmation.
-
-## Explore
-
-<Cards>
-  <Card icon={<Rocket />} title="Getting Started"
-    description="Install, configure, and send your first transaction in ~5 minutes."
-    href="/react-native-sdk/getting-started" />
-  <Card icon={<Plug />} title="LazorKitProvider"
-    description="Provider props and configuration."
-    href="/react-native-sdk/provider" />
-  <Card icon={<Key />} title="useWallet hook"
-    description="Complete API — connect, sign, sessions, authorities."
-    href="/react-native-sdk/use-wallet" />
-  <Card icon={<Send />} title="Sending transactions"
-    description="Confirmation, callbacks, sequencing, the deferred window, the paymaster."
-    href="/react-native-sdk/sending-transactions" />
-  <Card icon={<Coins />} title="Types"
-    description="TypeScript interfaces and constants."
-    href="/react-native-sdk/types" />
-  <Card icon={<UserCheck />} title="Wallet Confirmation"
-    description="How connect finds a returning user's wallet, and the built-in chooser."
-    href="/react-native-sdk/wallet-confirmation" />
-  <Card icon={<ArrowRightLeft />} title="Upgrading to 2.x"
-    description="What changed since 1.x and the 2.0.0 betas, release by release."
-    href="/react-native-sdk/upgrading" />
-  <Card icon={<TriangleAlert />} title="Errors"
-    description="Every error class, when it is thrown, and what to do."
-    href="/errors" />
-  <Card icon={<Shield />} title="Session Keys"
-    description="Skip the passkey prompt with scoped Ed25519 keys."
-    href="/concepts/session-keys" />
-  <Card icon={<HelpCircle />} title="Troubleshooting"
-    description="Common errors and fixes."
-    href="/troubleshooting" />
-</Cards>
+For creating a new Protocol wallet, use the [TypeScript quickstart](/web3js-v1/getting-started).

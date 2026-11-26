@@ -115,3 +115,50 @@ div.fixed.inset-0.backdrop-blur-xs[data-state='open'] {
 .prose h3 {
   margin-top: 1.5rem;
 }
+
+/* The start page gives the TypeScript quickstart the first and widest target. */
+.homePathGrid,
+.homeFlowGrid {
+  grid-template-columns: 1fr;
+  margin-block: 1rem;
+}
+
+.homePathGrid [data-card],
+.homeFlowGrid [data-card] {
+  padding: 1rem 1.125rem;
+}
+
+.homePathGrid .homePrimaryCard {
+  grid-column: 1 / -1;
+  border-color: color-mix(in srgb, var(--color-fd-primary) 42%, var(--color-fd-border));
+  background: linear-gradient(115deg, var(--color-fd-accent), var(--color-fd-card) 88%);
+}
+
+.homePathGrid .homePrimaryCard p:first-of-type {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.homeCardAction {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  margin-top: .75rem;
+  color: var(--color-fd-accent-foreground);
+  font-weight: 650;
+}
+
+@media (min-width: 43rem) {
+  .homePathGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .homeFlowGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .homePathGrid [data-card]:not(.homePrimaryCard),
+  .homeFlowGrid [data-card] {
+    grid-column: auto;
+  }
+}

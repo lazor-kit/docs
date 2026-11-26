@@ -1,307 +1,38 @@
 ---
 title: Wallet Standard
-description: Integrate LazorKit with @solana/wallet-adapter-react and other Wallet Standard clients.
+description: Add existing Protocol wallets to your Solana wallet picker.
 ---
 
-LazorKit implements the [Solana Wallet Standard](https://github.com/wallet-standard/wallet-standard),
-so you can drop it into any Wallet Adapter setup alongside Phantom, Solflare, Backpack,
-and friends.
+If your React app already uses Solana Wallet Adapter, register LazorKit so returning Protocol users can select it. Start with the [React quickstart](/react-sdk/getting-started) for the package pin.
 
-<Callout type="info" title="When to use Wallet Standard">
-  Pick this path if you already have a Wallet Adapter-powered app and want LazorKit to
-  appear in the standard wallet picker. For a purpose-built integration, use the
-  [React SDK](/react-sdk) or [React Native SDK](/react-native-sdk) directly — both expose
-  session keys, deferred execution, and authority management that Wallet Standard
-  doesn't cover.
-</Callout>
+## Register in the browser
 
-## Install
-
-```bash
-npm install @lazorkit/wallet @solana/web3.js@^1.99.0 \
-  @solana/wallet-adapter-react @solana/wallet-adapter-react-ui
-```
-
-This page describes `@lazorkit/wallet` 3.x (current: 3.4.0). The adapter speaks protocol
-v2, and v1 for wallets made before it; mainnet runs v1 today — see
-[Networks & versions](/networks). Since 3.3.1 the wallet declares no `@solana/kit` peer,
-so it installs in an app on `@solana/kit` 6, 7 or 8.
-
-## Setup
-
-<Steps>
-
-<Step>
-
-### Register LazorKit as a standard wallet
-
-Call `registerLazorkitWallet` once on the client. The Wallet Standard relies on the
-global `window` object, so mount registration inside an effect:
-
-```tsx title="app/providers.tsx"
-'use client';
-
-import { useEffect, useMemo } from 'react';
-import {
-  ConnectionProvider,
-  WalletProvider,
-} from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { registerLazorkitWallet } from '@lazorkit/wallet';
-
-const CONFIG = {
-  RPC_URL: 'https://api.devnet.solana.com',
-  PORTAL_URL: 'https://portal.lazor.sh',
-  PAYMASTER: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
-  CLUSTER: 'devnet' as const,
-};
-
-export function Providers({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    registerLazorkitWallet({
-      rpcUrl: CONFIG.RPC_URL,
-      cluster: CONFIG.CLUSTER,              // needed when the RPC URL does not say
-      portalUrl: CONFIG.PORTAL_URL,
-      paymasterConfig: CONFIG.PAYMASTER,
-      // v1PaymasterConfig: { paymasterUrl: '…' }, // the relayer for users still on LazorKit v1
-      clusterSimulation: CONFIG.CLUSTER,    // the portal's transaction preview
-    });
-  }, []);
-
-  const wallets = useMemo(() => [/* other adapters here */], []);
-
-  return (
-    <ConnectionProvider endpoint={CONFIG.RPC_URL}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>{children}</WalletModalProvider>
-      </WalletProvider>
-    </ConnectionProvider>
-  );
-}
-```
-
-</Step>
-
-<Step>
-
-### Use the standard hook anywhere
-
-Once registered, LazorKit appears in the standard wallet picker. Consume it with the
-usual `useWallet` hook from `@solana/wallet-adapter-react`:
-
-```tsx
-'use client';
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import {
-  LAMPORTS_PER_SOL,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-} from '@solana/web3.js';
-
-export function TransferButton() {
-  const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
-
-  const send = async () => {
-    if (!publicKey) return;
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: publicKey,                 // the vault — where funds live
-        toPubkey: new PublicKey('RECIPIENT'),
-        lamports: 0.01 * LAMPORTS_PER_SOL,
-      }),
-    );
-    // Resolves once the transaction is confirmed (3.1.0+).
-    const sig = await sendTransaction(tx, connection);
-    console.log('tx', sig);
-  };
-
-  return <button onClick={send}>Send SOL</button>;
-}
-```
-
-LazorKit handles the paymaster relay internally — you don't need to set `feePayer` or
-call `signTransaction` yourself. It takes your transaction's instructions, runs them inside
-a LazorKit `Execute` signed by the user's passkey, and sends it through its own RPC
-(`rpcUrl`) and paymaster.
-
-- **`publicKey` is the vault** (since 3.0.0; earlier releases advertised the wallet PDA,
-  which nothing can spend from). Use it as `fromPubkey` and as the user's address.
-- **`sendTransaction` resolves once the transaction is confirmed** (3.1.0+), and rejects if
-  it failed on chain. Calls for one passkey are queued, never sent in parallel.
-- **v0 transactions with lookup tables work** (3.1.0+): the adapter resolves the accounts a
-  dApp's lookup tables load (a Jupiter swap, for example).
-- A failed send reaches your app as wallet-adapter's `WalletSendTransactionError`, with the
-  LazorKit error in its `error` field — see [Errors](/errors). The `is*Error` predicates
-  read through it (3.3.0+).
-- A `connect`, `disconnect` or `change` listener that throws is logged; it does not stop
-  the listeners after it or fail a `connect` that has happened (3.3.0+).
-
-</Step>
-
-</Steps>
-
----
-
-## Confirming the user's wallet
-
-<Callout type="warn" title="Version note">
-  These options are in `@lazorkit/wallet` **3.0.0 and later**. Earlier versions (`2.x` and
-  before) do not have them.
-</Callout>
-
-When a returning user's wallet cannot be used without asking — it has never been used with
-their passkey, the passkey has signed for more than one wallet, or something else can also
-spend from it — `connect` asks the user which wallet is theirs. `registerLazorkitWallet` takes the same options for this as
-`LazorkitProvider` (`onConfirmWallet`, `trustedAuthorities`, `watchMints`), **except
-`onConfirmWallet: 'throw'`, which it rejects**: `standard:connect` cannot pass
-`confirmWallet`, so the user could never finish. Keep the default (`'builtin'`, the SDK's
-own chooser) or pass your own handler:
-
-```tsx
-import { registerLazorkitWallet } from '@lazorkit/wallet';
-
-registerLazorkitWallet({
-  rpcUrl: 'https://api.devnet.solana.com',
-  portalUrl: 'https://portal.lazor.sh',
-  paymasterConfig: { paymasterUrl: 'https://kora.devnet.lazorkit.com' },
-  clusterSimulation: 'devnet',
-  trustedAuthorities: [BACKEND_ADMIN_KEY], // optional: your own Ed25519 keys, base58
-  watchMints: [MY_TOKEN_MINT],             // optional: SPL mints your app receives
-});
-```
-
-See [React SDK › Wallet Confirmation](/react-sdk/wallet-confirmation) for the rule, the
-chooser, and the errors `connect` can reject with.
-
----
-
-## Disconnecting
-
-The Wallet Standard `standard:disconnect` and `LazorkitWalletAdapter.disconnect()` (what a
-wallet-adapter UI's Disconnect, or `useWallet().disconnect()` from
-`@solana/wallet-adapter-react`, calls) clear the stored wallet and, since 3.3.1, delete
-the session key the SDK keeps for `signAndSendWithSession` — the one a `createSession` on
-the same page made through the [React SDK](/react-sdk/use-wallet#createsession) — as the
-React SDK's own `disconnect()` does. Before 3.3.1 they left it, and it signed again once
-its wallet was connected. The authority key is kept; `forgetStoredKeys()` deletes it.
-
-Since 3.4.0 they also disconnect the React SDK's store on the same page, which connects
-the same stored wallet:
-
-- `useWallet()` from `@lazorkit/wallet` shows no wallet, also after a reload, and a
-  `connect` the store is running rejects with `PortalCancelledError`.
-- A kept key (the authority key, or a session key kept with `keepSessionKeys`) signs only
-  once its wallet is connected again.
-- A `signAndSendWithSession` or `signAndSendWithAuthority` still running neither signs nor
-  sends after the disconnect. It rejects with `KeyWalletMismatchError`, `reason`
-  `'disconnected'` when the same wallet is connected again by then: send again.
-
-In 3.3.1 the store stayed connected after these two disconnects, so the authority key, and
-a session key kept with `keepSessionKeys`, went on signing for the wallet, and a send
-already under way could still sign and send.
+Call `registerLazorkitWallet` once on the client, using the RPC and paymaster for the existing wallets. The portal must match the passkey's registered origin.
 
 ```ts
-import { LazorkitWalletAdapter } from '@lazorkit/wallet';
+import { registerLazorkitWallet } from '@lazorkit/wallet';
 
-declare const adapter: LazorkitWalletAdapter;
+export function registerProtocolWallet(portalUrl: string, protocolPaymasterUrl: string) {
+  const paymaster = { paymasterUrl: protocolPaymasterUrl };
 
-await adapter.disconnect();                           // deletes the session key
-await adapter.disconnect({ keepSessionKeys: true });  // keeps it (LazorkitAdapterDisconnectOptions)
-```
-
-`standard:disconnect` takes no options, so it always deletes the session key.
-`keepSessionKeys` decides only whether the session key is deleted: the store is
-disconnected either way. A key that IndexedDB fails to delete is logged, and the disconnect
-still succeeds. See
-[What the SDK stores](/react-sdk/provider#keys-the-sdk-generates).
-
----
-
-## Message signing (P256)
-
-`signMessage` (the Wallet Standard `solana:signMessage`, `LazorkitWalletAdapter.signMessage`)
-resolves with the UTF-8 bytes of a JSON object, not a 64-byte Ed25519 signature: a
-LazorKit address is a program account with no key to sign with, so the signer is the
-wallet's passkey. Since 3.3.1 the passkey signs a domain-separated challenge,
-`signedMessageChallenge(message)`, never the message's bytes, so a message signature can
-no longer be confused with a transaction approval
-([React SDK › signMessage](/react-sdk/use-wallet#signmessage)). The portal gets the
-challenge as `message` and the text to show the user as `displayMessage`, which is sent
-only when the message's bytes are valid UTF-8: for any other bytes the user sees no text,
-so pass text, `new TextEncoder().encode(...)`. The JSON carries the four fields a verifier
-needs:
-
-```tsx
-'use client';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { StorageManager } from '@lazorkit/wallet';
-
-export function SignIn({ message }: { message: string }) {
-  const { publicKey, signMessage } = useWallet();
-
-  const handle = async () => {
-    if (!signMessage || !publicKey) return;
-
-    const signed = await signMessage(new TextEncoder().encode(message));
-
-    // A UTF-8 JSON blob: { signature, signedPayload, clientDataJsonBase64, authenticatorDataBase64 }
-    const result = JSON.parse(new TextDecoder().decode(signed));
-
-    // The passkey's credential id, from the wallet LazorKit stored at connect.
-    const credentialId = (await StorageManager.getWallet())?.credentialId;
-
-    // Your server checks it with verifyWalletMessage (below).
-    await fetch('/api/sign-in', {
-      method: 'POST',
-      body: JSON.stringify({ wallet: publicKey.toBase58(), credentialId, ...result }),
-    });
-  };
-
-  return <button onClick={handle}>Sign in</button>;
+  registerLazorkitWallet({
+    cluster: 'mainnet',
+    rpcUrl: 'https://api.mainnet-beta.solana.com',
+    portalUrl,
+    paymasterConfig: paymaster,
+    v1PaymasterConfig: paymaster,
+  });
 }
 ```
 
-**Check it on your server with `verifyWalletMessage`**, which reads the passkey's key from
-chain: `verifyWalletMessage({ connection, wallet, credentialId, rpId: 'portal.lazor.sh',
-message, ...result })`. It is `true` only when the signature is over this message and
-verifies against the key stored on chain in an Owner authority of `wallet` for
-`credentialId`; a credential id that names another passkey simply fails. The Wallet
-Standard account does not carry the credential id, so read it from the stored wallet as
-above (`StorageManager.getWallet()`, or `wallet.credentialId` from the React SDK's
-`useWallet()`). Never accept a public key from the client. Parameters and the offline
-`verifySignedMessage`:
-[React SDK › Verifying a message signature](/react-sdk/use-wallet#verifying-a-message-signature).
+## Send and receive
 
-<Callout type="warn" title="Signatures from 3.3.0 and earlier">
-  They were made over the message's bytes, carry only `signature` and `signedPayload`, and
-  do not verify with `verifyWalletMessage`: ask the user to sign again. The deprecated
-  `verifySignatureBrowser` checks only that `signature` is over `signedPayload`, not which
-  message was signed; never use it to authenticate.
-</Callout>
+- The connected `publicKey` is the vault. Use it as the receive address and as the source of a transfer.
+- Call Wallet Adapter's `sendTransaction` to approve and send the transaction. The adapter handles relay submission and returns a signature after confirmation.
+- Use the [React adapter](/react-sdk) for session keys, deferred execution, or authority management.
 
----
+If the wallet picker asks which wallet to use, follow [Confirm a returning wallet](/react-sdk/wallet-confirmation).
 
-## What Wallet Standard supports
+## Message signing
 
-| Feature                              | Available |
-| ------------------------------------ | --------- |
-| `connect` / `disconnect`             | yes — `disconnect` deletes the kept session key (3.3.1+) and disconnects the React SDK's store (3.4.0+) |
-| `signTransaction` / `signAllTransactions` | **no** — throws `WalletSignTransactionError`; use `sendTransaction` |
-| `sendTransaction` / `signAndSendTransaction` | yes — resolves once confirmed |
-| `signMessage`                        | yes (P256, JSON — see above) |
-| Session keys                         | **no** — use React/RN SDK |
-| Deferred execution                   | **no** — use React/RN SDK |
-| Authority management                 | **no** — use React/RN SDK |
-
-If you need advanced features, drop to the [React SDK](/react-sdk) — it composes
-cleanly on top of the same wallet.
-
----
-
-## How it works
-
-1. **Register** — `registerLazorkitWallet` publishes the LazorKit adapter on `window`.
-2. **Discover** — Wallet Adapter detects the new standard wallet and lists it in the picker.
-3. **Transact** — When the user sends a transaction, LazorKit handles passkey signing and paymaster relay under the hood, waits for confirmation, then returns the signature.
+LazorKit returns a WebAuthn P-256 proof as UTF-8 JSON. Verify the expected message with `verifyWalletMessage` on your server, using the Protocol wallet PDA, credential ID, and registered relying-party ID. Resolve the authority from chain for verification.

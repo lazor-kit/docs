@@ -9,6 +9,13 @@ export const source = loader({
   plugins: [lucideIconsPlugin()],
 });
 
+export const docsOrigin = 'https://docs.lazorkit.com';
+export const markdownHeaders = { 'content-type': 'text/markdown; charset=utf-8' };
+
+export function markdownUrl(page: InferPageType<typeof source>) {
+  return `/markdown/${page.slugs.join('/') || 'index'}.md`;
+}
+
 export function getPageImage(page: InferPageType<typeof source>) {
   const segments = [...page.slugs, 'image.jpg'];
 
@@ -22,6 +29,8 @@ export async function getLLMText(page: InferPageType<typeof source>) {
   const processed = await page.data.getText('processed');
 
   return `# ${page.data.title}
+
+Source: ${docsOrigin}${page.url}
 
 ${processed}`;
 }

@@ -1,13 +1,10 @@
 {
-    "title": "React Native SDK",
+    "title": "React Native",
     "pages": [
         "index",
         "getting-started",
-        "provider",
-        "use-wallet",
         "sending-transactions",
         "wallet-confirmation",
-        "types",
         "upgrading"
     ]
 }
