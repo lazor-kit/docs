@@ -7,6 +7,7 @@ const config = {
   reactStrictMode: true,
   async redirects() {
     return [
+      { source: '/logo.jpg', destination: '/brand/mark-dark.png', permanent: true },
       { source: '/v1-to-v2', destination: '/networks', permanent: true },
       { source: '/web3js-v2/:path*', destination: '/web3js-v1', permanent: true },
     ];

@@ -7,8 +7,8 @@ export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
 export default function OGImage() {
-  const logoData = readFileSync(join(process.cwd(), 'public/logo.jpg'));
-  const logoSrc = `data:image/jpeg;base64,${logoData.toString('base64')}`;
+  const logoData = readFileSync(join(process.cwd(), 'public/brand/mark-dark.png'));
+  const logoSrc = `data:image/png;base64,${logoData.toString('base64')}`;
 
   return new ImageResponse(
     (
@@ -30,9 +30,9 @@ export default function OGImage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <img
             src={logoSrc}
+            alt=""
             width={44}
             height={44}
-            style={{ borderRadius: '10px' }}
           />
           <span
             style={{

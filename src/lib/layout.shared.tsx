@@ -7,11 +7,18 @@ export function baseOptions(): BaseLayoutProps {
       title: (
         <div className="flex items-center gap-2">
           <NextImage
-            src="/logo.jpg"
-            alt="LazorKit Logo"
+            src="/brand/mark-light.svg"
+            alt=""
             width={30}
             height={30}
-            className="rounded-md"
+            className="dark:hidden"
+          />
+          <NextImage
+            src="/brand/mark-dark.svg"
+            alt=""
+            width={30}
+            height={30}
+            className="hidden dark:block"
           />
           <span className="font-bold">LazorKit</span>
         </div>
