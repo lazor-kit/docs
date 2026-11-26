@@ -14,8 +14,11 @@ export const metadata: Metadata = {
   description: 'LazorKit is an execution layer for Solana — passkey wallets, session keys, gas sponsorship, and programmable on-chain permissions.',
   metadataBase: new URL(SITE_URL),
   icons: {
-    icon: '/logo.jpg',
-    apple: '/logo.jpg',
+    icon: [
+      { url: '/brand/mark-light.svg', type: 'image/svg+xml' },
+      { url: '/brand/mark-dark.svg', type: 'image/svg+xml', media: '(prefers-color-scheme: dark)' },
+    ],
+    apple: '/brand/apple-touch-icon.png',
   },
   openGraph: {
     siteName: 'LazorKit',

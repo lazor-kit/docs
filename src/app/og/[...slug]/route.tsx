@@ -14,8 +14,8 @@ export async function GET(
   const page = source.getPage(slug.slice(0, -1));
   if (!page) notFound();
 
-  const logoData = readFileSync(join(process.cwd(), 'public/logo.jpg'));
-  const logoSrc = `data:image/jpeg;base64,${logoData.toString('base64')}`;
+  const logoData = readFileSync(join(process.cwd(), 'public/brand/mark-dark.png'));
+  const logoSrc = `data:image/png;base64,${logoData.toString('base64')}`;
 
   return new ImageResponse(
     (
@@ -37,9 +37,9 @@ export async function GET(
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <img
             src={logoSrc}
+            alt=""
             width={44}
             height={44}
-            style={{ borderRadius: '10px' }}
           />
           <span
             style={{
