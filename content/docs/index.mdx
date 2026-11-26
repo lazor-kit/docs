@@ -1,82 +1,27 @@
 ---
-title: LazorKit Documentation
-description: Documentation for LazorKit — execution layer for Web3.
+title: Build Solana wallets with passkeys
+description: LazorKit Protocol v1 lets your app create wallets, approve transactions with a passkey, and sponsor fees.
+full: true
 ---
 
-import { Globe, Smartphone, Code, Zap, Layers, BookOpen, Network, ArrowRightLeft, TriangleAlert } from 'lucide-react'
+import { ArrowRight, Code, Globe, KeyRound, Smartphone, Wallet, Zap } from 'lucide-react'
 
-LazorKit is an execution layer for Solana. It handles **passkey authentication**, **session key delegation**, **gas sponsorship**, and **on-chain permission enforcement** — so your app or agent can go from user intent to on-chain action without the usual friction.
-
-<Callout type="info" title="New here?">
-  Start with the [Protocol Overview](/protocol) to understand how the system works end-to-end, then pick the SDK that fits your stack.
-</Callout>
-
-<Callout type="info" title="Protocol v1">
-  Use the [published Protocol SDK](/web3js-v1) for new direct integrations. Check
-  [Networks & SDK compatibility](/networks) for the program IDs and choose a
-  paymaster that supports the same deployment.
-</Callout>
-
----
-
-## SDKs
-
-<Cards>
-  <Card
-    icon={<Globe />}
-    title="React SDK"
-    description="@lazorkit/wallet — hooks and a provider for web apps. Passkeys through the LazorKit portal."
-    href="/react-sdk"
-  />
-  <Card
-    icon={<Smartphone />}
-    title="React Native SDK"
-    description="@lazorkit/wallet-mobile-adapter — React Native and Expo. Passkeys through the LazorKit portal in the system browser."
-    href="/react-native-sdk"
-  />
-  <Card
-    icon={<Code />}
-    title="SDK (web3.js v1)"
-    description="@lazorkit/sdk-legacy — direct contract access via LazorKitClient. Every protocol instruction."
-    href="/web3js-v1"
-  />
+<Cards className="homePathGrid">
+  <Card icon={<Code />} title="Create a wallet with TypeScript" className="homePrimaryCard" description="Create and fund a Devnet wallet, then send your first transaction." href="/web3js-v1/getting-started">
+    <span className="homeCardAction">Open quickstart <ArrowRight size={15} aria-hidden="true" /></span>
+  </Card>
+  <Card icon={<Globe />} title="React" description="Connect an existing Protocol wallet in a web app." href="/react-sdk/getting-started" />
+  <Card icon={<Smartphone />} title="React Native" description="Connect an existing Protocol wallet on iOS or Android." href="/react-native-sdk/getting-started" />
 </Cards>
 
----
+Protocol v1 is live on Mainnet. Use Devnet for your first integration. [Networks and versions](/networks) lists what to install and which program ID to use.
 
-## Protocol
+## What happens in your app
 
-<Cards>
-  <Card
-    icon={<Layers />}
-    title="Protocol Overview"
-    description="System architecture, execution flow, economic model, and current status."
-    href="/protocol"
-  />
-  <Card
-    icon={<BookOpen />}
-    title="Concepts"
-    description="Smart wallets, session keys, ranks and policies, and the paymaster."
-    href="/concepts"
-  />
-  <Card
-    icon={<Network />}
-    title="Networks & versions"
-    description="Program ids, which package speaks which protocol, and which address is the user's wallet."
-    href="/networks"
-  />
-  <Card
-    icon={<TriangleAlert />}
-    title="Errors"
-    description="Every SDK error class and program error code, and what to do about each."
-    href="/errors"
-  />
+<Cards className="homeFlowGrid">
+  <Card icon={<Wallet />} title="Create a wallet" description="The app creates a wallet on Solana. Its vault address receives SOL and tokens." href="/concepts/smart-wallet" />
+  <Card icon={<KeyRound />} title="Approve an action" description="The user signs with a passkey. A session key can handle follow-up actions within its allowed limits." href="/concepts/session-keys" />
+  <Card icon={<Zap />} title="Sponsor the fee" description="A paymaster can pay the Solana fees so the user can transact without holding SOL for gas." href="/concepts/paymaster" />
 </Cards>
 
----
-
-## Resources
-
-- **[GitHub](https://github.com/lazor-kit)**
-- **[Telegram](https://t.me/lazorkit)**
-- **[Twitter](https://twitter.com/lazorkit)**
+[See how the protocol works](/protocol) · [Give these docs to an AI assistant](/llms.txt)

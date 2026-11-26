@@ -1,17 +1,47 @@
 ---
-title: React Native SDK with Protocol v1
-description: Configure the released adapter for a Protocol v1 integration.
+title: Get started with React Native
+description: Mount the mobile provider and reconnect an existing Protocol wallet.
 ---
 
-Use [Networks & SDK compatibility](/networks) to select a version of `@lazorkit/wallet-mobile-adapter`
-that supports your Protocol wallet and the flows your app needs. As the published
-adapter versions can differ in wallet creation and wallet detection, test reconnection
-to an existing wallet before enabling the integration.
+Use this guide for a React Native app that already has Protocol wallets. For new wallets, start with the [TypeScript quickstart](/web3js-v1/getting-started).
 
-Configure your app's RPC URL and `configPaymaster` for the same cluster. Use the passkey
-portal matching the credential's relying-party domain. On mobile, configure the
-application's registered redirect scheme. Keep the established wallet PDA for program
-calls and display the separate vault PDA as the receive address.
+## Install
 
-For a new direct integration on Protocol v1, use the
-[published Protocol SDK setup](/web3js-v1/getting-started).
+```bash
+npm install @lazorkit/wallet-mobile-adapter@2.4.0 @solana/web3.js@^1.99.0
+```
+
+## Configure the provider
+
+Pass your app's existing Protocol paymaster URL and the portal origin used to register the passkey.
+
+```tsx
+import type { ComponentProps } from 'react';
+import { LazorKitProvider } from '@lazorkit/wallet-mobile-adapter';
+
+export function ProtocolProvider({ children, portalUrl, protocolPaymasterUrl }: {
+  children: ComponentProps<typeof LazorKitProvider>['children'];
+  portalUrl: string;
+  protocolPaymasterUrl: string;
+}) {
+  const paymaster = { paymasterUrl: protocolPaymasterUrl };
+
+  return (
+    <LazorKitProvider
+      cluster="mainnet"
+      rpcUrl="https://api.mainnet-beta.solana.com"
+      portalUrl={portalUrl}
+      configPaymaster={paymaster}
+      v1ConfigPaymaster={paymaster}
+    >
+      {children}
+    </LazorKitProvider>
+  );
+}
+```
+
+## Reconnect and send
+
+Register your app's redirect scheme and allow its callback with the portal. In your returning-user flow, call `useWallet().connect({ redirectUrl: 'myapp://wallet-callback' })` with your own callback. Confirm the result is the Protocol wallet your app already knows. Read `vaultPubkey` to display a receive address.
+
+Next, [send a transaction](/react-native-sdk/sending-transactions) or check [provider options](/react-native-sdk/provider).

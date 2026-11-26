@@ -1,18 +1,18 @@
 {
     "pages": [
         "index",
-        "protocol",
-        "networks",
-        "concepts",
-        "---UI SDKs---",
+        "---Start building---",
+        "web3js-v1",
         "react-sdk",
         "react-native-sdk",
-        "---Contract SDKs---",
-        "web3js-v1",
+        "---Understand the protocol---",
+        "protocol",
+        "concepts",
         "---Reference---",
+        "networks",
+        "troubleshooting",
         "errors",
         "wallet-standard",
-        "troubleshooting",
         "changelog"
     ]
 }

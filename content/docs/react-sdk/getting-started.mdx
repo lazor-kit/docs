@@ -1,16 +1,49 @@
 ---
-title: React SDK with Protocol v1
-description: Configure the released adapter for a Protocol v1 integration.
+title: Get started with React
+description: Mount the React provider and reconnect an existing Protocol wallet.
 ---
 
-Use [Networks & SDK compatibility](/networks) to select a version of `@lazorkit/wallet`
-that supports your Protocol wallet and the flows your app needs. As the published
-adapter versions can differ in wallet creation and wallet detection, test reconnection
-to an existing wallet before enabling the integration.
+Use this guide for a React app that already has Protocol wallets. For new wallets, start with the [TypeScript quickstart](/web3js-v1/getting-started).
 
-Configure your app's RPC URL and `paymasterConfig` for the same cluster. Use the passkey
-portal matching the credential's relying-party domain. Keep the established wallet PDA
-for program calls and display the separate vault PDA as the receive address.
+## Install
 
-For a new direct integration on Protocol v1, use the
-[published Protocol SDK setup](/web3js-v1/getting-started).
+```bash
+npm install @lazorkit/wallet@3.4.1 @solana/web3.js@^1.99.0
+```
+
+## Configure the provider
+
+Put the provider in a client component. Pass your app's existing Protocol paymaster URL and the portal origin used to register the passkey.
+
+```tsx
+'use client';
+
+import type { ReactNode } from 'react';
+import { LazorkitProvider } from '@lazorkit/wallet';
+
+export function ProtocolProvider({ children, portalUrl, protocolPaymasterUrl }: {
+  children: ReactNode;
+  portalUrl: string;
+  protocolPaymasterUrl: string;
+}) {
+  const paymaster = { paymasterUrl: protocolPaymasterUrl };
+
+  return (
+    <LazorkitProvider
+      cluster="mainnet"
+      rpcUrl="https://api.mainnet-beta.solana.com"
+      portalUrl={portalUrl}
+      paymasterConfig={paymaster}
+      v1PaymasterConfig={paymaster}
+    >
+      {children}
+    </LazorkitProvider>
+  );
+}
+```
+
+## Reconnect and send
+
+Call `useWallet().connect()` from a user action in your returning-user flow. Confirm the result is the Protocol wallet your app already knows. Read `vaultPubkey` to display a receive address.
+
+Next, [send a transaction](/react-sdk/sending-transactions) or check [provider options](/react-sdk/provider).

@@ -1,20 +1,27 @@
 ---
-title: Networks & SDK compatibility
-description: LazorKit Protocol program IDs and SDK compatibility.
+title: Networks and versions
+description: Choose a package and a Solana cluster for Protocol v1.
 ---
 
-| Cluster | Protocol program ID | SDK constant |
+## Packages
+
+Protocol v1 is the on-chain program. The package numbers below identify the SDK release for each environment.
+
+| What you're building | Install this package | Use it for |
+| --- | --- | --- |
+| A new Protocol integration | `@lazorkit/sdk-legacy@0.3.2` | Create wallets and build transactions directly |
+| A React app with Protocol wallets | `@lazorkit/wallet@3.4.1` | Reconnect and transact with existing wallets |
+| A React Native app with Protocol wallets | `@lazorkit/wallet-mobile-adapter@2.4.0` | Reconnect and transact with existing wallets |
+
+These examples use `@solana/web3.js@^1.99.0`. Pin the LazorKit package version in your app. The [TypeScript quickstart](/web3js-v1/getting-started) covers creating a new Protocol wallet.
+
+## Program addresses
+
+| Cluster | Program ID | TypeScript SDK constant |
 | --- | --- | --- |
 | Mainnet | `LazorjRFNavitUaBu5m3WaNPjU1maipvSW2rZfAFAKi` | `PROGRAM_ID_MAINNET` |
 | Devnet | `4h3XoNReAgEcHVxcZ8sw2aufi9MTr7BbvYYjzjWDyDxS` | `PROGRAM_ID_DEVNET` |
 
-The public mainnet client is `@lazorkit/sdk-legacy@0.3.2`. Use the exact version
-when setting up an integration. Keep the program ID and paymaster pointed at
-the same cluster. Use a Protocol-compatible paymaster for existing wallets.
+Use the same cluster for your RPC, program ID, and paymaster. Returning users also need the portal domain their passkey was registered with.
 
-The React and React Native packages publish their own release notes. Check
-the supported program IDs before adopting a new version.
-
-Use the **vault PDA** as the wallet's receive address. The **wallet PDA**
-stores the protocol's internal wallet record. Always derive addresses with
-the program ID for your selected cluster.
+Use the **vault PDA** as the receive address. Keep the **wallet PDA** for program calls. See [Smart wallet](/concepts/smart-wallet).

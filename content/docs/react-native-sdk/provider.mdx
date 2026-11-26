@@ -1,15 +1,14 @@
 ---
-title: Provider configuration
-description: Connect an adapter to the selected Protocol deployment.
+title: Provider options
+description: Configure the React Native provider for Protocol wallets.
 ---
 
-Use the provider options from your installed `@lazorkit/wallet-mobile-adapter` version.
-Set an explicit RPC URL, cluster, portal origin and `configPaymaster` that support the same
-Protocol deployment. If that version uses a separate Protocol v1 relayer option,
-configure it according to its versioned API. On React Native and Expo also register
-the app's callback scheme with the signing portal.
+The [React Native quickstart](/react-native-sdk/getting-started#configure-the-provider) shows how to set up `LazorKitProvider`.
 
-Keep privileged paymaster credentials on your backend. Give client applications
-a scoped endpoint that enforces your application's sponsorship policy.
+| Option | Value |
+| --- | --- |
+| `rpcUrl` and `cluster` | The RPC and cluster of the existing wallet |
+| `portalUrl` | The portal origin used to create the passkey |
+| `v1ConfigPaymaster` | The endpoint that sponsors this wallet's Protocol transactions |
 
-See [Getting started](/react-native-sdk/getting-started) and [Networks](/networks).
+Keep privileged paymaster credentials on your backend. Give the client an endpoint with your application's sponsorship rules.

@@ -1,54 +1,13 @@
 ---
 title: Concepts
-description: Core protocol primitives — smart wallets, session keys, ranks and policies, and the paymaster.
+description: The accounts, signers, and fee payer behind a LazorKit wallet.
 ---
 
 import { Wallet, KeyRound, ShieldCheck, Zap } from 'lucide-react'
 
-LazorKit is built on four protocol primitives. Read these once and the SDK surface
-starts making sense — every method on every hook maps to one of the concepts below.
-
 <Cards>
-  <Card icon={<Wallet />} title="Smart Wallet"
-    description="Passkey-controlled PDAs. Authentication, account structure, vault vs wallet PDA, roles, lifecycle."
-    href="/concepts/smart-wallet" />
-  <Card icon={<KeyRound />} title="Session Keys"
-    description="Scoped, time-bound delegation keys. Action types, spending limits, deferred execution, and revocation."
-    href="/concepts/session-keys" />
-  <Card icon={<ShieldCheck />} title="Ranks & policies"
-    description="On-chain permission model. Owner, Admin and Spender roles."
-    href="/concepts/rbac" />
-  <Card icon={<Zap />} title="Paymaster"
-    description="Gas abstraction. How fees are collected, routed across treasury shards, and tracked per integrator."
-    href="/concepts/paymaster" />
+  <Card icon={<Wallet />} title="Smart wallet" description="Find the address that holds funds and the accounts that control it." href="/concepts/smart-wallet" />
+  <Card icon={<KeyRound />} title="Session keys" description="Delegate actions with an expiry and spending rules." href="/concepts/session-keys" />
+  <Card icon={<ShieldCheck />} title="Authority roles" description="See what an Owner, Admin, or Spender can do." href="/concepts/rbac" />
+  <Card icon={<Zap />} title="Paymaster" description="Sponsor the fees paid in SOL." href="/concepts/paymaster" />
 </Cards>
-
-<Callout type="info" title="How they fit together">
-  A wallet authority signs directly with a passkey or an Ed25519 key. A delegated
-  signer uses a session key and the program enforces its configured policy.
-  A paymaster can act as the fee payer on either path.
-  See the [Protocol Overview](/protocol) for the end-to-end picture.
-
-</Callout>
-
----
-
-## Quick glossary
-
-| Term                 | Definition                                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| **Smart Wallet**     | A cluster of on-chain accounts (wallet PDA, vault PDA, authorities, sessions) controlled by LazorKit. |
-| **Wallet PDA**       | Metadata anchor — 8 bytes (bump, version, Owner count), derived from `user_seed`. Internal to the program; never send funds here. |
-| **Vault PDA**        | The actual fund-holding address. What end-users see as "their wallet address".                      |
-| **Authority PDA**    | Per-key auth record: key, rank, replay counter, the wallet it belongs to, and its wallet binding. One PDA per authorised key. |
-| **Session PDA**      | Ephemeral signer record with action constraints + expiry. Closed by a wallet Owner or Admin through revocation. |
-| **Passkey**          | WebAuthn credential held by the device's authenticator (often synced by iCloud Keychain or Google Password Manager). Verified on-chain via the Secp256r1 precompile. |
-| **Action**           | One rule of a spending policy (SOL cap, token cap, program allow-list, etc.). Sessions carry them; they cannot be changed afterwards. |
-| **Rank**             | What an authority may manage: Owner (0), Admin (1) or Spender (2, the SDKs' `ROLE_SPENDER`).     |
-| **Paymaster**        | The transaction's `fee_payer`. Pays SOL; the developer recoups it through the app.                 |
-| **FeeRecord**        | Per-fee-payer accounting record used when Protocol fees are enabled. |
-| **Deferred exec**    | 2-tx flow (`Authorize` + `ExecuteDeferred`) for payloads that exceed a single Secp256r1 transaction. |
-
-Need the exact byte layouts and on-chain account shapes? See
-[`docs/Architecture.md`](https://github.com/lazor-kit/lazorkit-protocol/blob/release/sdk-legacy-0.3.2/docs/Architecture.md)
-in the protocol repo.

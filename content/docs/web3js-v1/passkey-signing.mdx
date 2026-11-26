@@ -1,12 +1,38 @@
 ---
-title: Protocol passkey signing
-description: Prepare and finalize a Protocol passkey transaction.
+title: Passkey signing
+description: Use a passkey to approve direct or deferred Protocol transactions.
 ---
 
-For an immediate action, use `prepareExecute`, sign the returned challenge
-with the wallet's existing passkey, and pass the assertion to `finalizeExecute`.
-Submit the returned instructions in order so the verification instruction
-immediately precedes `Execute`. Use `prepareAuthorize` and
-`executeDeferredFromPayload` when approval and execution happen separately.
+## Direct execution
 
-[Protocol SDK 0.3.2 reference](https://github.com/lazor-kit/lazorkit-protocol/tree/release/sdk-legacy-0.3.2/sdk/sdk-legacy)
+1. Build the action's Solana instructions and call `prepareExecute` with the payer, wallet PDA, and passkey authority.
+2. Ask the registered passkey to sign the returned challenge. Pass the WebAuthn assertion to `finalizeExecute`.
+3. Submit the returned instructions in order. The Secp256r1 verification instruction must immediately precede `Execute`. Wait for confirmation on the same RPC.
+
+Wire `approvePasskey` to your portal or WebAuthn handler on the passkey's registered relying party. It receives the prepared challenge and returns the SDK's `WebAuthnResponse`.
+
+```ts
+import type { LazorKitClient, WebAuthnResponse } from '@lazorkit/sdk-legacy';
+
+export async function buildPasskeyExecute(
+  client: LazorKitClient,
+  params: Parameters<LazorKitClient['prepareExecute']>[0],
+  approvePasskey: (challenge: Uint8Array) => Promise<WebAuthnResponse>,
+) {
+  const prepared = await client.prepareExecute(params);
+  const response = await approvePasskey(prepared.challenge);
+  return client.finalizeExecute(prepared, response).instructions;
+}
+```
+
+Use a fresh challenge for each approval. If the paymaster's response is unclear, check whether the original transaction landed before asking the user to sign again.
+
+## Deferred execution
+
+Use this path when approval and submission are separate.
+
+1. Call `prepareAuthorize`, sign the challenge with the passkey, and submit the instructions from `finalizeAuthorize`.
+2. Keep the deferred payload. Submit it with `executeDeferredFromPayload` before its expiry slot.
+3. If the approval expires unused, the original payer can recover the rent with `reclaimDeferred`.
+
+See the [Protocol SDK reference](https://github.com/lazor-kit/lazorkit-protocol/tree/sdk-legacy-v0.3.2/sdk/sdk-legacy) for method signatures.

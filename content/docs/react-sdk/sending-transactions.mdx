@@ -1,27 +1,24 @@
 ---
-title: Sending transactions
-description: Prepare, approve and confirm Protocol transactions with the React adapter.
+title: Send a transaction
+description: Confirm a passkey-approved Protocol transaction from React.
 ---
 
-Build the intended Solana instructions and call `signAndSendTransaction` from the installed
-adapter. Check that the provider, wallet and paymaster serve the same Protocol
-deployment. Use the vault PDA for asset transfers.
+After reconnecting the expected Protocol wallet, build the action's Solana instructions. Use the vault as the source for a transfer.
 
-## Confirm the result
+```tsx
+import { useWallet } from '@lazorkit/wallet';
+import type { TransactionInstruction } from '@solana/web3.js';
 
-Retain the transaction signature and check its confirmation with the selected RPC.
-When a relay response is lost, check the original signature before preparing a new
-payment. Review the installed adapter's callbacks and error types for your version.
+export function useSendProtocolTransaction() {
+  const { protocolVersion, signAndSendTransaction } = useWallet();
 
-## Transaction format and deferred execution
+  return async (instructions: TransactionInstruction[]) => {
+    if (protocolVersion !== 1) throw new Error('Connect your Protocol wallet first.');
+    return signAndSendTransaction({ instructions });
+  };
+}
+```
 
-Use a transaction format supported by the RPC, adapter and paymaster. A transaction
-that exceeds its wire limit needs a compatible format or a smaller action. Check
-size before asking the user to approve.
+Call it from a user action after showing what they will approve. Save the returned signature. If relay submission is uncertain, check that signature before requesting a second approval.
 
-For an action that must be approved before it is submitted, use the Protocol SDK's
-`prepareAuthorize`, `finalizeAuthorize` and `executeDeferredFromPayload`.
-Respect the expiry slot and retain the authorization's payload.
-
-See [Protocol signing](/web3js-v1/passkey-signing), [Paymaster](/concepts/paymaster)
-and [Protocol errors](/errors).
+For separate approval and submission, see [deferred execution](/web3js-v1/passkey-signing#deferred-execution). For fee sponsorship, see [Paymaster](/concepts/paymaster).

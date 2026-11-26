@@ -1,13 +1,10 @@
 {
-    "title": "React SDK",
+    "title": "React",
     "pages": [
         "index",
         "getting-started",
-        "provider",
-        "use-wallet",
         "sending-transactions",
         "wallet-confirmation",
-        "types",
         "upgrading"
     ]
 }

@@ -1,21 +1,78 @@
 ---
-title: Getting started with Protocol
-description: Install the current client and select a Protocol deployment.
+title: Create a wallet
+description: Install the TypeScript SDK and create a Protocol wallet on Solana Devnet.
 ---
 
+## Install
+
 ```bash
-npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js
+npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js@^1.99.0
 ```
 
+## Create a Devnet wallet
+
+This Node.js example uses an Ed25519 owner so you can run it without a browser. Pass in a Devnet keypair funded with test SOL and the owner's public key. The payer signs the creation transaction.
+
 ```ts
-import { Connection } from '@solana/web3.js';
-import { LazorKitClient, PROGRAM_ID_DEVNET } from '@lazorkit/sdk-legacy';
+import { randomBytes } from 'node:crypto';
+import {
+  Connection,
+  SystemProgram,
+  Transaction,
+  sendAndConfirmTransaction,
+  type Keypair,
+  type PublicKey,
+} from '@solana/web3.js';
+import { ed25519, LazorKitClient, PROGRAM_ID_DEVNET } from '@lazorkit/sdk-legacy';
 
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 const client = new LazorKitClient(connection, PROGRAM_ID_DEVNET);
+
+export async function createWallet(payer: Keypair, owner: PublicKey) {
+  const { instructions, walletPda, vaultPda } = await client.createWallet({
+    payer: payer.publicKey,
+    userSeed: randomBytes(32),
+    owner: { type: 'ed25519', publicKey: owner },
+  });
+
+  const signature = await sendAndConfirmTransaction(
+    connection,
+    new Transaction().add(...instructions),
+    [payer],
+  );
+
+  return { signature, walletAddress: walletPda.toBase58(), receiveAddress: vaultPda.toBase58() };
+}
 ```
 
-Choose a paymaster that supports the same deployment. Display the vault PDA
-as the receive address. Keep the wallet PDA for program calls.
+Store the wallet address with the user's account. Show the receive address when the user wants to deposit SOL or tokens.
 
-[Protocol SDK 0.3.2 reference](https://github.com/lazor-kit/lazorkit-protocol/tree/release/sdk-legacy-0.3.2/sdk/sdk-legacy)
+## Send SOL from the wallet
+
+Fund the new vault with test SOL. In the same file, add this helper to send to a Devnet recipient. The owner authorizes the action and the payer pays the transaction fees.
+
+```ts
+export async function sendSol(
+  payer: Keypair,
+  owner: Keypair,
+  walletPda: PublicKey,
+  recipient: PublicKey,
+  lamports: number,
+) {
+  const [vaultPda] = client.findVault(walletPda);
+  const { instructions } = await client.execute({
+    payer: payer.publicKey,
+    walletPda,
+    signer: ed25519(owner.publicKey),
+    instructions: [SystemProgram.transfer({ fromPubkey: vaultPda, toPubkey: recipient, lamports })],
+  });
+
+  return sendAndConfirmTransaction(connection, new Transaction().add(...instructions), [payer, owner]);
+}
+```
+
+## Create a passkey wallet
+
+For a passkey owner, pass `{ type: 'secp256r1', credentialIdHash, compressedPubkey, rpId }` as the owner. Use the SHA-256 hash of the credential ID bytes, the compressed P-256 public key, and the relying-party ID from the WebAuthn registration. Keep the same relying party when the user returns.
+
+See [Passkey signing](/web3js-v1/passkey-signing) for approving a transaction and [Networks and versions](/networks) for the Mainnet settings.

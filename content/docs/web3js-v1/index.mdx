@@ -1,25 +1,13 @@
 ---
-title: Protocol SDK
-description: Use the published LazorKit Protocol SDK with @solana/web3.js v1.
+title: TypeScript SDK
+description: Create wallets and build instructions for LazorKit Protocol.
 ---
 
-Install the public Protocol client for applications that build instructions directly.
+Use `@lazorkit/sdk-legacy` to create a Protocol wallet, submit an action, or manage session keys.
 
-```bash
-npm install @lazorkit/sdk-legacy@0.3.2 @solana/web3.js@^1.95.0
-```
+- [Getting started](/web3js-v1/getting-started) sets up a Devnet client and creates a wallet.
+- [Passkey signing](/web3js-v1/passkey-signing) covers direct and deferred execution.
+- [Session keys](/web3js-v1/session-keys) covers delegated signing.
+- [SDK types](/web3js-v1/types) shows how to use the TypeScript API.
 
-| Area | SDK 0.3.2 methods |
-| --- | --- |
-| Wallet and authority | `createWallet`, `addAuthority`, `removeAuthority`, `transferOwnership` |
-| Execute | `execute`, `transferSol`, `prepareExecute`, `finalizeExecute` |
-| Sessions | `createSession`, `prepareCreateSession`, `finalizeCreateSession`, `revokeSession` |
-| Deferred | `prepareAuthorize`, `finalizeAuthorize`, `executeDeferredFromPayload`, `reclaimDeferred` |
-| Accounts | `findWallet`, `findVault`, `findAuthority`, `findSession` |
-
-For a returning wallet, keep the wallet PDA your app established during onboarding and
-verify the wallet and authority against the selected Protocol program. A credential ID
-lookup alone does not prove ownership of a wallet. Use the vault PDA as the receive address.
-
-See [Getting started](/web3js-v1/getting-started), [Networks](/networks) and the
-[published SDK reference](https://github.com/lazor-kit/lazorkit-protocol/tree/release/sdk-legacy-0.3.2/sdk/sdk-legacy).
+[Networks and versions](/networks) lists the package pin and both program IDs.

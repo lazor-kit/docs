@@ -1,4 +1,4 @@
-import { getPageImage, source } from '@/lib/source';
+import { docsOrigin, getPageImage, markdownUrl, source } from '@/lib/source';
 import {
   DocsBody,
   DocsDescription,
@@ -9,8 +9,6 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
-
-const SITE_URL = 'https://docs.lazorkit.com';
 
 export default async function Page(props: PageProps<'/[[...slug]]'>) {
   const params = await props.params;
@@ -46,15 +44,19 @@ export async function generateMetadata(
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
-  const ogImage = `${SITE_URL}${getPageImage(page).url}`;
+  const ogImage = `${docsOrigin}${getPageImage(page).url}`;
 
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: {
+      canonical: `${docsOrigin}${page.url}`,
+      types: { 'text/markdown': `${docsOrigin}${markdownUrl(page)}` },
+    },
     openGraph: {
       title: page.data.title,
       description: page.data.description,
-      url: `${SITE_URL}/${page.slugs.join('/')}`,
+      url: `${docsOrigin}/${page.slugs.join('/')}`,
       images: [{ url: ogImage, width: 1200, height: 630 }],
     },
     twitter: {

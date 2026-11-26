@@ -30,32 +30,17 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Structure
 
-```
-content/docs/
-  index.mdx               Landing page
-  protocol.mdx            Protocol overview (for investors and builders)
-  networks.mdx            Program ids, package versions, what is deployed where
-  v1-to-v2.mdx            Protocol v1 and v2 side by side, the v1 sunset, MigrateWallet
+Public documentation for LazorKit Protocol v1 lives in `content/docs/`.
 
-  concepts/               Protocol deep-dives
-    smart-wallet.mdx
-    session-keys.mdx
-    rbac.mdx              Ranks & policies
-    paymaster.mdx
+- `index.mdx` routes developers to the TypeScript, React, or React Native guide.
+- `networks.mdx` lists package pins and program addresses for both clusters.
+- `concepts/` describes the accounts, authority roles, session keys, and paymaster.
+- `web3js-v1/`, `react-sdk/`, and `react-native-sdk/` contain integration guides.
+- `troubleshooting.mdx`, `errors.mdx`, `wallet-standard/`, and `changelog.mdx` contain reference material.
 
-  react-sdk/              React SDK (@lazorkit/wallet)
-  react-native-sdk/       React Native SDK (@lazorkit/wallet-mobile-adapter)
-  web3js-v1/              Contract SDK — web3.js v1 (@lazorkit/sdk-legacy)
-  web3js-v2/              Contract SDK — Solana Kit (@lazorkit/sdk, release candidate)
+Applications that create Protocol wallets start with the TypeScript quickstart. The adapter guides cover reconnecting existing wallets. Compile examples against the packages named in the guides.
 
-  errors.mdx              Every SDK error class and program error code
-  wallet-standard/        Wallet Standard integration
-  troubleshooting.mdx
-  changelog.mdx
-```
-
-Code examples are written against the published packages. When you change one, check that
-it still compiles against the versions the page names.
+The AI index is at `/llms.txt`. Each guide also has a Markdown URL under `/markdown/`, and `/llms-full.txt` contains the full public corpus. All three use the same MDX source as the site.
 
 ---
 
